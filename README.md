@@ -155,10 +155,6 @@ A complete demo app is included in [`demo/`](demo/) showcasing SDK initializatio
 ./gradlew :library:assembleRelease
 ```
 
-## Contributing
-
-Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/datagrail/consent-android/issues).
-
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
