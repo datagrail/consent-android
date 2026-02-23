@@ -1,7 +1,7 @@
 # DataGrail Consent Android SDK
 
 [![CI](https://github.com/datagrail/consent-android/actions/workflows/ci.yml/badge.svg)](https://github.com/datagrail/consent-android/actions/workflows/ci.yml)
-[![Maven Central](https://img.shields.io/maven-central/v/com.datagrail/consent)](https://central.sonatype.com/artifact/com.datagrail/consent)
+[![Maven Central](https://img.shields.io/maven-central/v/io.datagrail/consent)](https://central.sonatype.com/artifact/io.datagrail/consent)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Min SDK](https://img.shields.io/badge/minSdk-21-green.svg)](https://developer.android.com/about/versions/lollipop)
 
@@ -13,7 +13,7 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.datagrail:consent:1.0.0")
+    implementation("io.datagrail:consent:1.0.0")
 }
 ```
 
