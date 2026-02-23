@@ -1,0 +1,17 @@
+# EditorConfig for DataGrail Consent Android SDK
+# See https://editorconfig.org
+
+root = true
+
+[*.{kt,kts}]
+charset = utf-8
+end_of_line = lf
+indent_size = 4
+indent_style = space
+insert_final_newline = true
+max_line_length = 120
+trim_trailing_whitespace = true
+
+# ktlint configuration
+# Disable no-wildcard-imports rule as it's common in Kotlin test files
+ktlint_standard_no-wildcard-imports = disabled

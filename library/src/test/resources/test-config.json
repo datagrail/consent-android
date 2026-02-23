@@ -1,0 +1,509 @@
+{
+    "version": "cc959465-747d-4c81-8bc1-5dcd34dc3756",
+    "consentContainerVersionId": "0dd5bdf3-b55e-4d97-8a06-e14b17660b94",
+    "dgCustomerId": "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
+    "p": 1765415800250,
+    "dch": "categorize",
+    "dc": "dg-category-marketing",
+    "privacyDomain": "api.consentjs.datagrailstaging.com",
+    "plugins": {
+        "scriptControl": true,
+        "allCookieSubdomains": true,
+        "cookieBlocking": true,
+        "localStorageBlocking": true,
+        "syncOTConsent": false
+    },
+    "testMode": false,
+    "ignoreDoNotTrack": false,
+    "trackingDetailsUrl": "https://api.consentjs.datagrailstaging.com/ac46d8ad-a67a-431f-a5d5-9e3eb922dae7/service-metadata.json",
+    "consentMode": "optout",
+    "showBanner": false,
+    "consentPolicy": {
+        "name": "CPRA",
+        "default": false
+    },
+    "gppUsNat": true,
+    "initialCategories": {
+        "respect_gpc": true,
+        "respect_dnt": true,
+        "respect_optout": false,
+        "initial": [
+            "dg-category-essential",
+            "dg-category-performance",
+            "dg-category-functional",
+            "dg-category-marketing"
+        ],
+        "gpc": [
+            "dg-category-essential"
+        ],
+        "optout": [
+            "dg-category-essential",
+            "dg-category-performance",
+            "dg-category-functional"
+        ]
+    },
+    "layout": {
+        "id": "a788c60d-ec2c-40a9-bd3b-cfd371d62889",
+        "name": "CPRA only",
+        "description": null,
+        "status": "published",
+        "default_layout": false,
+        "collapsed_on_mobile": true,
+        "first_layer_id": "26259ccb-e5e0-4305-b696-fa2b7413c239",
+        "consent_layers": {
+            "00a6e2c3-f1d5-4d3f-bd91-7d45cc0b75c5": {
+                "id": "00a6e2c3-f1d5-4d3f-bd91-7d45cc0b75c5",
+                "name": "New Layer 4",
+                "theme": "neutral",
+                "position": "left",
+                "show_close_button": true,
+                "banner_api_id": "new-layer-4",
+                "elements": [
+                    {
+                        "id": "9fd555a7-eb69-42fc-8ccb-5cc90e0716fd",
+                        "order": 1,
+                        "button_action": "open_layer",
+                        "type": "ConsentLayerButtonElement",
+                        "target_consent_layer": "26259ccb-e5e0-4305-b696-fa2b7413c239",
+                        "translations": {
+                            "en": {
+                                "id": "d0e97b8d-2df0-48bd-8565-c0bd8ca2c84b",
+                                "locale": "en",
+                                "value": "Button Element"
+                            }
+                        },
+                        "categories": []
+                    }
+                ]
+            },
+            "26259ccb-e5e0-4305-b696-fa2b7413c239": {
+                "id": "26259ccb-e5e0-4305-b696-fa2b7413c239",
+                "name": "Categories Ler",
+                "theme": "neutral",
+                "position": "left",
+                "show_close_button": true,
+                "banner_api_id": "categories-layer",
+                "elements": [
+                    {
+                        "id": "0d8f26cf-1ac6-43ab-9f1e-d25722be04b9",
+                        "order": 1,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-title",
+                        "translations": {
+                            "en": {
+                                "id": "884fe056-5787-43c8-bb96-08c9b013e62c",
+                                "locale": "en",
+                                "value": "Privacy Settings"
+                            }
+                        }
+                    },
+                    {
+                        "id": "92ef045d-cd19-438d-ba21-6b3728e38204",
+                        "order": 2,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-main-content-explanation",
+                        "translations": {
+                            "en": {
+                                "id": "ea071c0e-8d8e-4474-9973-8200b8640fd9",
+                                "locale": "en",
+                                "value": "this is for CPRA only!"
+                            }
+                        }
+                    },
+                    {
+                        "id": "5a7f3c06-eb6c-473e-b004-d2a5bde00fc9",
+                        "order": 3,
+                        "type": "ConsentLayerCategoryElement",
+                        "consent_layer_categories": [
+                            {
+                                "id": "5be5f52d-bcdb-4937-957f-740cab4d302f",
+                                "consent_category_id": "936160e0-06fd-4de7-8b13-1ac51c6f0125",
+                                "order": 1,
+                                "hidden": false,
+                                "primitive": "dg-category-essential",
+                                "always_on": true,
+                                "gtm_key": "dg-category-essential",
+                                "uuids": [
+                                    "4wLTf967dsYKgcPHKoqA7T",
+                                    "2NSEpVrtthIFGOhiPfEeeR"
+                                ],
+                                "cookie_patterns": [
+                                    "li$",
+                                    "datagrail_consent_locale_code",
+                                    "foobar$",
+                                    "test",
+                                    "dgdomain$",
+                                    "asdfasdf$",
+                                    "dg\\-",
+                                    "datagrail"
+                                ],
+                                "translations": {
+                                    "en": {
+                                        "id": "63528d02-2251-4b9d-8665-c9c921829e85",
+                                        "locale": "en",
+                                        "name": "Essential",
+                                        "description": "These cookies are necessary for the website to function and cannot be switched off in our systems. They are usually only set in response to actions made by you which amount to a request for services, such as setting your privacy preferences, logging in or filling in forms. You can set your browser to block or alert you about these cookies, but some parts of the site will not then work. These cookies do not store any personally identifiable information. Some testing of things right here to make sure it saves",
+                                        "essential_label": "Always On"
+                                    },
+                                    "bg": {
+                                        "id": "87fc839b-6d24-4be8-b4d7-5a3aa9c28fab",
+                                        "locale": "bg",
+                                        "name": "От съществено значение",
+                                        "description": "Тези бисквитки са необходими за функционирането на уебсайта и не могат да бъдат изключени в нашите системи. Обикновено те се задават само в отговор на действия, направени от вас, които представляват заявка за услуги, като например задаване на вашите предпочитания за поверителност, влизане или попълване на формуляри. Можете да настроите браузъра си да блокира или да ви предупреждава за тези бисквитки, но някои части от сайта няма да работят. Тези бисквитки не съхраняват никаква лична информация. Някои тестове на нещата тук, за да сте сигурни, че спестяват",
+                                        "essential_label": "Винаги включен"
+                                    },
+                                    "hr": {
+                                        "id": "ce9b9f46-e99e-4f35-86c3-f8f043e351ce",
+                                        "locale": "hr",
+                                        "name": "Bitno",
+                                        "description": "Ovi kolačići su neophodni za funkcioniranje web stranice i ne mogu se isključiti u našim sustavima. Obično se postavljaju samo kao odgovor na radnje koje ste izvršili, a koje predstavljaju zahtjev za uslugama, poput postavljanja postavki privatnosti, prijave ili popunjavanja obrazaca. Možete postaviti svoj preglednik da vas blokira ili upozorava na ove kolačiće, ali neki dijelovi web stranice tada neće raditi. Ovi kolačići ne pohranjuju nikakve osobne podatke. Neko testiranje stvari ovdje kako biste bili sigurni da se štedi",
+                                        "essential_label": "Uvijek uključen"
+                                    }
+                                },
+                                "show_tracking_details_link": false
+                            },
+                            {
+                                "id": "2818ef18-f556-450a-8909-91937009efbe",
+                                "consent_category_id": "c3850c8f-12f0-4c3d-89f0-8862173dddc2",
+                                "order": 2,
+                                "hidden": false,
+                                "primitive": "dg-category-essential",
+                                "always_on": false,
+                                "gtm_key": "dg-category-mystery-category",
+                                "uuids": [],
+                                "cookie_patterns": [
+                                    "asdasda$",
+                                    "testytest"
+                                ],
+                                "translations": {
+                                    "en": {
+                                        "id": "a68bb406-9c80-40c9-b6e8-fbf856965565",
+                                        "locale": "en",
+                                        "name": "Mystery Category",
+                                        "description": "meow\nSome testing of things right here to make sure it saves",
+                                        "essential_label": "Always On"
+                                    }
+                                },
+                                "show_tracking_details_link": false
+                            },
+                            {
+                                "id": "17088990-4ba6-4a65-b4ac-26f7d7584cb8",
+                                "consent_category_id": "69e057a3-2fa8-4589-bef5-5fab680a2f4b",
+                                "order": 3,
+                                "hidden": false,
+                                "primitive": "dg-category-marketing",
+                                "always_on": false,
+                                "gtm_key": "dg-category-marketing",
+                                "uuids": [],
+                                "cookie_patterns": [
+                                    "_fbpi$",
+                                    "_pin_unauth$",
+                                    "sa\\-user\\-id$",
+                                    "_fbpixies$",
+                                    "_dd_s",
+                                    "_derived_epik$",
+                                    "_fbp$",
+                                    "back\\-slash",
+                                    "__TAG_ASSISTANT$",
+                                    "foo$",
+                                    "_ga$",
+                                    "_gcl"
+                                ],
+                                "translations": {
+                                    "en": {
+                                        "id": "18e6c209-edc6-4635-9eca-fcc9a84e79d9",
+                                        "locale": "en",
+                                        "name": "Marketing",
+                                        "description": "These cookies may be set through our site by our advertising partners. Those companies may use them to build a profile of your interests and show you relevant adverts on other sites. They do not store directly personal information but are based on uniquely identifying your browser and internet device. If you do not allow these cookies, you will experience less targeted advertising. Some testing of things right here to make sure it saves",
+                                        "essential_label": null
+                                    }
+                                },
+                                "show_tracking_details_link": false
+                            },
+                            {
+                                "id": "027daf0a-7587-4173-931c-11d08fd90a93",
+                                "consent_category_id": "b6e4c6a9-a0e7-4e43-a754-2f69ac10a7d9",
+                                "order": 4,
+                                "hidden": false,
+                                "primitive": "dg-category-performance",
+                                "always_on": false,
+                                "gtm_key": "dg-category-performance",
+                                "uuids": [
+                                    "5EDNmhBPLmJgtLIpAKsGBG"
+                                ],
+                                "cookie_patterns": [
+                                    "_fbpixie$",
+                                    "ajs_anonymous_id$",
+                                    "_gid$",
+                                    "_ga_",
+                                    "_gat",
+                                    "adroll"
+                                ],
+                                "translations": {
+                                    "en": {
+                                        "id": "ebf52048-9253-4ef3-ac91-aa4a07e08f24",
+                                        "locale": "en",
+                                        "name": "Performance",
+                                        "description": "These cookies allow us to count visits and traffic sources so we can measure and improve the performance of our site. They help us to know which pages are the most and least popular and see how visitors move around the site. All information these cookies collect is aggregated and therefore anonymous. If you do not allow these cookies we will not know when you have visited our site, and will not be able to monitor its performance. Some testing of things right here to make sure it saves",
+                                        "essential_label": null
+                                    }
+                                },
+                                "show_tracking_details_link": false
+                            },
+                            {
+                                "id": "475c059e-68c2-4eac-a00c-ddde7c48e931",
+                                "consent_category_id": "8b71f121-9835-4797-a0ed-5ceded136362",
+                                "order": 5,
+                                "hidden": false,
+                                "primitive": "dg-category-functional",
+                                "always_on": false,
+                                "gtm_key": "dg-category-functional",
+                                "uuids": [],
+                                "cookie_patterns": [
+                                    "_hjSessionUser_",
+                                    "OptanonConsent$",
+                                    "_hjSession_"
+                                ],
+                                "translations": {
+                                    "en": {
+                                        "id": "5a740f74-97a8-43be-8898-515f0694855d",
+                                        "locale": "en",
+                                        "name": "Functional",
+                                        "description": "These cookies enable the website to provide enhanced functionality and personalization. They may be set by us or by third-party providers whose services we have added to our pages. If you do not allow these cookies, some or all of these services may not function properly. Some testing of things right here to make sure it saves",
+                                        "essential_label": null
+                                    }
+                                },
+                                "show_tracking_details_link": false
+                            }
+                        ],
+                        "show_tracking_details_link": false,
+                        "consent_layer_categories_config_id": "34980026956232425",
+                        "tracking_details_link_translations": [
+                            {
+                                "locale": "en",
+                                "value": "View Tracking Details",
+                                "id": "34980027320934133"
+                            }
+                        ]
+                    },
+                    {
+                        "id": "e0c20e05-493c-46a4-820a-c52d92557480",
+                        "order": 4,
+                        "button_action": "custom",
+                        "type": "ConsentLayerButtonElement",
+                        "target_consent_layer": null,
+                        "translations": {
+                            "en": {
+                                "id": "387d8758-8939-48bb-a24a-bbbb7e8d2f3b",
+                                "locale": "en",
+                                "value": "Accept 🤪🥸 TEST"
+                            }
+                        },
+                        "categories": []
+                    },
+                    {
+                        "id": "ce0eb438-edef-4044-8549-ea28a530b94c",
+                        "order": 5,
+                        "type": "ConsentLayerLinkElement",
+                        "links": [
+                            {
+                                "id": "34b0d24b-0757-44f9-9e67-3b3ed4b2050e",
+                                "order": 1,
+                                "translations": {
+                                    "en": {
+                                        "id": "c69ab150-3686-400b-8cc2-08e7a4fbcf4b",
+                                        "locale": "en",
+                                        "text": "Link",
+                                        "url": "Replace with a URL"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "id": "91ca434d-5d40-4131-9ab7-f7b11308b499",
+                        "order": 6,
+                        "button_action": "noop",
+                        "type": "ConsentLayerButtonElement",
+                        "target_consent_layer": null,
+                        "translations": {
+                            "en": {
+                                "id": "5f2945e7-0f92-443f-9a2f-b4cd236d702a",
+                                "locale": "en",
+                                "value": "Button Element"
+                            }
+                        },
+                        "categories": []
+                    },
+                    {
+                        "id": "e152714d-99c6-4084-b189-dd88f5191b5f",
+                        "order": 7,
+                        "type": "ConsentLayerTextElement",
+                        "style": null,
+                        "translations": {
+                            "en": {
+                                "id": "43d1fd86-e8d7-4ed3-b856-afd54be8dc6f",
+                                "locale": "en",
+                                "value": "Text Element"
+                            }
+                        }
+                    },
+                    {
+                        "id": "5176cba0-7f05-42a6-b7f5-672e41c9c9a0",
+                        "order": 8,
+                        "type": "ConsentLayerTextElement",
+                        "style": null,
+                        "translations": {
+                            "en": {
+                                "id": "fd607d94-2c12-4e24-9681-ff37b819bac6",
+                                "locale": "en",
+                                "value": "Text Element"
+                            }
+                        }
+                    }
+                ]
+            },
+            "7ffc5655-7fe9-4fcd-96ef-4494b875c8eb": {
+                "id": "7ffc5655-7fe9-4fcd-96ef-4494b875c8eb",
+                "name": "New Layer 2 (copy)",
+                "theme": "neutral",
+                "position": "left",
+                "show_close_button": true,
+                "banner_api_id": "new-layer-2-copy",
+                "elements": [
+                    {
+                        "id": "1788df0c-1ac9-4449-a401-4984d8118a89",
+                        "order": 1,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-header",
+                        "translations": {
+                            "en": {
+                                "id": "97ab2879-1fe5-4f3b-80a7-a0802236b74f",
+                                "locale": "en",
+                                "value": "Text Element"
+                            }
+                        }
+                    }
+                ]
+            },
+            "ae948d41-65aa-4ffc-941c-5ff029cd2291": {
+                "id": "ae948d41-65aa-4ffc-941c-5ff029cd2291",
+                "name": "New Layer 2",
+                "theme": "neutral",
+                "position": "left",
+                "show_close_button": true,
+                "banner_api_id": "new-layer-2",
+                "elements": [
+                    {
+                        "id": "6242af31-0fad-43a0-bcee-8d8a8a99f055",
+                        "order": 1,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-header",
+                        "translations": {
+                            "en": {
+                                "id": "3d3a884e-3e4f-43ca-9a09-386e3e406487",
+                                "locale": "en",
+                                "value": "Text Element"
+                            }
+                        }
+                    }
+                ]
+            },
+            "b0b9fc31-4ea2-4026-8aa1-25fd647aa265": {
+                "id": "b0b9fc31-4ea2-4026-8aa1-25fd647aa265",
+                "name": "Default Layer",
+                "theme": "neutral",
+                "position": "bottom",
+                "show_close_button": false,
+                "banner_api_id": "default-layer",
+                "elements": [
+                    {
+                        "id": "081cad35-b56f-4bc5-80cf-5d0641a7c43c",
+                        "order": 1,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-title",
+                        "translations": {
+                            "en": {
+                                "id": "187529da-3e4f-422e-8135-6c19bb2481e5",
+                                "locale": "en",
+                                "value": "Privacy Settings"
+                            }
+                        }
+                    },
+                    {
+                        "id": "1ec8f7b7-cc37-45a3-b9e2-574ed0300c14",
+                        "order": 2,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-main-content-explanation",
+                        "translations": {
+                            "en": {
+                                "id": "c3d8900d-c65b-4bd7-b640-dd6a4edc5525",
+                                "locale": "en",
+                                "value": "We use cookies and similar technologies for the proper functioning of this site and to give you the optimum experience of our services. Cookies are also used to develop and serve ads, content, or features that are more relevant to your interests. Use this tool to opt-out of us selling/sharing data associated with this browser or device."
+                            }
+                        }
+                    },
+                    {
+                        "id": "b124bbe6-2060-4936-a960-d33774643fa0",
+                        "order": 3,
+                        "type": "ConsentLayerLinkElement",
+                        "links": [
+                            {
+                                "id": "a7ef075c-a359-4524-8f46-ea8614e18651",
+                                "order": 1,
+                                "translations": {
+                                    "en": {
+                                        "id": "157a5411-1df4-4568-a8b5-a6569fa8eb6f",
+                                        "locale": "en",
+                                        "text": "Privacy Policy",
+                                        "url": "https://www.datagrail.io/privacy-policy/"
+                                    }
+                                }
+                            },
+                            {
+                                "id": "84c742e4-d7f9-421a-8394-13f9e721f725",
+                                "order": 2,
+                                "translations": {
+                                    "en": {
+                                        "id": "b5896fb7-422a-46f0-b890-b643db1be38f",
+                                        "locale": "en",
+                                        "text": "Opt-Out Form",
+                                        "url": "https://preferences.datagrail.io/form/opt_out?locationCode=US-MA\u0026privacyRequestPolicyId=372090ab-21c9-4dc4-9a2e-c189d337b774"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "id": "06bd91d3-5850-43cf-a983-7f0f51208c9a",
+                        "order": 4,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-main-content-explanation",
+                        "translations": {
+                            "en": {
+                                "id": "59ba2e95-ff2a-4bef-bd14-bf9d566ea614",
+                                "locale": "en",
+                                "value": "HI"
+                            }
+                        }
+                    },
+                    {
+                        "id": "aa46fc13-8d4c-448d-9716-36b4a751fcdf",
+                        "order": 5,
+                        "button_action": "open_layer",
+                        "type": "ConsentLayerButtonElement",
+                        "target_consent_layer": "00a6e2c3-f1d5-4d3f-bd91-7d45cc0b75c5",
+                        "translations": {
+                            "en": {
+                                "id": "ddac9c4e-2459-4ff7-98b3-53661e680d65",
+                                "locale": "en",
+                                "value": "OK"
+                            }
+                        },
+                        "categories": []
+                    }
+                ]
+            }
+        }
+    }
+}
