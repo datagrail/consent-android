@@ -45,7 +45,7 @@ jobs:
 
       - name: Validate version in build.gradle.kts
         run: |
-          GRADLE_VERSION=$(grep -oP 'coordinates\("com\.datagrail",\s*"consent",\s*"\K[^"]+' library/build.gradle.kts)
+          GRADLE_VERSION=$(grep -oP 'coordinates\("io\.datagrail",\s*"consent",\s*"\K[^"]+' library/build.gradle.kts)
           if [ "$GRADLE_VERSION" != "${{ steps.version.outputs.version }}" ]; then
             echo "::error::Version mismatch: tag=${{ steps.version.outputs.version }}, build.gradle.kts=$GRADLE_VERSION"
             exit 1
