@@ -114,8 +114,14 @@ if (DataGrailConsent.getInstance().isCategoryEnabled("category_marketing")) {
 ## Requirements
 
 - Android 5.0 (API 21) or higher
-- Kotlin 1.9+
+- Kotlin 1.9+ or Java 8+
 - AndroidX
+
+## Java Support
+
+The SDK is written in Kotlin but provides **full Java interoperability** through dedicated callback interfaces. Java developers can use all SDK features with clear success/failure callbacks instead of Kotlin's `Result` type.
+
+**[→ Java Integration Guide](JAVA_INTEGRATION.md)** - Complete examples for Java applications
 
 ## Permissions
 
