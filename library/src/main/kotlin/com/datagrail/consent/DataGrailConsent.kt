@@ -5,6 +5,7 @@ import com.datagrail.consent.models.CategoryConsent
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
+import com.datagrail.consent.models.ConsentResponse
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.network.NetworkClient
@@ -31,6 +32,7 @@ class DataGrailConsent private constructor() {
         /**
          * Get the shared singleton instance
          */
+        @JvmStatic
         fun getInstance(): DataGrailConsent {
             return instance ?: synchronized(this) {
                 instance ?: DataGrailConsent().also { instance = it }
@@ -41,7 +43,31 @@ class DataGrailConsent private constructor() {
     // MARK: - Initialization
 
     /**
-     * Initialize the DataGrail Consent SDK
+     * Initialize the DataGrail Consent SDK (Java-friendly)
+     * @param context Android application context
+     * @param configUrl URL to fetch consent configuration from
+     * @param callback Callback interface for success/failure
+     */
+    @JvmOverloads
+    fun initialize(
+        context: Context,
+        configUrl: String,
+        callback: ConsentCallback,
+    ) {
+        initialize(context, configUrl) { result ->
+            result.fold(
+                onSuccess = { callback.onSuccess() },
+                onFailure = { error ->
+                    callback.onFailure(
+                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * Initialize the DataGrail Consent SDK (Kotlin-friendly)
      * @param context Android application context
      * @param configUrl URL to fetch consent configuration from
      * @param callback Callback with result
@@ -200,7 +226,29 @@ class DataGrailConsent private constructor() {
     // MARK: - Consent Management
 
     /**
-     * Save consent preferences
+     * Save consent preferences (Java-friendly)
+     * @param preferences The preferences to save
+     * @param callback Callback interface for success/failure
+     */
+    @JvmOverloads
+    fun savePreferences(
+        preferences: ConsentPreferences,
+        callback: ConsentCallback,
+    ) {
+        savePreferences(preferences) { result ->
+            result.fold(
+                onSuccess = { callback.onSuccess() },
+                onFailure = { error ->
+                    callback.onFailure(
+                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * Save consent preferences (Kotlin-friendly)
      * @param preferences The preferences to save
      * @param callback Callback with result
      */
@@ -226,7 +274,25 @@ class DataGrailConsent private constructor() {
     }
 
     /**
-     * Accept all categories
+     * Accept all categories (Java-friendly)
+     * @param callback Callback interface for success/failure
+     */
+    @JvmOverloads
+    fun acceptAll(callback: ConsentCallback) {
+        acceptAll { result ->
+            result.fold(
+                onSuccess = { callback.onSuccess() },
+                onFailure = { error ->
+                    callback.onFailure(
+                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * Accept all categories (Kotlin-friendly)
      * @param callback Callback with result
      */
     fun acceptAll(callback: (Result<Unit>) -> Unit) {
@@ -256,7 +322,25 @@ class DataGrailConsent private constructor() {
     }
 
     /**
-     * Reject all non-essential categories
+     * Reject all non-essential categories (Java-friendly)
+     * @param callback Callback interface for success/failure
+     */
+    @JvmOverloads
+    fun rejectAll(callback: ConsentCallback) {
+        rejectAll { result ->
+            result.fold(
+                onSuccess = { callback.onSuccess() },
+                onFailure = { error ->
+                    callback.onFailure(
+                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * Reject all non-essential categories (Kotlin-friendly)
      * @param callback Callback with result
      */
     fun rejectAll(callback: (Result<Unit>) -> Unit) {
@@ -299,7 +383,25 @@ class DataGrailConsent private constructor() {
     // MARK: - Banner Display
 
     /**
-     * Track that the banner was shown
+     * Track that the banner was shown (Java-friendly)
+     * @param callback Callback interface for success/failure
+     */
+    @JvmOverloads
+    fun trackBannerShown(callback: ConsentCallback) {
+        trackBannerShown { result ->
+            result.fold(
+                onSuccess = { callback.onSuccess() },
+                onFailure = { error ->
+                    callback.onFailure(
+                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * Track that the banner was shown (Kotlin-friendly)
      * @param callback Callback with result
      */
     fun trackBannerShown(callback: (Result<Unit>) -> Unit) {
@@ -317,7 +419,18 @@ class DataGrailConsent private constructor() {
     // MARK: - Callbacks
 
     /**
-     * Set callback to be notified when consent changes
+     * Set callback to be notified when consent changes (Java-friendly)
+     * @param listener Listener interface to invoke with new preferences
+     */
+    @JvmOverloads
+    fun onConsentChanged(listener: ConsentChangeListener) {
+        this.onConsentChangedCallback = { preferences ->
+            listener.onConsentChanged(preferences)
+        }
+    }
+
+    /**
+     * Set callback to be notified when consent changes (Kotlin-friendly)
      * @param callback Callback to invoke with new preferences
      */
     fun onConsentChanged(callback: (ConsentPreferences) -> Unit) {
@@ -327,7 +440,18 @@ class DataGrailConsent private constructor() {
     // MARK: - Utility
 
     /**
-     * Retry any pending API requests
+     * Retry any pending API requests (Java-friendly)
+     * @param callback Callback interface with retry results
+     */
+    @JvmOverloads
+    fun retryPendingRequests(callback: RetryCallback) {
+        retryPendingRequests { successCount, failureCount ->
+            callback.onRetryComplete(successCount, failureCount)
+        }
+    }
+
+    /**
+     * Retry any pending API requests (Kotlin-friendly)
      * @param callback Callback with (successCount, failureCount)
      */
     fun retryPendingRequests(callback: (Int, Int) -> Unit) {
@@ -346,11 +470,34 @@ class DataGrailConsent private constructor() {
     // MARK: - UI Methods
 
     /**
-     * Show the consent banner dialog with specified display style
+     * Show the consent banner dialog with specified display style (Java-friendly)
+     * @param activity The activity to show the dialog on
+     * @param style The display style for the banner (MODAL or FULL_SCREEN)
+     * @param callback Callback interface for banner result
+     */
+    @JvmOverloads
+    fun showBanner(
+        activity: androidx.fragment.app.FragmentActivity,
+        style: BannerDisplayStyle = BannerDisplayStyle.MODAL,
+        callback: PreferencesCallback,
+    ) {
+        showBanner(activity, style) { preferences ->
+            if (preferences != null) {
+                callback.onPreferencesSaved(preferences)
+            } else {
+                callback.onDismissed()
+            }
+        }
+    }
+
+
+    /**
+     * Show the consent banner dialog with specified display style (Kotlin-friendly)
      * @param activity The activity to show the dialog on
      * @param style The display style for the banner (MODAL or FULL_SCREEN)
      * @param callback Called when the dialog is dismissed with updated preferences (null if dismissed without saving)
      */
+    @JvmOverloads
     fun showBanner(
         activity: androidx.fragment.app.FragmentActivity,
         style: BannerDisplayStyle = BannerDisplayStyle.MODAL,

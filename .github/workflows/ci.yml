@@ -29,6 +29,9 @@ jobs:
       - name: Run unit tests
         run: ./gradlew :library:test
 
+      - name: Run Java interoperability tests
+        run: ./gradlew :library:testDebugUnitTest --tests "com.datagrail.consent.JavaInteroperabilityTest"
+
       - name: Generate test report
         if: always()
         uses: dorny/test-reporter@v1
