@@ -2,19 +2,60 @@
 set -e
 
 # Parse arguments
+DEMO_TYPE="kotlin"
 CLEAN_BUILD=false
+
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --clean) CLEAN_BUILD=true ;;
-        *) echo "Unknown option: $1"; exit 1 ;;
+        kotlin|java)
+            DEMO_TYPE="$1"
+            ;;
+        --help|-h)
+            echo "Usage: $0 [kotlin|java] [--clean]"
+            echo ""
+            echo "Arguments:"
+            echo "  kotlin    Launch Kotlin demo (default)"
+            echo "  java      Launch Java demo"
+            echo "  --clean   Clean build artifacts before building"
+            echo ""
+            echo "Examples:"
+            echo "  $0              # Launch Kotlin demo"
+            echo "  $0 java         # Launch Java demo"
+            echo "  $0 java --clean # Clean build and launch Java demo"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
     esac
     shift
 done
 
-echo "Building and launching Android Demo app..."
+echo "Building and launching Android Demo app ($DEMO_TYPE version)..."
 
 # Navigate to Android directory
 cd "$(dirname "$0")"
+
+# Check if JAVA_HOME is set, if not try to find it
+if [ -z "$JAVA_HOME" ]; then
+    # Try Android Studio's embedded JDK
+    if [ -d "/Applications/Android Studio.app/Contents/jbr/Contents/Home" ]; then
+        export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+        echo "Using Android Studio's embedded JDK: $JAVA_HOME"
+    elif [ -x "/usr/libexec/java_home" ]; then
+        export JAVA_HOME=$(/usr/libexec/java_home 2>/dev/null)
+    fi
+fi
+
+if [ -z "$JAVA_HOME" ]; then
+    echo "Java not found. Please install Java or set JAVA_HOME."
+    exit 1
+fi
+
+export PATH="$JAVA_HOME/bin:$PATH"
 
 # Check if ANDROID_HOME or ANDROID_SDK_ROOT is set
 if [ -z "$ANDROID_HOME" ] && [ -z "$ANDROID_SDK_ROOT" ]; then
@@ -90,7 +131,16 @@ fi
 echo "Installing app to emulator..."
 "$ADB" -s "$DEVICE_ID" install -r "$APK_PATH"
 
-echo "Launching Demo app..."
-"$ADB" -s "$DEVICE_ID" shell am start -n com.datagrail.consent.demo/.MainActivity
+# Determine which activity to launch
+if [ "$DEMO_TYPE" = "java" ]; then
+    ACTIVITY=".JavaMainActivity"
+    DEMO_LABEL="Java Demo"
+else
+    ACTIVITY=".MainActivity"
+    DEMO_LABEL="Kotlin Demo"
+fi
 
-echo "Demo app launched successfully!"
+echo "Launching $DEMO_LABEL app..."
+"$ADB" -s "$DEVICE_ID" shell am start -n com.datagrail.consent.demo/$ACTIVITY
+
+echo "$DEMO_LABEL app launched successfully!"
