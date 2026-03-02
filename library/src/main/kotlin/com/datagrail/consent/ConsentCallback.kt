@@ -2,7 +2,17 @@ package com.datagrail.consent
 
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
-import com.datagrail.consent.models.ConsentResponse
+
+/**
+ * Java Interoperability Callback Interfaces
+ *
+ * These interfaces provide Java-friendly alternatives to Kotlin's lambda-based callbacks.
+ * Kotlin developers should continue using the lambda-based methods (e.g., `callback: (Result<Unit>) -> Unit`).
+ * Java developers should use these interfaces for clearer, more idiomatic code.
+ *
+ * Why? Kotlin's `Result<Unit>` type requires special handling from Java and is not idiomatic.
+ * These interfaces provide explicit `onSuccess()` and `onFailure()` methods that Java developers expect.
+ */
 
 /**
  * Java-friendly callback interface for consent operations

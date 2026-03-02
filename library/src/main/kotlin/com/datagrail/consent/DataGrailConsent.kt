@@ -5,7 +5,6 @@ import com.datagrail.consent.models.CategoryConsent
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
-import com.datagrail.consent.models.ConsentResponse
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.network.NetworkClient
@@ -18,6 +17,18 @@ import java.net.URL
 
 /**
  * Main entry point for DataGrail Consent SDK
+ *
+ * ## Java Interoperability
+ *
+ * This SDK provides two versions of each async method:
+ * - **Kotlin version**: Uses lambda callbacks with `Result<T>` (e.g., `callback: (Result<Unit>) -> Unit`)
+ * - **Java version**: Uses callback interfaces with explicit success/failure methods (e.g., `ConsentCallback`)
+ *
+ * Kotlin developers should use the lambda-based methods as usual.
+ * Java developers should use the callback interface methods for clearer, more idiomatic code.
+ *
+ * Both versions are functionally identical - the callback interface methods are thin adapters
+ * over the lambda-based implementations. See [JAVA_INTEGRATION.md] for Java usage examples.
  */
 class DataGrailConsent private constructor() {
     private var manager: ConsentManager? = null

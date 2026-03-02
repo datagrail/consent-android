@@ -2,6 +2,10 @@
 
 The DataGrail Consent Android SDK is written in Kotlin but provides full Java interoperability through dedicated callback interfaces.
 
+**💡 Working Demo:** See `demo/src/main/java/com/datagrail/consent/demo/JavaMainActivity.java` for a complete, runnable Java demo application. Launch it with: `./launch_demo.sh java`
+
+**Requirements:** Java 8+ (the SDK uses standard callback interfaces compatible with all modern Java versions)
+
 ## Quick Start (Java)
 
 ### 1. Initialize the SDK

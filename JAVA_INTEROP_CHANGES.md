@@ -23,28 +23,25 @@ We added Java-friendly overloads for all SDK methods while maintaining **100% ba
 
 ### New Files
 
-1. **`ConsentResult.kt`** - Java-friendly result wrapper
-   - `ConsentResult<T>` sealed class with `Success` and `Failure` cases
-   - `ConsentResponse` data class for operations that don't return data
-   - Clear success/failure checking without requiring Result API knowledge
-
-2. **`ConsentCallback.kt`** - Java-friendly callback interfaces
+1. **`ConsentCallback.kt`** - Java-friendly callback interfaces
    - `ConsentCallback` - For operations with success/failure (initialize, save, accept, reject)
    - `PreferencesCallback` - For banner display (saved vs dismissed)
    - `ConsentChangeListener` - For consent change notifications
    - `RetryCallback` - For retry operations
 
-3. **`JAVA_INTEGRATION.md`** - Complete Java integration guide
+2. **`JAVA_INTEGRATION.md`** - Complete Java integration guide
    - Quick start examples
    - Complete API usage from Java
    - Error handling patterns
    - Full working examples
 
-4. **`JavaExample.java`** - Concrete Java example code
-   - Application initialization
-   - Banner display
-   - Category management
-   - Preference checking
+3. **`JavaMainActivity.java`** - Working demo application
+   - Fully functional Java-based demo activity
+   - SDK initialization with error handling
+   - Banner display (modal and full-screen)
+   - Programmatic accept/reject operations
+   - Consent change listener integration
+   - Can be launched via: `./launch_demo.sh java`
 
 ### Modified Files
 
