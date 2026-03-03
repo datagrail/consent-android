@@ -213,4 +213,11 @@ class ConsentManager(
         storage.clearAll()
         currentConfig = null
     }
+
+    /**
+     * Reset the unique tracking identifier
+     */
+    fun resetIdentifier() {
+        storage.resetIdentifier()
+    }
 }

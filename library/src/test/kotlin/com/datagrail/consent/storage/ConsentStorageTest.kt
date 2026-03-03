@@ -1,6 +1,5 @@
 package com.datagrail.consent.storage
 
-import android.content.Context
 import android.content.SharedPreferences
 import com.datagrail.consent.models.CategoryConsent
 import com.datagrail.consent.models.ConsentPreferences
@@ -20,9 +19,6 @@ import org.mockito.kotlin.whenever
 @RunWith(MockitoJUnitRunner::class)
 class ConsentStorageTest {
     @Mock
-    private lateinit var mockContext: Context
-
-    @Mock
     private lateinit var mockSharedPreferences: SharedPreferences
 
     @Mock
@@ -34,18 +30,17 @@ class ConsentStorageTest {
 
     @Before
     fun setUp() {
-        whenever(mockContext.getSharedPreferences(any(), any())).thenReturn(mockSharedPreferences)
         whenever(mockSharedPreferences.edit()).thenReturn(mockEditor)
         whenever(mockEditor.putString(any(), any())).thenReturn(mockEditor)
         whenever(mockEditor.remove(any())).thenReturn(mockEditor)
         whenever(mockEditor.apply()).then { }
 
-        storage = ConsentStorage(mockContext)
+        storage = ConsentStorage(mockSharedPreferences)
     }
 
     @After
     fun tearDown() {
-        Mockito.reset(mockContext, mockSharedPreferences, mockEditor)
+        Mockito.reset(mockSharedPreferences, mockEditor)
     }
 
     @Test
@@ -115,6 +110,14 @@ class ConsentStorageTest {
             Mockito.eq("datagrail_consent_id"),
             any(),
         )
+    }
+
+    @Test
+    fun testResetIdentifier() {
+        storage.resetIdentifier()
+
+        Mockito.verify(mockEditor).remove("datagrail_consent_id")
+        Mockito.verify(mockEditor).apply()
     }
 
     @Test

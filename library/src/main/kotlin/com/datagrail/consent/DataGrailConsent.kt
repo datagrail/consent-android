@@ -10,6 +10,8 @@ import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.network.NetworkClient
 import com.datagrail.consent.storage.ConsentStorage
 import com.datagrail.consent.ui.BannerDisplayStyle
+import com.datagrail.consent.utils.ConsentLogger
+import com.datagrail.consent.utils.LogLevel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -39,6 +41,15 @@ class DataGrailConsent private constructor() {
     companion object {
         @Volatile
         private var instance: DataGrailConsent? = null
+
+        /**
+         * Set the SDK log level. Default is NONE (no logging).
+         * @param level The desired log level
+         */
+        @JvmStatic
+        fun setLogLevel(level: LogLevel) {
+            ConsentLogger.level = level
+        }
 
         /**
          * Get the shared singleton instance
@@ -123,17 +134,22 @@ class DataGrailConsent private constructor() {
 
         this.configUrl = configUrl
 
-        val storage = ConsentStorage(context)
+        val storage = ConsentStorage.create(context)
         val networkClient = NetworkClient()
         val configService = ConfigService(networkClient, storage)
 
         // Extract privacy domain from config URL
-        val privacyDomain =
-            try {
-                URL(configUrl).host ?: "consent.datagrail.io"
-            } catch (e: Exception) {
-                "consent.datagrail.io"
+        val privacyDomain = url.host
+        if (privacyDomain.isNullOrEmpty()) {
+            scope.launch {
+                callback(
+                    Result.failure(
+                        ConsentException.InvalidConfigUrl(configUrl),
+                    ),
+                )
             }
+            return
+        }
 
         val consentService = ConsentService(networkClient, storage, privacyDomain)
 
@@ -389,6 +405,14 @@ class DataGrailConsent private constructor() {
      */
     fun reset() {
         manager?.reset()
+    }
+
+    /**
+     * Reset the unique tracking identifier.
+     * A new ID will be generated on the next API call.
+     */
+    fun resetIdentifier() {
+        manager?.resetIdentifier()
     }
 
     // MARK: - Banner Display

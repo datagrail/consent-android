@@ -7,6 +7,7 @@ import com.datagrail.consent.storage.ConsentStorage
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.net.URLEncoder
 import java.util.UUID
 
 /**
@@ -26,6 +27,12 @@ class ConsentService(
         val sessionId: String,
         val uniqueId: String,
     )
+
+    companion object {
+        private const val MAX_PENDING_EVENTS = 100
+    }
+
+    private fun encodeParam(value: String): String = URLEncoder.encode(value, "UTF-8")
 
     /**
      * Save consent preferences to backend
@@ -83,6 +90,9 @@ class ConsentService(
 
             val existingEvents = storage.loadPendingEvents().toMutableList()
             existingEvents.add(eventJson)
+            if (existingEvents.size > MAX_PENDING_EVENTS) {
+                existingEvents.subList(0, existingEvents.size - MAX_PENDING_EVENTS).clear()
+            }
             storage.savePendingEvents(existingEvents)
 
             // Still save locally
@@ -104,10 +114,10 @@ class ConsentService(
 
         val url =
             "https://$privacyDomain/api/v1/save_open" +
-                "?customerId=${config.dgCustomerId}" +
-                "&sessionId=$sessionId" +
-                "&uniqueId=$uniqueId" +
-                "&consentPolicy=ConsentPolicy"
+                "?customerId=${encodeParam(config.dgCustomerId)}" +
+                "&sessionId=${encodeParam(sessionId)}" +
+                "&uniqueId=${encodeParam(uniqueId)}" +
+                "&consentPolicy=${encodeParam("ConsentPolicy")}"
 
         try {
             networkClient.request(url = url, method = HTTPMethod.GET)
@@ -124,6 +134,9 @@ class ConsentService(
 
             val existingEvents = storage.loadPendingEvents().toMutableList()
             existingEvents.add(eventJson)
+            if (existingEvents.size > MAX_PENDING_EVENTS) {
+                existingEvents.subList(0, existingEvents.size - MAX_PENDING_EVENTS).clear()
+            }
             storage.savePendingEvents(existingEvents)
 
             // Don't throw - saveOpen is fire-and-forget analytics

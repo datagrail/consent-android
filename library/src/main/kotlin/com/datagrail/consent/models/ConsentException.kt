@@ -13,7 +13,7 @@ sealed class ConsentException(message: String, cause: Throwable? = null) : Excep
     )
 
     class InvalidConfigUrl(url: String) : ConsentException(
-        "Invalid configuration URL: $url",
+        "Invalid configuration URL host: ${try { java.net.URL(url).host } catch (_: Exception) { "<malformed>" }}",
     )
 
     class NetworkError(message: String, cause: Throwable? = null) : ConsentException(

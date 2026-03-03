@@ -3,6 +3,8 @@ package com.datagrail.consent.network
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.storage.ConsentStorage
+import com.datagrail.consent.utils.ConfigValidator
+import com.datagrail.consent.utils.ConsentLogger
 import kotlinx.serialization.json.Json
 
 /**
@@ -29,6 +31,15 @@ class ConfigService(
             val response = networkClient.request(url, HTTPMethod.GET)
             val config = json.decodeFromString<ConsentConfig>(response)
 
+            // Validate config structure
+            try {
+                ConfigValidator.validate(config)
+            } catch (e: ConsentException.ValidationError) {
+                ConsentLogger.e("Config validation failed: ${e.message}")
+                return storage.loadConfigCache()
+                    ?: throw e
+            }
+
             // Cache the configuration
             storage.saveConfigCache(config)
 
@@ -37,6 +48,8 @@ class ConfigService(
             // If network fails, try cached config
             storage.loadConfigCache()
                 ?: throw e
+        } catch (e: ConsentException.ValidationError) {
+            throw e
         } catch (e: Exception) {
             // Parse error or other error
             storage.loadConfigCache()

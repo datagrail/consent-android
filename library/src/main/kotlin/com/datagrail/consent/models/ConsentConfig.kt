@@ -9,6 +9,7 @@ import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.descriptors.buildClassSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import com.datagrail.consent.utils.ConsentLogger
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonObject
@@ -271,6 +272,7 @@ object TrackingDetailsLinkTranslationsSerializer : KSerializer<List<TrackingDeta
                             translation
                         }
                     } catch (e: Exception) {
+                        ConsentLogger.e("Failed to deserialize tracking details translation: ${e.message}")
                         null
                     }
                 }
