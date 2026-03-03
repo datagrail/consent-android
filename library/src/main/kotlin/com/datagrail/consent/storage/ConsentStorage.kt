@@ -36,12 +36,13 @@ class ConsentStorage(private val prefs: SharedPreferences) {
          * @return ConsentStorage instance with encrypted backing store
          */
         fun create(context: Context): ConsentStorage {
+            val appContext = context.applicationContext
             val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
             val encryptedPrefs =
                 EncryptedSharedPreferences.create(
                     PREFS_NAME,
                     masterKeyAlias,
-                    context,
+                    appContext,
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
                 )
