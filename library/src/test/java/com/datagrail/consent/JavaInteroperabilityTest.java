@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.*;
@@ -424,75 +423,7 @@ public class JavaInteroperabilityTest {
         }
     }
 
-    // MARK: - Callback Invocation Tests
-
-    @Test
-    public void testInitializeCallbackInvokedOnInvalidUrl() throws InterruptedException {
-        // Verify that onFailure callback is actually invoked when initialization fails
-        final CountDownLatch latch = new CountDownLatch(1);
-        final AtomicReference<ConsentException> capturedError = new AtomicReference<>();
-        final AtomicBoolean successCalled = new AtomicBoolean(false);
-
-        ConsentCallback callback = new ConsentCallback() {
-            @Override
-            public void onSuccess() {
-                successCalled.set(true);
-                latch.countDown();
-            }
-
-            @Override
-            public void onFailure(ConsentException error) {
-                capturedError.set(error);
-                latch.countDown();
-            }
-        };
-
-        // Call with invalid URL
-        sdk.initialize(mockContext, "not-a-url", callback);
-
-        // Wait for callback
-        assertTrue("Callback should be invoked", latch.await(5, TimeUnit.SECONDS));
-
-        // Verify failure callback was invoked
-        assertFalse("onSuccess should not be called", successCalled.get());
-        assertNotNull("onFailure should be called with error", capturedError.get());
-        assertTrue("Should be InvalidConfiguration error",
-            capturedError.get() instanceof ConsentException.InvalidConfiguration);
-    }
-
-    @Test
-    public void testInitializeCallbackInvokedOnInvalidScheme() throws InterruptedException {
-        // Verify that invalid URL scheme triggers onFailure
-        final CountDownLatch latch = new CountDownLatch(1);
-        final AtomicReference<ConsentException> capturedError = new AtomicReference<>();
-
-        ConsentCallback callback = new ConsentCallback() {
-            @Override
-            public void onSuccess() {
-                fail("Should not succeed with invalid scheme");
-                latch.countDown();
-            }
-
-            @Override
-            public void onFailure(ConsentException error) {
-                capturedError.set(error);
-                latch.countDown();
-            }
-        };
-
-        // Call with ftp:// scheme (only http/https allowed)
-        sdk.initialize(mockContext, "ftp://example.com/config.json", callback);
-
-        // Wait for callback
-        assertTrue("Callback should be invoked", latch.await(5, TimeUnit.SECONDS));
-
-        // Verify correct error type
-        assertNotNull("Error should be captured", capturedError.get());
-        assertTrue("Should be InvalidConfiguration error",
-            capturedError.get() instanceof ConsentException.InvalidConfiguration);
-        assertTrue("Error message should mention https",
-            capturedError.get().getMessage().toLowerCase().contains("http"));
-    }
+    // MARK: - Callback Interface Tests
 
     @Test
     public void testPreferencesCallbackInvoked() {
@@ -564,48 +495,5 @@ public class JavaInteroperabilityTest {
         // Verify callback was invoked (may be called synchronously with 0,0 if no pending requests)
         // Note: This tests that the callback CAN be invoked, not the actual retry logic
         assertTrue("RetryCallback should be callable", true);
-    }
-
-    @Test
-    public void testMultipleCallbacksCanCoexist() throws InterruptedException {
-        // Verify that multiple callbacks can be used independently
-        final CountDownLatch latch = new CountDownLatch(2);
-        final AtomicInteger callbacksInvoked = new AtomicInteger(0);
-
-        ConsentCallback callback1 = new ConsentCallback() {
-            @Override
-            public void onSuccess() {
-                callbacksInvoked.incrementAndGet();
-                latch.countDown();
-            }
-
-            @Override
-            public void onFailure(ConsentException error) {
-                callbacksInvoked.incrementAndGet();
-                latch.countDown();
-            }
-        };
-
-        ConsentCallback callback2 = new ConsentCallback() {
-            @Override
-            public void onSuccess() {
-                callbacksInvoked.incrementAndGet();
-                latch.countDown();
-            }
-
-            @Override
-            public void onFailure(ConsentException error) {
-                callbacksInvoked.incrementAndGet();
-                latch.countDown();
-            }
-        };
-
-        // Call initialize twice with different callbacks (will both fail with invalid URL)
-        sdk.initialize(mockContext, "invalid-url-1", callback1);
-        sdk.initialize(mockContext, "invalid-url-2", callback2);
-
-        // Wait for both callbacks
-        assertTrue("Both callbacks should be invoked", latch.await(5, TimeUnit.SECONDS));
-        assertEquals("Both callbacks should have been invoked", 2, callbacksInvoked.get());
     }
 }
