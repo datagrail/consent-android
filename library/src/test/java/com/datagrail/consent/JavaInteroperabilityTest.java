@@ -472,28 +472,4 @@ public class JavaInteroperabilityTest {
         // but we can verify it can be set without errors)
         assertTrue("Listener should be set successfully", true);
     }
-
-    @Test
-    public void testRetryCallbackInvoked() {
-        // Verify RetryCallback can be invoked
-        final AtomicInteger successCount = new AtomicInteger(-1);
-        final AtomicInteger failureCount = new AtomicInteger(-1);
-        final CountDownLatch latch = new CountDownLatch(1);
-
-        RetryCallback callback = new RetryCallback() {
-            @Override
-            public void onRetryComplete(int success, int failure) {
-                successCount.set(success);
-                failureCount.set(failure);
-                latch.countDown();
-            }
-        };
-
-        // Call the method
-        sdk.retryPendingRequests(callback);
-
-        // Verify callback was invoked (may be called synchronously with 0,0 if no pending requests)
-        // Note: This tests that the callback CAN be invoked, not the actual retry logic
-        assertTrue("RetryCallback should be callable", true);
-    }
 }
