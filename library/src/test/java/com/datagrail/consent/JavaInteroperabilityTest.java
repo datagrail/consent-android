@@ -175,53 +175,66 @@ public class JavaInteroperabilityTest {
     }
 
     @Test
-    public void testAcceptAllMethodAccessible() {
+    public void testAcceptAllCallsFailureWhenNotInitialized() {
+        final AtomicReference<ConsentException> errorRef = new AtomicReference<>();
+
         ConsentCallback callback = new ConsentCallback() {
             @Override
-            public void onSuccess() {}
+            public void onSuccess() {
+                fail("Should not succeed when not initialized");
+            }
 
             @Override
-            public void onFailure(ConsentException error) {}
+            public void onFailure(ConsentException error) {
+                errorRef.set(error);
+            }
         };
 
-        // Verify method is accessible (will fail gracefully if not initialized)
-        try {
-            sdk.acceptAll(callback);
-        } catch (Exception e) {
-            // Expected - SDK not initialized
-            assertTrue("Should throw exception when not initialized", true);
-        }
+        // acceptAll delivers NotInitialized via callback synchronously when SDK is not initialized
+        sdk.acceptAll(callback);
+
+        assertNotNull("Expected ConsentException when SDK is not initialized for acceptAll", errorRef.get());
+        assertTrue("Should be NotInitialized", errorRef.get() instanceof ConsentException.NotInitialized);
     }
 
     @Test
-    public void testRejectAllMethodAccessible() {
+    public void testRejectAllCallsFailureWhenNotInitialized() {
+        final AtomicReference<ConsentException> errorRef = new AtomicReference<>();
+
         ConsentCallback callback = new ConsentCallback() {
             @Override
-            public void onSuccess() {}
+            public void onSuccess() {
+                fail("Should not succeed when not initialized");
+            }
 
             @Override
-            public void onFailure(ConsentException error) {}
+            public void onFailure(ConsentException error) {
+                errorRef.set(error);
+            }
         };
 
-        // Verify method is accessible (will fail gracefully if not initialized)
-        try {
-            sdk.rejectAll(callback);
-        } catch (Exception e) {
-            // Expected - SDK not initialized
-            assertTrue("Should throw exception when not initialized", true);
-        }
+        // rejectAll delivers NotInitialized via callback synchronously when SDK is not initialized
+        sdk.rejectAll(callback);
+
+        assertNotNull("Expected ConsentException when SDK is not initialized for rejectAll", errorRef.get());
+        assertTrue("Should be NotInitialized", errorRef.get() instanceof ConsentException.NotInitialized);
     }
 
     @Test
-    public void testOnConsentChangedMethodAccessible() {
+    public void testOnConsentChangedDoesNotThrow() {
         ConsentChangeListener listener = new ConsentChangeListener() {
             @Override
-            public void onConsentChanged(ConsentPreferences preferences) {}
+            public void onConsentChanged(ConsentPreferences preferences) {
+                // No-op: this test only verifies that the listener can be registered.
+            }
         };
 
-        // Verify method is accessible
-        sdk.onConsentChanged(listener);
-        assertTrue("onConsentChanged should be callable", true);
+        // Verify method is accessible and does not throw when registering a listener
+        try {
+            sdk.onConsentChanged(listener);
+        } catch (Exception e) {
+            fail("onConsentChanged should be callable without throwing, but threw: " + e);
+        }
     }
 
     // MARK: - Synchronous Method Tests
