@@ -41,13 +41,13 @@ class NetworkClient {
         headers: Map<String, String>? = null,
     ): String =
         withContext(Dispatchers.IO) {
-            val parsedUrl = URL(url)
-            if (parsedUrl.protocol != "https") {
-                throw ConsentException.NetworkError("Only HTTPS connections are allowed")
-            }
-
             ConsentLogger.d("Making ${method.value} request")
             try {
+                val parsedUrl = URL(url)
+                if (parsedUrl.protocol != "https") {
+                    throw ConsentException.NetworkError("Only HTTPS connections are allowed")
+                }
+
                 val connection = parsedUrl.openConnection() as HttpURLConnection
 
                 connection.requestMethod = method.value
