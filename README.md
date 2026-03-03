@@ -113,8 +113,9 @@ if (DataGrailConsent.getInstance().isCategoryEnabled("category_marketing")) {
 
 ## Requirements
 
-- Android 5.0 (API 21) or higher
-- Kotlin 1.9+ or Java 8+
+- Android 6.0 (API 23) or higher
+- Build tooling: JDK 17+ and Android Gradle Plugin 8.0+ (library is compiled with JVM/Java 17 bytecode)
+- Calling code: Kotlin 1.9+ or Java 8+ source compatibility
 - AndroidX
 
 ## Java Support
