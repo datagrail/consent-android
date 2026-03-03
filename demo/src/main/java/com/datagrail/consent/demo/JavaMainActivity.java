@@ -1,13 +1,10 @@
 package com.datagrail.consent.demo;
 
-import android.content.Context;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
-import android.widget.Toast;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -45,7 +42,6 @@ public class JavaMainActivity extends AppCompatActivity {
     private Button resetButton;
 
     // State
-    private boolean isInitialized = false;
     private StringBuilder logBuilder = new StringBuilder();
 
     @Override
@@ -119,7 +115,7 @@ public class JavaMainActivity extends AppCompatActivity {
                 @Override
                 public void onSuccess() {
                     log("SUCCESS", "SDK initialized successfully");
-                    isInitialized = true;
+
                     enableBannerButtons(true);
                     updateStatus("✅ SDK Initialized");
 
@@ -130,7 +126,7 @@ public class JavaMainActivity extends AppCompatActivity {
                 @Override
                 public void onFailure(ConsentException error) {
                     log("ERROR", "Failed to initialize: " + error.getMessage());
-                    isInitialized = false;
+
                     enableBannerButtons(false);
                     updateStatus("❌ Init Failed: " + error.getMessage());
 
@@ -213,7 +209,7 @@ public class JavaMainActivity extends AppCompatActivity {
         DataGrailConsent.getInstance().reset();
         log("SUCCESS", "SDK reset complete");
 
-        isInitialized = false;
+
         enableBannerButtons(false);
         updateStatus("🔄 SDK Reset - Reinitialize Required");
     }
