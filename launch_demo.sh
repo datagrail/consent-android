@@ -51,11 +51,15 @@ if [ -z "$JAVA_HOME" ]; then
 fi
 
 if [ -z "$JAVA_HOME" ]; then
-    echo "Java not found. Please install Java or set JAVA_HOME."
-    exit 1
+    if command -v java >/dev/null 2>&1; then
+        echo "JAVA_HOME is not set; using 'java' from PATH."
+    else
+        echo "Java not found. Please install Java or set JAVA_HOME."
+        exit 1
+    fi
+else
+    export PATH="$JAVA_HOME/bin:$PATH"
 fi
-
-export PATH="$JAVA_HOME/bin:$PATH"
 
 # Check if ANDROID_HOME or ANDROID_SDK_ROOT is set
 if [ -z "$ANDROID_HOME" ] && [ -z "$ANDROID_SDK_ROOT" ]; then
