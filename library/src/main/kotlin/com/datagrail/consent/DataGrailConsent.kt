@@ -60,6 +60,24 @@ class DataGrailConsent private constructor() {
                 instance ?: DataGrailConsent().also { instance = it }
             }
         }
+
+        /**
+         * Convert a Result callback to a ConsentCallback invocation.
+         * Maps non-ConsentException errors to ConsentException.NetworkError.
+         */
+        internal fun adaptResult(
+            result: Result<Unit>,
+            callback: ConsentCallback,
+        ) {
+            result.fold(
+                onSuccess = { callback.onSuccess() },
+                onFailure = { error ->
+                    callback.onFailure(
+                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
+                    )
+                },
+            )
+        }
     }
 
     // MARK: - Initialization
@@ -70,22 +88,12 @@ class DataGrailConsent private constructor() {
      * @param configUrl URL to fetch consent configuration from
      * @param callback Callback interface for success/failure
      */
-    @JvmOverloads
     fun initialize(
         context: Context,
         configUrl: String,
         callback: ConsentCallback,
     ) {
-        initialize(context, configUrl) { result ->
-            result.fold(
-                onSuccess = { callback.onSuccess() },
-                onFailure = { error ->
-                    callback.onFailure(
-                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
-                    )
-                },
-            )
-        }
+        initialize(context, configUrl) { result -> adaptResult(result, callback) }
     }
 
     /**
@@ -257,21 +265,11 @@ class DataGrailConsent private constructor() {
      * @param preferences The preferences to save
      * @param callback Callback interface for success/failure
      */
-    @JvmOverloads
     fun savePreferences(
         preferences: ConsentPreferences,
         callback: ConsentCallback,
     ) {
-        savePreferences(preferences) { result ->
-            result.fold(
-                onSuccess = { callback.onSuccess() },
-                onFailure = { error ->
-                    callback.onFailure(
-                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
-                    )
-                },
-            )
-        }
+        savePreferences(preferences) { result -> adaptResult(result, callback) }
     }
 
     /**
@@ -304,18 +302,8 @@ class DataGrailConsent private constructor() {
      * Accept all categories (Java-friendly)
      * @param callback Callback interface for success/failure
      */
-    @JvmOverloads
     fun acceptAll(callback: ConsentCallback) {
-        acceptAll { result ->
-            result.fold(
-                onSuccess = { callback.onSuccess() },
-                onFailure = { error ->
-                    callback.onFailure(
-                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
-                    )
-                },
-            )
-        }
+        acceptAll { result -> adaptResult(result, callback) }
     }
 
     /**
@@ -352,18 +340,8 @@ class DataGrailConsent private constructor() {
      * Reject all non-essential categories (Java-friendly)
      * @param callback Callback interface for success/failure
      */
-    @JvmOverloads
     fun rejectAll(callback: ConsentCallback) {
-        rejectAll { result ->
-            result.fold(
-                onSuccess = { callback.onSuccess() },
-                onFailure = { error ->
-                    callback.onFailure(
-                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
-                    )
-                },
-            )
-        }
+        rejectAll { result -> adaptResult(result, callback) }
     }
 
     /**
@@ -421,18 +399,8 @@ class DataGrailConsent private constructor() {
      * Track that the banner was shown (Java-friendly)
      * @param callback Callback interface for success/failure
      */
-    @JvmOverloads
     fun trackBannerShown(callback: ConsentCallback) {
-        trackBannerShown { result ->
-            result.fold(
-                onSuccess = { callback.onSuccess() },
-                onFailure = { error ->
-                    callback.onFailure(
-                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
-                    )
-                },
-            )
-        }
+        trackBannerShown { result -> adaptResult(result, callback) }
     }
 
     /**
@@ -457,7 +425,6 @@ class DataGrailConsent private constructor() {
      * Set callback to be notified when consent changes (Java-friendly)
      * @param listener Listener interface to invoke with new preferences
      */
-    @JvmOverloads
     fun onConsentChanged(listener: ConsentChangeListener) {
         this.onConsentChangedCallback = { preferences ->
             listener.onConsentChanged(preferences)
@@ -478,7 +445,6 @@ class DataGrailConsent private constructor() {
      * Retry any pending API requests (Java-friendly)
      * @param callback Callback interface with retry results
      */
-    @JvmOverloads
     fun retryPendingRequests(callback: RetryCallback) {
         retryPendingRequests { successCount, failureCount ->
             callback.onRetryComplete(successCount, failureCount)
