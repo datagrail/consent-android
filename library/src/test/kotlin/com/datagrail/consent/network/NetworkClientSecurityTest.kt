@@ -2,7 +2,6 @@ package com.datagrail.consent.network
 
 import com.datagrail.consent.models.ConsentException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
