@@ -3,7 +3,7 @@
 [![CI](https://github.com/datagrail/consent-android/actions/workflows/ci.yml/badge.svg)](https://github.com/datagrail/consent-android/actions/workflows/ci.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/io.datagrail/consent)](https://central.sonatype.com/artifact/io.datagrail/consent)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Min SDK](https://img.shields.io/badge/minSdk-21-green.svg)](https://developer.android.com/about/versions/lollipop)
+[![Min SDK](https://img.shields.io/badge/minSdk-23-green.svg)](https://developer.android.com/about/versions/marshmallow)
 
 Native Android SDK for displaying consent banners and managing user privacy preferences, powered by [DataGrail](https://www.datagrail.io/).
 
