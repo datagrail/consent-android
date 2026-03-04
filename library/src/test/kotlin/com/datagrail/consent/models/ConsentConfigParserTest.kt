@@ -217,6 +217,47 @@ class ConsentConfigParserTest {
         }
     }
 
+    @Test
+    fun `test parse config without syncOTConsent defaults to false`() {
+        val configFile = File(javaClass.classLoader?.getResource("config-no-sync-ot.json")?.file ?: "")
+        assertTrue("Config file should exist", configFile.exists())
+
+        val config = json.decodeFromString<ConsentConfig>(configFile.readText())
+
+        // syncOTConsent is absent from this config and should default to false
+        assertFalse(config.plugins.syncOTConsent)
+
+        // Verify the rest of plugins parsed correctly
+        assertTrue(config.plugins.scriptControl)
+        assertTrue(config.plugins.allCookieSubdomains)
+        assertTrue(config.plugins.cookieBlocking)
+        assertTrue(config.plugins.localStorageBlocking)
+    }
+
+    @Test
+    fun `test parse config with gpcDntLayerId present in no-sync-ot config`() {
+        val configFile = File(javaClass.classLoader?.getResource("config-no-sync-ot.json")?.file ?: "")
+        val config = json.decodeFromString<ConsentConfig>(configFile.readText())
+
+        // This config has a non-null gpc_dnt_layer_id
+        assertEquals("4de8260b-d70c-4601-9232-6d9631e49622", config.layout.gpcDntLayerId)
+
+        // Verify layout basics still parse
+        assertEquals("0c74436b-1c80-4078-89f8-e0840903252a", config.layout.id)
+        assertEquals("CPRA only", config.layout.name)
+        assertFalse(config.layout.defaultLayout)
+        assertEquals(5, config.layout.consentLayers.size)
+    }
+
+    @Test
+    fun `test parse config with gpcDntLayerId present`() {
+        val configFile = File(javaClass.classLoader?.getResource("config-bys.json")?.file ?: "")
+        val config = json.decodeFromString<ConsentConfig>(configFile.readText())
+
+        // config-bys.json has a non-null gpc_dnt_layer_id
+        assertEquals("19fcd340-6fb6-4363-bc9b-df10af839800", config.layout.gpcDntLayerId)
+    }
+
     @Test(expected = Exception::class)
     fun `test parse invalid JSON`() {
         val invalidJSON = "{ invalid json }"
