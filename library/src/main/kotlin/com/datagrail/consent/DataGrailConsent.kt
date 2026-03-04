@@ -122,11 +122,11 @@ class DataGrailConsent private constructor() {
                 return
             }
 
-        // Validate URL scheme
-        if (url.protocol != "https" && url.protocol != "http") {
+        // Validate URL scheme — HTTPS required
+        if (url.protocol != "https") {
             scope.launch {
                 callback(
-                    Result.failure(ConsentException.InvalidConfiguration("Config URL must use http or https scheme")),
+                    Result.failure(ConsentException.InvalidConfiguration("Config URL must use HTTPS")),
                 )
             }
             return
@@ -146,18 +146,8 @@ class DataGrailConsent private constructor() {
         val networkClient = NetworkClient()
         val configService = ConfigService(networkClient, storage)
 
-        // Extract privacy domain from config URL
+        // Extract privacy domain from config URL (already validated non-empty above)
         val privacyDomain = url.host
-        if (privacyDomain.isNullOrEmpty()) {
-            scope.launch {
-                callback(
-                    Result.failure(
-                        ConsentException.InvalidConfigUrl(configUrl),
-                    ),
-                )
-            }
-            return
-        }
 
         val consentService = ConsentService(networkClient, storage, privacyDomain)
 

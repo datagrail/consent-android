@@ -64,7 +64,7 @@ class DataGrailConsentTests {
             // Then
             assertNotNull("Should have received an error", resultError)
             assertTrue(resultError is ConsentException.InvalidConfiguration)
-            assertTrue((resultError as ConsentException.InvalidConfiguration).message?.contains("http") == true)
+            assertTrue((resultError as ConsentException.InvalidConfiguration).message?.contains("HTTPS") == true)
         }
 
     @Test
