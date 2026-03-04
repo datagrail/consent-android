@@ -1,7 +1,7 @@
 package com.datagrail.consent.network
 
-import android.util.Log
 import com.datagrail.consent.models.ConsentException
+import com.datagrail.consent.utils.ConsentLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -9,8 +9,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.math.pow
-
-private const val TAG = "DataGrailNetwork"
+import kotlin.random.Random
 
 /**
  * HTTP methods supported by the network client
@@ -42,9 +41,14 @@ class NetworkClient {
         headers: Map<String, String>? = null,
     ): String =
         withContext(Dispatchers.IO) {
-            Log.d(TAG, "Making ${method.value} request to: $url")
+            ConsentLogger.d("Making ${method.value} request")
             try {
-                val connection = URL(url).openConnection() as HttpURLConnection
+                val parsedUrl = URL(url)
+                if (parsedUrl.protocol != "https") {
+                    throw ConsentException.NetworkError("Only HTTPS connections are allowed")
+                }
+
+                val connection = parsedUrl.openConnection() as HttpURLConnection
 
                 connection.requestMethod = method.value
                 connection.connectTimeout = 30000
@@ -69,36 +73,35 @@ class NetworkClient {
                 }
 
                 val responseCode = connection.responseCode
-                Log.d(TAG, "Response code: $responseCode")
+                ConsentLogger.d("Response code: $responseCode")
 
                 if (responseCode !in 200..299) {
-                    val errorBody =
-                        try {
-                            connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-                        } catch (e: Exception) {
-                            ""
-                        }
-                    Log.e(TAG, "HTTP error $responseCode: $errorBody")
+                    // Read error stream but do not log its contents
+                    try {
+                        connection.errorStream?.bufferedReader()?.use { it.readText() }
+                    } catch (_: Exception) {
+                    }
+                    ConsentLogger.e("HTTP error $responseCode")
                     throw ConsentException.NetworkError("HTTP $responseCode")
                 }
 
                 val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
-                Log.d(TAG, "Response received: ${responseBody.take(200)}...")
+                ConsentLogger.d("Response received successfully")
                 responseBody
             } catch (e: ConsentException) {
-                Log.e(TAG, "ConsentException: ${e.message}", e)
+                ConsentLogger.e("Request failed: ${e.javaClass.simpleName}")
                 throw e
             } catch (e: IOException) {
-                Log.e(TAG, "IOException: ${e.message}", e)
+                ConsentLogger.e("IO error during request")
                 throw ConsentException.NetworkError(e.message ?: "Network error", e)
             } catch (e: Exception) {
-                Log.e(TAG, "Exception: ${e.message}", e)
+                ConsentLogger.e("Unexpected error during request")
                 throw ConsentException.NetworkError(e.message ?: "Unknown error", e)
             }
         }
 
     /**
-     * Retry an operation with exponential backoff
+     * Retry an operation with exponential backoff and jitter
      * @param maxAttempts Maximum number of retry attempts (default: 5)
      * @param baseDelayMs Base delay in milliseconds (default: 250)
      * @param operation The suspend operation to retry
@@ -123,8 +126,9 @@ class NetworkClient {
                     throw e
                 }
 
-                val delayMs = (baseDelayMs * 2.0.pow(attempt.toDouble())).toLong()
-                delay(delayMs)
+                val baseDelay = (baseDelayMs * 2.0.pow(attempt.toDouble())).toLong()
+                val jitter = (baseDelay * Random.nextDouble(0.0, 0.25)).toLong()
+                delay(baseDelay + jitter)
                 attempt++
             }
         }

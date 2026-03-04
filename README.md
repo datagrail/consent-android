@@ -3,7 +3,7 @@
 [![CI](https://github.com/datagrail/consent-android/actions/workflows/ci.yml/badge.svg)](https://github.com/datagrail/consent-android/actions/workflows/ci.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/io.datagrail/consent)](https://central.sonatype.com/artifact/io.datagrail/consent)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Min SDK](https://img.shields.io/badge/minSdk-21-green.svg)](https://developer.android.com/about/versions/lollipop)
+[![Min SDK](https://img.shields.io/badge/minSdk-23-green.svg)](https://developer.android.com/about/versions/marshmallow)
 
 Native Android SDK for displaying consent banners and managing user privacy preferences, powered by [DataGrail](https://www.datagrail.io/).
 
@@ -113,9 +113,16 @@ if (DataGrailConsent.getInstance().isCategoryEnabled("category_marketing")) {
 
 ## Requirements
 
-- Android 5.0 (API 21) or higher
-- Kotlin 1.9+
+- Android 6.0 (API 23) or higher
+- Build tooling: JDK 17+ and Android Gradle Plugin 8.0+ (library is compiled with JVM/Java 17 bytecode)
+- Calling code: Kotlin 1.9+ or Java 8+ source compatibility
 - AndroidX
+
+## Java Support
+
+The SDK is written in Kotlin but provides **full Java interoperability** through dedicated callback interfaces. Java developers can use all SDK features with clear success/failure callbacks instead of Kotlin's `Result` type.
+
+**[→ Java Integration Guide](JAVA_INTEGRATION.md)** - Complete examples for Java applications
 
 ## Permissions
 
@@ -124,6 +131,31 @@ Add to your `AndroidManifest.xml`:
 ```xml
 <uses-permission android:name="android.permission.INTERNET" />
 ```
+
+## Backup Exclusion
+
+The SDK stores consent data in EncryptedSharedPreferences (`com.datagrail.consent.prefs`). To prevent this data from being included in cloud backups or device transfers, add backup exclusion rules to your app:
+
+**Pre-API 31** (`fullBackupContent`):
+```xml
+<full-backup-content>
+    <exclude domain="sharedpref" path="com.datagrail.consent.prefs.xml" />
+</full-backup-content>
+```
+
+**API 31+** (`dataExtractionRules`):
+```xml
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="com.datagrail.consent.prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="com.datagrail.consent.prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>
+```
+
+See the demo app for a complete example.
 
 ## ProGuard / R8
 

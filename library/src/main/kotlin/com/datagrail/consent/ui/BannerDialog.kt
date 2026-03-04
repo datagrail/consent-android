@@ -784,8 +784,13 @@ class BannerDialog : DialogFragment() {
 
     private fun openUrl(url: String) {
         try {
-            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
-            intent.data = android.net.Uri.parse(url)
+            val uri = android.net.Uri.parse(url)
+            val scheme = uri.scheme?.lowercase()
+            if (scheme != "http" && scheme != "https") {
+                com.datagrail.consent.utils.ConsentLogger.e("Blocked URL with disallowed scheme: $scheme")
+                return
+            }
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
             startActivity(intent)
         } catch (e: Exception) {
             Toast.makeText(requireContext(), "Could not open URL", Toast.LENGTH_SHORT).show()

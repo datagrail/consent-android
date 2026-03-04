@@ -2,6 +2,8 @@ package com.datagrail.consent.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKeys
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
@@ -10,10 +12,10 @@ import kotlinx.serialization.json.Json
 import java.util.UUID
 
 /**
- * Handles local storage of consent data using SharedPreferences
+ * Handles local storage of consent data using EncryptedSharedPreferences.
+ * This class is internal to the SDK — consumers should not instantiate it directly.
  */
-class ConsentStorage(context: Context) {
-    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+internal class ConsentStorage(private val prefs: SharedPreferences) {
     private val json =
         Json {
             ignoreUnknownKeys = true
@@ -21,13 +23,40 @@ class ConsentStorage(context: Context) {
         }
 
     companion object {
-        private const val PREFS_NAME = "com.datagrail.consent.prefs"
+        internal const val PREFS_NAME = "com.datagrail.consent.prefs"
         private const val KEY_PREFERENCES = "datagrail_consent_preferences"
         private const val KEY_UNIQUE_ID = "datagrail_consent_id"
         private const val KEY_VERSION = "datagrail_consent_version"
         private const val KEY_LOCALE_CODE = "datagrail_consent_locale_code"
         private const val KEY_CONFIG_CACHE = "datagrail_consent_config_cache"
         private const val KEY_PENDING_EVENTS = "datagrail_consent_pending_events"
+
+        /**
+         * Create a ConsentStorage backed by EncryptedSharedPreferences
+         * @param context Android application context
+         * @return ConsentStorage instance with encrypted backing store
+         * @throws ConsentException.InvalidConfiguration if encrypted storage cannot be initialized
+         */
+        fun create(context: Context): ConsentStorage {
+            val appContext = context.applicationContext
+            return try {
+                val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+                val encryptedPrefs =
+                    EncryptedSharedPreferences.create(
+                        PREFS_NAME,
+                        masterKeyAlias,
+                        appContext,
+                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                    )
+                ConsentStorage(encryptedPrefs)
+            } catch (e: Exception) {
+                throw ConsentException.InvalidConfiguration(
+                    "Failed to initialize encrypted storage",
+                    e,
+                )
+            }
+        }
     }
 
     // MARK: - Preferences
@@ -72,6 +101,14 @@ class ConsentStorage(context: Context) {
         val newId = UUID.randomUUID().toString()
         prefs.edit().putString(KEY_UNIQUE_ID, newId).apply()
         return newId
+    }
+
+    /**
+     * Reset the unique identifier, removing it from storage.
+     * A new ID will be generated on the next call to getOrCreateUniqueId().
+     */
+    fun resetIdentifier() {
+        prefs.edit().remove(KEY_UNIQUE_ID).apply()
     }
 
     // MARK: - Configuration Version

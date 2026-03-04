@@ -11,7 +11,7 @@ import com.datagrail.consent.storage.ConsentStorage
 /**
  * Manages consent state and coordinates between storage, network, and configuration
  */
-class ConsentManager(
+internal class ConsentManager(
     private val storage: ConsentStorage,
     private val configService: ConfigService,
     private val consentService: ConsentService,
@@ -212,5 +212,12 @@ class ConsentManager(
     fun reset() {
         storage.clearAll()
         currentConfig = null
+    }
+
+    /**
+     * Reset the unique tracking identifier
+     */
+    fun resetIdentifier() {
+        storage.resetIdentifier()
     }
 }

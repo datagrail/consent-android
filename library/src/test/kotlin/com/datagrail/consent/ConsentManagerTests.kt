@@ -420,6 +420,15 @@ class ConsentManagerTests {
         assertTrue(essentialCategories.isEmpty())
     }
 
+    // MARK: - Reset Identifier Tests
+
+    @Test
+    fun `resetIdentifier delegates to storage`() {
+        sut.resetIdentifier()
+
+        org.mockito.Mockito.verify(mockStorage).resetIdentifier()
+    }
+
     // MARK: - Helper Methods
 
     private fun createMockConfigWithInitialCategories(initialCategories: List<String>): ConsentConfig {

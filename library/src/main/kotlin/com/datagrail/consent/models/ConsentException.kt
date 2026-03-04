@@ -8,12 +8,13 @@ sealed class ConsentException(message: String, cause: Throwable? = null) : Excep
         "DataGrailConsent not initialized. Call DataGrailConsent.initialize() first.",
     )
 
-    class InvalidConfiguration(message: String) : ConsentException(
+    class InvalidConfiguration(message: String, cause: Throwable? = null) : ConsentException(
         "Invalid configuration: $message",
+        cause,
     )
 
     class InvalidConfigUrl(url: String) : ConsentException(
-        "Invalid configuration URL: $url",
+        "Invalid configuration URL host: ${try { java.net.URL(url).host } catch (_: Exception) { "<malformed>" }}",
     )
 
     class NetworkError(message: String, cause: Throwable? = null) : ConsentException(

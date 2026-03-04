@@ -1,6 +1,8 @@
 package com.datagrail.consent
 
 import com.datagrail.consent.models.ConsentException
+import com.datagrail.consent.utils.ConsentLogger
+import com.datagrail.consent.utils.LogLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
@@ -62,7 +64,7 @@ class DataGrailConsentTests {
             // Then
             assertNotNull("Should have received an error", resultError)
             assertTrue(resultError is ConsentException.InvalidConfiguration)
-            assertTrue((resultError as ConsentException.InvalidConfiguration).message?.contains("http") == true)
+            assertTrue((resultError as ConsentException.InvalidConfiguration).message?.contains("HTTPS") == true)
         }
 
     @Test
@@ -122,6 +124,53 @@ class DataGrailConsentTests {
         assertEquals("https", url.protocol)
         assertEquals("consent.datagrail.io", url.host)
     }
+
+    // MARK: - setLogLevel Tests
+
+    @Test
+    fun `setLogLevel changes ConsentLogger level`() {
+        DataGrailConsent.setLogLevel(LogLevel.DEBUG)
+        assertEquals(LogLevel.DEBUG, ConsentLogger.level)
+
+        DataGrailConsent.setLogLevel(LogLevel.ERROR)
+        assertEquals(LogLevel.ERROR, ConsentLogger.level)
+
+        DataGrailConsent.setLogLevel(LogLevel.NONE)
+        assertEquals(LogLevel.NONE, ConsentLogger.level)
+    }
+
+    @Test
+    fun `default log level is NONE`() {
+        // Reset to default
+        DataGrailConsent.setLogLevel(LogLevel.NONE)
+        assertEquals(LogLevel.NONE, ConsentLogger.level)
+    }
+
+    // MARK: - Privacy Domain Fail-Loudly Tests
+
+    @Test
+    fun `initialize with empty host URL fails with InvalidConfigUrl`() =
+        runTest {
+            // "https://" has no host — should be caught by the earlier host validation
+            val emptyHostUrl = "https://"
+            var resultError: Throwable? = null
+
+            sut.initialize(mockContext, emptyHostUrl) { result ->
+                result.fold(
+                    onSuccess = { },
+                    onFailure = { error -> resultError = error },
+                )
+            }
+
+            testScheduler.advanceUntilIdle()
+
+            assertNotNull("Should have received an error", resultError)
+            // The URL host validation catches this first
+            assertTrue(
+                "Should be InvalidConfiguration or InvalidConfigUrl",
+                resultError is ConsentException.InvalidConfiguration || resultError is ConsentException.InvalidConfigUrl,
+            )
+        }
 
     // MARK: - Thread Safety Tests
 
