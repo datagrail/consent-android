@@ -471,15 +471,26 @@ class DataGrailConsent private constructor() {
     // MARK: - UI Methods
 
     /**
+     * Show the consent banner dialog with MODAL style (Java-friendly convenience overload)
+     * @param activity The activity to show the dialog on
+     * @param callback Callback interface for banner result
+     */
+    fun showBanner(
+        activity: androidx.fragment.app.FragmentActivity,
+        callback: PreferencesCallback,
+    ) {
+        showBanner(activity, BannerDisplayStyle.MODAL, callback)
+    }
+
+    /**
      * Show the consent banner dialog with specified display style (Java-friendly)
      * @param activity The activity to show the dialog on
      * @param style The display style for the banner (MODAL or FULL_SCREEN)
      * @param callback Callback interface for banner result
      */
-    @JvmOverloads
     fun showBanner(
         activity: androidx.fragment.app.FragmentActivity,
-        style: BannerDisplayStyle = BannerDisplayStyle.MODAL,
+        style: BannerDisplayStyle,
         callback: PreferencesCallback,
     ) {
         showBanner(activity, style) { preferences ->
