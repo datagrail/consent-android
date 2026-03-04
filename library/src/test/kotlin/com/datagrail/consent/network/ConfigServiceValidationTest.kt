@@ -5,10 +5,12 @@ import com.datagrail.consent.storage.ConsentStorage
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.mockito.Mock
+import org.mockito.Mockito
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.*
 
@@ -29,10 +31,18 @@ class ConfigServiceValidationTest {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    private lateinit var closeable: AutoCloseable
+
     @Before
     fun setUp() {
-        MockitoAnnotations.openMocks(this)
+        closeable = MockitoAnnotations.openMocks(this)
         configService = ConfigService(mockNetworkClient, mockStorage)
+    }
+
+    @After
+    fun tearDown() {
+        Mockito.reset(mockNetworkClient, mockStorage)
+        closeable.close()
     }
 
     // MARK: - Valid Config
