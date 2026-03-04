@@ -132,6 +132,31 @@ Add to your `AndroidManifest.xml`:
 <uses-permission android:name="android.permission.INTERNET" />
 ```
 
+## Backup Exclusion
+
+The SDK stores consent data in EncryptedSharedPreferences (`com.datagrail.consent.prefs`). To prevent this data from being included in cloud backups or device transfers, add backup exclusion rules to your app:
+
+**Pre-API 31** (`fullBackupContent`):
+```xml
+<full-backup-content>
+    <exclude domain="sharedpref" path="com.datagrail.consent.prefs.xml" />
+</full-backup-content>
+```
+
+**API 31+** (`dataExtractionRules`):
+```xml
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="com.datagrail.consent.prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="com.datagrail.consent.prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>
+```
+
+See the demo app for a complete example.
+
 ## ProGuard / R8
 
 If you have ProGuard/R8 enabled, add these rules:
