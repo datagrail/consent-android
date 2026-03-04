@@ -10,7 +10,7 @@ import kotlinx.serialization.json.Json
 /**
  * Service for fetching and managing consent configuration
  */
-class ConfigService(
+internal class ConfigService(
     private val networkClient: NetworkClient,
     private val storage: ConsentStorage,
 ) {

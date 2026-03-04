@@ -8,8 +8,9 @@ sealed class ConsentException(message: String, cause: Throwable? = null) : Excep
         "DataGrailConsent not initialized. Call DataGrailConsent.initialize() first.",
     )
 
-    class InvalidConfiguration(message: String) : ConsentException(
+    class InvalidConfiguration(message: String, cause: Throwable? = null) : ConsentException(
         "Invalid configuration: $message",
+        cause,
     )
 
     class InvalidConfigUrl(url: String) : ConsentException(

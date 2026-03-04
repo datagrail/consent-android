@@ -334,7 +334,7 @@ public class JavaInteroperabilityTest {
     public void testConsentExceptionTypesAccessible() {
         // Verify all exception types are accessible from Java
         ConsentException networkError = new ConsentException.NetworkError("Network error", null);
-        ConsentException configError = new ConsentException.InvalidConfiguration("Config error");
+        ConsentException configError = new ConsentException.InvalidConfiguration("Config error", null);
         ConsentException notInitError = new ConsentException.NotInitialized();
 
         assertTrue("NetworkError should be ConsentException", networkError instanceof ConsentException);

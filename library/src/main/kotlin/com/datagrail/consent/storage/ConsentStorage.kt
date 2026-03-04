@@ -12,9 +12,10 @@ import kotlinx.serialization.json.Json
 import java.util.UUID
 
 /**
- * Handles local storage of consent data using EncryptedSharedPreferences
+ * Handles local storage of consent data using EncryptedSharedPreferences.
+ * This class is internal to the SDK — consumers should not instantiate it directly.
  */
-class ConsentStorage(private val prefs: SharedPreferences) {
+internal class ConsentStorage(private val prefs: SharedPreferences) {
     private val json =
         Json {
             ignoreUnknownKeys = true
@@ -34,19 +35,27 @@ class ConsentStorage(private val prefs: SharedPreferences) {
          * Create a ConsentStorage backed by EncryptedSharedPreferences
          * @param context Android application context
          * @return ConsentStorage instance with encrypted backing store
+         * @throws ConsentException.InvalidConfiguration if encrypted storage cannot be initialized
          */
         fun create(context: Context): ConsentStorage {
             val appContext = context.applicationContext
-            val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-            val encryptedPrefs =
-                EncryptedSharedPreferences.create(
-                    PREFS_NAME,
-                    masterKeyAlias,
-                    appContext,
-                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            return try {
+                val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+                val encryptedPrefs =
+                    EncryptedSharedPreferences.create(
+                        PREFS_NAME,
+                        masterKeyAlias,
+                        appContext,
+                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                    )
+                ConsentStorage(encryptedPrefs)
+            } catch (e: Exception) {
+                throw ConsentException.InvalidConfiguration(
+                    "Failed to initialize encrypted storage",
+                    e,
                 )
-            return ConsentStorage(encryptedPrefs)
+            }
         }
     }
 

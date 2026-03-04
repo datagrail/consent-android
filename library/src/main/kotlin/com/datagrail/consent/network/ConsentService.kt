@@ -13,7 +13,7 @@ import java.util.UUID
 /**
  * Service for sending consent data to backend
  */
-class ConsentService(
+internal class ConsentService(
     private val networkClient: NetworkClient,
     private val storage: ConsentStorage,
     private val privacyDomain: String,
