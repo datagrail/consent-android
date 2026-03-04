@@ -160,18 +160,27 @@ public class JavaInteroperabilityTest {
     // MARK: - API Method Access Tests
 
     @Test
-    public void testInitializeMethodAccessible() {
-        // Verify initialize method with ConsentCallback is accessible from Java
+    public void testInitializeCallsFailureForInvalidUrl() {
+        final AtomicReference<ConsentException> errorRef = new AtomicReference<>();
+
         ConsentCallback callback = new ConsentCallback() {
             @Override
-            public void onSuccess() {}
+            public void onSuccess() {
+                fail("Should not succeed with invalid URL");
+            }
 
             @Override
-            public void onFailure(ConsentException error) {}
+            public void onFailure(ConsentException error) {
+                errorRef.set(error);
+            }
         };
 
-        // This should compile and be callable (won't actually initialize without proper context)
-        assertNotNull("Initialize method should be accessible", callback);
+        // Verify initialize is accessible from Java and calls onFailure for bad URL
+        sdk.initialize(mockContext, "not-a-valid-url", callback);
+
+        assertNotNull("Expected ConsentException for invalid URL", errorRef.get());
+        assertTrue("Should be InvalidConfiguration",
+                errorRef.get() instanceof ConsentException.InvalidConfiguration);
     }
 
     @Test
@@ -395,11 +404,12 @@ public class JavaInteroperabilityTest {
     }
 
     @Test
-    public void testLambdaStyleCallbackNotPossible() {
-        // Java 8+ lambdas don't work with interfaces that have multiple methods
-        // This test documents that ConsentCallback requires traditional anonymous class syntax
-        // (This is expected behavior for multi-method interfaces)
-        assertTrue("ConsentCallback requires anonymous class syntax in Java", true);
+    public void testConsentCallbackIsNotSamInterface() {
+        // Java 8+ lambdas don't work with interfaces that have multiple methods.
+        // Verify ConsentCallback declares multiple methods and is therefore not a SAM interface.
+        int declaredMethodCount = ConsentCallback.class.getDeclaredMethods().length;
+        assertTrue("ConsentCallback should declare multiple methods and not be a SAM interface",
+                declaredMethodCount > 1);
     }
 
     // MARK: - Thread Safety Tests
