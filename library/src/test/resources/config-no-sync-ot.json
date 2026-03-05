@@ -1,0 +1,1353 @@
+{
+    "version": "0a3fa58e-6cae-4ba4-993f-7a6f844c553c",
+    "consentContainerVersionId": "35e0fba1-54bd-45ce-bf29-2622196328f4",
+    "dgCustomerId": "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
+    "p": 1772640197596,
+    "dch": "categorize",
+    "dc": "dg-category-performance",
+    "privacyDomain": "api.consentjs.datagrailstaging.com",
+    "plugins": {
+        "scriptControl": true,
+        "allCookieSubdomains": true,
+        "cookieBlocking": true,
+        "localStorageBlocking": true
+    },
+    "testMode": false,
+    "ignoreDoNotTrack": false,
+    "trackingDetailsUrl": "https://api.consentjs.datagrailstaging.com/ac46d8ad-a67a-431f-a5d5-9e3eb922dae7/service-metadata.json",
+    "consentMode": "optout",
+    "showBanner": false,
+    "consentPolicy": {
+        "name": "CPRA",
+        "default": false
+    },
+    "gppUsNat": true,
+    "initialCategories": {
+        "respect_gpc": true,
+        "respect_dnt": true,
+        "respect_optout": false,
+        "initial": [
+            "dg-category-essential",
+            "dg-category-performance",
+            "dg-category-functional",
+            "dg-category-marketing"
+        ],
+        "gpc": [
+            "dg-category-essential"
+        ],
+        "optout": [
+            "dg-category-essential",
+            "dg-category-performance",
+            "dg-category-functional"
+        ]
+    },
+    "layout": {
+        "id": "0c74436b-1c80-4078-89f8-e0840903252a",
+        "name": "CPRA only",
+        "description": null,
+        "status": "published",
+        "default_layout": false,
+        "collapsed_on_mobile": true,
+        "first_layer_id": "83648dc1-3f43-4d79-b704-26ee1f58d99c",
+        "gpc_dnt_layer_id": "4de8260b-d70c-4601-9232-6d9631e49622",
+        "consent_layers": {
+            "0b9fbfad-8501-498d-81c7-d7d1434700ed": {
+                "id": "0b9fbfad-8501-498d-81c7-d7d1434700ed",
+                "name": "Default Layer",
+                "theme": "neutral",
+                "position": "bottom",
+                "show_close_button": false,
+                "banner_api_id": "default-layer",
+                "elements": [
+                    {
+                        "id": "9a47b8e0-cc34-4139-8daf-18a8a2ef19c6",
+                        "order": 1,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-title",
+                        "translations": {
+                            "en": {
+                                "id": "eed4fc42-dd45-493a-89aa-f2e02e98f09c",
+                                "locale": "en",
+                                "value": "Privacy Settings"
+                            },
+                            "zh-TW": {
+                                "id": "c00df0bf-1769-48ef-9a86-f96e2e5b3dde",
+                                "locale": "zh-TW",
+                                "value": "隱私設定"
+                            },
+                            "es": {
+                                "id": "26dacabd-fbb3-4082-b058-831ac62f82dd",
+                                "locale": "es",
+                                "value": "Configuración de privacidad"
+                            },
+                            "cs": {
+                                "id": "b44ed2b3-58ae-4191-b74e-b13d29bf354b",
+                                "locale": "cs",
+                                "value": "Nastavení ochrany osobních údajů"
+                            },
+                            "nl": {
+                                "id": "920a3324-f99c-476a-b2fe-57e9f324309a",
+                                "locale": "nl",
+                                "value": "Privacy-instellingen"
+                            },
+                            "pt": {
+                                "id": "7fbbf3ec-bea5-406e-934c-4d7227ad68f9",
+                                "locale": "pt",
+                                "value": "Definições de Privacidade"
+                            },
+                            "zh-CN": {
+                                "id": "1c11f385-1d50-40db-96a7-7c8a93804691",
+                                "locale": "zh-CN",
+                                "value": "隐私设置"
+                            }
+                        }
+                    },
+                    {
+                        "id": "be321748-2309-4540-880e-ab711f8d4b8e",
+                        "order": 2,
+                        "type": "ConsentLayerLanguagePickerElement"
+                    },
+                    {
+                        "id": "d48d3275-de74-416a-9cdf-5da5db6ccaf9",
+                        "order": 3,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-main-content-explanation",
+                        "translations": {
+                            "en": {
+                                "id": "1ad35efe-0bb3-4d83-a9d9-19e398fbd123",
+                                "locale": "en",
+                                "value": "We use cookies and similar technologies for the proper functioning of this site and to give you the optimum experience of our services. Cookies are also used to develop and serve ads, content, or features that are more relevant to your interests. Use this tool to opt-out of us selling/sharing data associated with this browser or device."
+                            },
+                            "zh-TW": {
+                                "id": "af41a25e-f1eb-4331-8fbd-e2733ca03114",
+                                "locale": "zh-TW",
+                                "value": "我們使用 Cookie 和類似技術來確保本網站的正確運作，並為您提供最佳服務體驗。Cookie 也用於開發和提供與您興趣更相關的廣告、內容或功能。使用此工具退出我們出售/共享與此瀏覽器或設備相關的數據。"
+                            },
+                            "es": {
+                                "id": "7572ded4-10dd-453b-b198-0a8851fab139",
+                                "locale": "es",
+                                "value": "Usamos cookies y tecnologías similares para el correcto funcionamiento de este sitio y para brindarle una experiencia óptima de nuestros servicios. Las cookies también se utilizan para desarrollar y publicar anuncios, contenido o funciones que sean más relevantes para sus intereses. Utilice esta herramienta para impedir que vendamos o compartamos los datos asociados a este navegador o dispositivo."
+                            },
+                            "cs": {
+                                "id": "84c4db15-3563-463c-bf2a-74e61d3f981d",
+                                "locale": "cs",
+                                "value": "Soubory cookie a podobné technologie používáme pro správné fungování tohoto webu a pro zajištění optimálního zážitku z našich služeb. Soubory cookie se také používají k vytváření a zobrazování reklam, obsahu nebo funkcí, které jsou relevantnější pro vaše zájmy. Pomocí tohoto nástroje můžete zrušit prodej/sdílení dat spojených s tímto prohlížečem nebo zařízením."
+                            },
+                            "nl": {
+                                "id": "236342db-5730-413f-a9d9-a6e65aaa87cd",
+                                "locale": "nl",
+                                "value": "We gebruiken cookies en soortgelijke technologieën voor de goede werking van deze site en om u de optimale ervaring van onze diensten te bieden. Cookies worden ook gebruikt om advertenties, inhoud of functies te ontwikkelen en weer te geven die relevanter zijn voor uw interesses. Gebruik deze tool om u af te melden voor het verkopen/delen van gegevens die zijn gekoppeld aan deze browser of dit apparaat."
+                            },
+                            "pt": {
+                                "id": "57f29214-9b4a-4f8e-a817-a5f95de1f12d",
+                                "locale": "pt",
+                                "value": "Utilizamos cookies e tecnologias semelhantes para o bom funcionamento deste site e para lhe proporcionar a melhor experiência dos nossos serviços. Os cookies também são utilizados para desenvolver e veicular anúncios, conteúdos ou funcionalidades mais relevantes para os seus interesses. Utilize esta ferramenta para optar por não nos vender/partilhar dados associados a este navegador ou dispositivo."
+                            },
+                            "zh-CN": {
+                                "id": "4b82c315-81c9-4633-a802-519155ba4843",
+                                "locale": "zh-CN",
+                                "value": "我们使用Cookie和类似技术来确保本网站的正常运行，并为您提供最佳的服务体验。Cookie 还用于开发和提供与您的兴趣更相关的广告、内容或功能。使用此工具选择不出售/共享与此浏览器或设备相关的数据。"
+                            }
+                        }
+                    },
+                    {
+                        "id": "22481000-96f8-4cc4-9677-8d0da04e4030",
+                        "order": 4,
+                        "type": "ConsentLayerLinkElement",
+                        "links": [
+                            {
+                                "id": "8234c107-9f30-4579-8114-c80ef2e7096d",
+                                "order": 1,
+                                "translations": {
+                                    "en": {
+                                        "id": "fb54d84a-4202-436d-bb1f-2470b82182c1",
+                                        "locale": "en",
+                                        "text": "Privacy Policy",
+                                        "url": "https://www.datagrail.io/privacy-policy/"
+                                    },
+                                    "es": {
+                                        "id": "e88457c1-6a79-4e0f-b440-21346525ded6",
+                                        "locale": "es",
+                                        "text": "Política de privacidad",
+                                        "url": "https://www.datagrail.io/privacy-policy/"
+                                    },
+                                    "cs": {
+                                        "id": "9a65cf3c-ab83-4465-8f87-0244a7a10dc8",
+                                        "locale": "cs",
+                                        "text": "Zásady ochrany osobních údajů",
+                                        "url": "https://www.datagrail.io/privacy-policy/"
+                                    },
+                                    "nl": {
+                                        "id": "c0c308c0-10cb-4e45-82f5-e6e6bbb2658f",
+                                        "locale": "nl",
+                                        "text": "Privacybeleid",
+                                        "url": "https://www.datagrail.io/privacy-policy/"
+                                    },
+                                    "pt": {
+                                        "id": "3f09ca93-3f13-49c6-888b-fc753efb44e4",
+                                        "locale": "pt",
+                                        "text": "Política de Privacidade",
+                                        "url": "https://www.datagrail.io/privacy-policy/"
+                                    },
+                                    "zh-CN": {
+                                        "id": "45f29247-0c51-4fd1-9991-ff742501cf2f",
+                                        "locale": "zh-CN",
+                                        "text": "隐私政策",
+                                        "url": "https://www.datagrail.io/privacy-policy/"
+                                    },
+                                    "zh-TW": {
+                                        "id": "96ea5fc7-9246-43da-83fd-2247e6620262",
+                                        "locale": "zh-TW",
+                                        "text": "私隱政策",
+                                        "url": "https://www.datagrail.io/privacy-policy/"
+                                    }
+                                }
+                            },
+                            {
+                                "id": "e0dbed02-94ff-4fe3-a897-1cc9ea9630ba",
+                                "order": 2,
+                                "translations": {
+                                    "en": {
+                                        "id": "c133267b-d096-4385-9bf4-c245fe97afed",
+                                        "locale": "en",
+                                        "text": "Opt-Out Form",
+                                        "url": "https://preferences.datagrail.io/form/opt_out?locationCode=US-MA\u0026privacyRequestPolicyId=372090ab-21c9-4dc4-9a2e-c189d337b774"
+                                    },
+                                    "es": {
+                                        "id": "f1877f1c-d2e4-4363-abde-20bd960ddcfd",
+                                        "locale": "es",
+                                        "text": "Formulario de exclusión",
+                                        "url": "https://preferences.datagrail.io/form/opt_out?locationCode=US-MA\u0026privacyRequestPolicyId=372090ab-21c9-4dc4-9a2e-c189d337b774"
+                                    },
+                                    "cs": {
+                                        "id": "ca4c4465-1e33-42e9-8da5-78b28e6a255b",
+                                        "locale": "cs",
+                                        "text": "Formulář pro odhlášení",
+                                        "url": "https://preferences.datagrail.io/form/opt_out?locationCode=US-MA\u0026privacyRequestPolicyId=372090ab-21c9-4dc4-9a2e-c189d337b774"
+                                    },
+                                    "nl": {
+                                        "id": "5a1a496a-d1e9-4174-bd7d-964789206f97",
+                                        "locale": "nl",
+                                        "text": "Opt-out-formulier",
+                                        "url": "https://preferences.datagrail.io/form/opt_out?locationCode=US-MA\u0026privacyRequestPolicyId=372090ab-21c9-4dc4-9a2e-c189d337b774"
+                                    },
+                                    "pt": {
+                                        "id": "7182ec4a-f267-401c-9aea-d0110bd087b0",
+                                        "locale": "pt",
+                                        "text": "Formulário de Opt-Out",
+                                        "url": "https://preferences.datagrail.io/form/opt_out?locationCode=US-MA\u0026privacyRequestPolicyId=372090ab-21c9-4dc4-9a2e-c189d337b774"
+                                    },
+                                    "zh-CN": {
+                                        "id": "beceb9aa-4dd2-4548-a250-7e06aca19dd0",
+                                        "locale": "zh-CN",
+                                        "text": "选择退出表格",
+                                        "url": "https://preferences.datagrail.io/form/opt_out?locationCode=US-MA\u0026privacyRequestPolicyId=372090ab-21c9-4dc4-9a2e-c189d337b774"
+                                    },
+                                    "zh-TW": {
+                                        "id": "cd11e55d-7fd0-414f-82f8-6b38efbeef91",
+                                        "locale": "zh-TW",
+                                        "text": "退出表格",
+                                        "url": "https://preferences.datagrail.io/form/opt_out?locationCode=US-MA\u0026privacyRequestPolicyId=372090ab-21c9-4dc4-9a2e-c189d337b774"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "id": "3d82c208-7cb3-4d25-befd-ebd6b7369954",
+                        "order": 5,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-main-content-explanation",
+                        "translations": {
+                            "en": {
+                                "id": "247899f5-9f8b-4b80-9d91-05f533d2b1ff",
+                                "locale": "en",
+                                "value": "HI"
+                            },
+                            "zh-TW": {
+                                "id": "9240535c-1d10-47f1-9193-6daeace54a5f",
+                                "locale": "zh-TW",
+                                "value": "嗨"
+                            },
+                            "es": {
+                                "id": "b947d229-b0fd-407e-9625-d432706dac05",
+                                "locale": "es",
+                                "value": "HOLA"
+                            },
+                            "cs": {
+                                "id": "a20f75bf-d695-4e93-9493-bce5d9da2f1b",
+                                "locale": "cs",
+                                "value": "AHOJ"
+                            },
+                            "nl": {
+                                "id": "46013789-b82a-4df2-aa16-a725bb2c0cc5",
+                                "locale": "nl",
+                                "value": "HOI"
+                            },
+                            "pt": {
+                                "id": "fa2a9ed3-7767-4cc2-85ae-f0c863d32e98",
+                                "locale": "pt",
+                                "value": "OLÁ"
+                            },
+                            "zh-CN": {
+                                "id": "3610e9db-0e15-4fe0-a0ee-6d1c49066f9f",
+                                "locale": "zh-CN",
+                                "value": "嗨"
+                            }
+                        }
+                    },
+                    {
+                        "id": "43a50cb1-6a63-41ae-9805-83c442375f3c",
+                        "order": 6,
+                        "button_action": "open_layer",
+                        "type": "ConsentLayerButtonElement",
+                        "target_consent_layer": "3735692f-efe1-4ac3-b671-afdc9922b9b8",
+                        "translations": {
+                            "en": {
+                                "id": "6270c5b5-bed1-4ea2-ab1c-80a15056d463",
+                                "locale": "en",
+                                "value": "OK"
+                            },
+                            "zh-TW": {
+                                "id": "da117142-8309-49cd-bb11-cfef2ff33419",
+                                "locale": "zh-TW",
+                                "value": "好"
+                            },
+                            "es": {
+                                "id": "918050e9-ee68-4957-aa84-b518df8b4f3c",
+                                "locale": "es",
+                                "value": "BIEN"
+                            },
+                            "cs": {
+                                "id": "1d321ec1-b270-4a3f-abae-5ad696ea714c",
+                                "locale": "cs",
+                                "value": "OK"
+                            },
+                            "nl": {
+                                "id": "e162b701-0baf-484e-8d29-5eb3a39cffb5",
+                                "locale": "nl",
+                                "value": "OKÉ"
+                            },
+                            "pt": {
+                                "id": "71a64152-c62a-4528-8f82-e85cf0000344",
+                                "locale": "pt",
+                                "value": "OK"
+                            },
+                            "zh-CN": {
+                                "id": "5c3c786f-13d3-44e9-968e-d738e7ea47ab",
+                                "locale": "zh-CN",
+                                "value": "行"
+                            }
+                        },
+                        "categories": []
+                    }
+                ]
+            },
+            "3735692f-efe1-4ac3-b671-afdc9922b9b8": {
+                "id": "3735692f-efe1-4ac3-b671-afdc9922b9b8",
+                "name": "New Layer 4",
+                "theme": "neutral",
+                "position": "left",
+                "show_close_button": true,
+                "banner_api_id": "new-layer-4",
+                "elements": [
+                    {
+                        "id": "6b9bfbb8-7260-4af6-8a97-cf93af83a363",
+                        "order": 1,
+                        "button_action": "open_layer",
+                        "type": "ConsentLayerButtonElement",
+                        "target_consent_layer": "83648dc1-3f43-4d79-b704-26ee1f58d99c",
+                        "translations": {
+                            "en": {
+                                "id": "e6a38a8a-1436-4322-aee8-5d0b50cbdffc",
+                                "locale": "en",
+                                "value": "Button Element"
+                            },
+                            "zh-TW": {
+                                "id": "ac98e841-0f55-4bdf-ae84-b800ea862fa8",
+                                "locale": "zh-TW",
+                                "value": "按鈕元素"
+                            },
+                            "es": {
+                                "id": "863d5504-e0cc-47ff-9133-4e58e05ca4a3",
+                                "locale": "es",
+                                "value": "Elemento de botón"
+                            },
+                            "cs": {
+                                "id": "437eac37-5e40-4ea3-89fb-2ac281301506",
+                                "locale": "cs",
+                                "value": "Tlačítkový prvek"
+                            },
+                            "nl": {
+                                "id": "d79981ee-2aea-45d0-bb02-c7497765dcdd",
+                                "locale": "nl",
+                                "value": "Knoopelement"
+                            },
+                            "pt": {
+                                "id": "c3e39d19-e539-4f15-b6ca-95cbb3c91e75",
+                                "locale": "pt",
+                                "value": "Elemento Botão"
+                            },
+                            "zh-CN": {
+                                "id": "3ae92bbc-92f2-4446-b614-a552439edb44",
+                                "locale": "zh-CN",
+                                "value": "按钮元素"
+                            }
+                        },
+                        "categories": []
+                    },
+                    {
+                        "id": "2cf95c17-a753-4f81-96d8-a61bf29e4fc3",
+                        "order": 2,
+                        "type": "ConsentLayerLanguagePickerElement"
+                    }
+                ]
+            },
+            "4de8260b-d70c-4601-9232-6d9631e49622": {
+                "id": "4de8260b-d70c-4601-9232-6d9631e49622",
+                "name": "GPC Notice",
+                "theme": "neutral",
+                "position": "left",
+                "show_close_button": true,
+                "banner_api_id": "new-layer-2",
+                "elements": [
+                    {
+                        "id": "6ec1b959-2c1f-4ae7-8a9f-6f66073bf9fd",
+                        "order": 1,
+                        "type": "ConsentLayerLanguagePickerElement"
+                    },
+                    {
+                        "id": "6e30824c-734c-4810-bd9b-6e8cb706a10e",
+                        "order": 3,
+                        "type": "ConsentLayerBrowserSignalNoticeElement",
+                        "translations": {},
+                        "show_icon": true,
+                        "consent_layer_browser_signal_notice_config_id": "50130663078994741",
+                        "browser_signal_notice_translations": {
+                            "zh-TW": {
+                                "locale": "zh-TW",
+                                "value": "Your browser's opt-out signal is being honored and will override your choices.",
+                                "id": "50130663375998790"
+                            },
+                            "en": {
+                                "locale": "en",
+                                "value": "Your browser's opt-out signal is being honored and will override your choices.",
+                                "id": "50130663385566023"
+                            },
+                            "es": {
+                                "locale": "es",
+                                "value": "La señal de exclusión de su navegador está siendo respetada y anulará sus elecciones.",
+                                "id": "50130663398175560"
+                            },
+                            "it": {
+                                "locale": "it",
+                                "value": "Il segnale di opt-out del tuo browser viene rispettato e sostituirà le tue scelte.",
+                                "id": "50130663406891849"
+                            },
+                            "ja": {
+                                "locale": "ja",
+                                "value": "ブラウザのオプトアウトシグナルは受け付けられており、選択内容よりも優先されます。",
+                                "id": "50130663418426186"
+                            },
+                            "pl": {
+                                "locale": "pl",
+                                "value": "Sygnał rezygnacji przeglądarki jest honorowany i zastąpi Twoje wybory.",
+                                "id": "50130663427144523"
+                            },
+                            "hr": {
+                                "locale": "hr",
+                                "value": "Signal za isključivanje vašeg preglednika poštuje se i nadjačat će vaše izbore.",
+                                "id": "50130663440576332"
+                            },
+                            "lt": {
+                                "locale": "lt",
+                                "value": "Jūsų naršyklės atsisakymo signalas yra gerbiamas ir nepaisys jūsų pasirinkimų.",
+                                "id": "50130663451394893"
+                            },
+                            "de": {
+                                "locale": "de",
+                                "value": "Das Opt-Out-Signal Ihres Browsers wird berücksichtigt und hat Vorrang vor Ihren Einstellungen.",
+                                "id": "50130663461387086"
+                            },
+                            "pt": {
+                                "locale": "pt",
+                                "value": "O sinal de desativação do seu navegador está a ser honrado e substituirá as suas escolhas.",
+                                "id": "50130663474147151"
+                            },
+                            "zh-CN": {
+                                "locale": "zh-CN",
+                                "value": "Your browser's opt-out signal is being honored and will override your choices.",
+                                "id": "50130663481455440"
+                            },
+                            "cs": {
+                                "locale": "cs",
+                                "value": "Signál odhlášení vašeho prohlížeče je respektován a přepíše vaše volby.",
+                                "id": "50130663491467089"
+                            },
+                            "nl": {
+                                "locale": "nl",
+                                "value": "Het opt-out-signaal van uw browser wordt gehonoreerd en heeft voorrang op uw keuzes.",
+                                "id": "50130663505675090"
+                            }
+                        }
+                    }
+                ]
+            },
+            "83648dc1-3f43-4d79-b704-26ee1f58d99c": {
+                "id": "83648dc1-3f43-4d79-b704-26ee1f58d99c",
+                "name": "Categories Ler",
+                "theme": "neutral",
+                "position": "right",
+                "show_close_button": true,
+                "banner_api_id": "categories-layer",
+                "elements": [
+                    {
+                        "id": "7eaecf3f-0343-4ce9-80a7-4da986ac48c1",
+                        "order": 1,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-title",
+                        "translations": {
+                            "en": {
+                                "id": "c1576530-ad38-4f70-97ce-8acaca475da5",
+                                "locale": "en",
+                                "value": "Privacy Settings"
+                            },
+                            "zh-TW": {
+                                "id": "416bedae-3c9f-49a9-be0d-4e89e4a175d3",
+                                "locale": "zh-TW",
+                                "value": "隱私設定"
+                            },
+                            "es": {
+                                "id": "e1528880-4423-4416-8adb-4283502c9910",
+                                "locale": "es",
+                                "value": "Configuración de privacidad"
+                            },
+                            "cs": {
+                                "id": "146f7b12-23c8-4c21-a960-db3fccca60fe",
+                                "locale": "cs",
+                                "value": "Nastavení ochrany osobních údajů"
+                            },
+                            "nl": {
+                                "id": "1929c86d-1e2e-4423-88c2-7ef5e28da450",
+                                "locale": "nl",
+                                "value": "Privacy-instellingen"
+                            },
+                            "pt": {
+                                "id": "559e5fde-6f82-459d-9748-c4048ec32f64",
+                                "locale": "pt",
+                                "value": "Definições de Privacidade"
+                            },
+                            "zh-CN": {
+                                "id": "0473ca3b-8505-4787-af7f-67f002c33c8d",
+                                "locale": "zh-CN",
+                                "value": "隐私设置"
+                            }
+                        }
+                    },
+                    {
+                        "id": "fd579909-2c2d-448f-af08-bfd9936744de",
+                        "order": 2,
+                        "type": "ConsentLayerLanguagePickerElement"
+                    },
+                    {
+                        "id": "44099cce-ba4e-4cd1-a9a8-b7dce4977555",
+                        "order": 3,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-main-content-explanation",
+                        "translations": {
+                            "zh-TW": {
+                                "id": "a0e2af47-ea6d-435f-b971-5a51ee335db4",
+                                "locale": "zh-TW",
+                                "value": "這是彼得和馬特"
+                            },
+                            "es": {
+                                "id": "109f0b61-b9f6-46c2-bd21-8b08e4bd2fab",
+                                "locale": "es",
+                                "value": "¡Esto es solo para CPRA!"
+                            },
+                            "en": {
+                                "id": "b3ac7bf6-3ebd-4122-a64e-2e15c10ba62b",
+                                "locale": "en",
+                                "value": "this is Peter and Matt"
+                            },
+                            "cs": {
+                                "id": "d1028e9f-6eb9-4631-8961-0c8130b0a09f",
+                                "locale": "cs",
+                                "value": "Tohle je Taylor"
+                            },
+                            "nl": {
+                                "id": "c1480831-9cff-4cf8-a535-8763e4315fe7",
+                                "locale": "nl",
+                                "value": "dit is Taylor"
+                            },
+                            "pt": {
+                                "id": "4daa1a68-dcea-4b4e-ba2c-ba869a41d014",
+                                "locale": "pt",
+                                "value": "este é o Taylor"
+                            },
+                            "zh-CN": {
+                                "id": "fbff6986-946f-418c-aea5-31436819c272",
+                                "locale": "zh-CN",
+                                "value": "这是泰勒"
+                            }
+                        }
+                    },
+                    {
+                        "id": "dd05d5eb-6024-4ab0-bc3a-71e26a505339",
+                        "order": 4,
+                        "type": "ConsentLayerCategoryElement",
+                        "consent_layer_categories": [
+                            {
+                                "id": "c5b28ccf-155a-4a05-8d8d-af023fc380fc",
+                                "consent_category_id": "47db19e9-521d-4266-8ab9-bb749d9f5f24",
+                                "order": 1,
+                                "hidden": false,
+                                "primitive": "dg-category-essential",
+                                "always_on": true,
+                                "gtm_key": "dg-category-essential",
+                                "uuids": [
+                                    "2NSEpVrtthIFGOhiPfEeeR",
+                                    "4wLTf967dsYKgcPHKoqA7T",
+                                    "5NFNxhSsICC6BKGK0D2lEb"
+                                ],
+                                "cookie_patterns": [
+                                    "_check_cookie$",
+                                    "li$",
+                                    "lucasv\\.dg\\-dev\\.com$",
+                                    "datagrail_consent_locale_code",
+                                    "OptanonCookie$",
+                                    "foobar$",
+                                    "test",
+                                    "dgdomain$",
+                                    "asdfasdf$",
+                                    "dg\\-category\\-[^\\W_]+",
+                                    "datagrail"
+                                ],
+                                "translations": {
+                                    "en": {
+                                        "id": "15e76088-afc3-4d30-a5be-d9a6dfa68429",
+                                        "locale": "en",
+                                        "name": "Essential",
+                                        "description": "These cookies are necessary for the website to function and cannot be switched off in our systems. They are usually only set in response to actions made by you which amount to a request for services, such as setting your privacy preferences, logging in or filling in forms. You can set your browser to block or alert you about these cookies, but some parts of the site will not then work. These cookies do not store any personally identifiable information. Some testing of things right here to make sure it saves",
+                                        "essential_label": "Always On"
+                                    },
+                                    "hr": {
+                                        "id": "c272d379-135f-4c86-b6bd-d86e91ae4d1b",
+                                        "locale": "hr",
+                                        "name": "Bitno",
+                                        "description": "Ovi kolačići su neophodni za funkcioniranje web stranice i ne mogu se isključiti u našim sustavima. Obično se postavljaju samo kao odgovor na radnje koje ste izvršili, a koje predstavljaju zahtjev za uslugama, poput postavljanja postavki privatnosti, prijave ili popunjavanja obrazaca. Možete postaviti svoj preglednik da vas blokira ili upozorava na ove kolačiće, ali neki dijelovi web stranice tada neće raditi. Ovi kolačići ne pohranjuju nikakve osobne podatke. Neko testiranje stvari ovdje kako biste bili sigurni da se štedi",
+                                        "essential_label": "Uvijek uključen"
+                                    },
+                                    "es": {
+                                        "id": "a536274e-04df-42ab-8738-092f8b4bc8e3",
+                                        "locale": "es",
+                                        "name": "Imprescindible",
+                                        "description": "Estas cookies son necesarias para que el sitio web funcione y no se pueden desactivar en nuestros sistemas. Por lo general, solo se configuran en respuesta a las acciones realizadas por usted que equivalen a una solicitud de servicios, como configurar sus preferencias de privacidad, iniciar sesión o completar formularios. Puedes configurar tu navegador para que bloquee estas cookies o te avise sobre ellas, pero algunas partes del sitio no funcionarán entonces. Estas cookies no almacenan ninguna información de identificación personal. Algunas cosas están probándose aquí para asegurarnos de que se guarda",
+                                        "essential_label": "Siempre encendida"
+                                    },
+                                    "cs": {
+                                        "id": "4a674fe1-0659-4ab1-9861-f44a6c17dc85",
+                                        "locale": "cs",
+                                        "name": "Zásadní",
+                                        "description": "Tyto soubory cookie jsou nezbytné pro fungování webových stránek a nelze je v našich systémech vypnout. Obvykle jsou nastaveny pouze v reakci na vaše akce, které se rovnají požadavku na služby, jako je nastavení vašich předvoleb ochrany osobních údajů, přihlášení nebo vyplňování formulářů. Svůj prohlížeč můžete nastavit tak, aby vás blokoval nebo upozornil na tyto soubory cookie, ale některé části webu pak nebudou fungovat. Tyto soubory cookie neukládají žádné osobně identifikovatelné informace. Nějaké testování věcí právě zde, abyste se ujistili, že to uloží",
+                                        "essential_label": "Vždy zapnutý"
+                                    },
+                                    "nl": {
+                                        "id": "753a8bfe-a556-41e6-a93b-ce31dde8b7c2",
+                                        "locale": "nl",
+                                        "name": "Essentieel",
+                                        "description": "Deze cookies zijn noodzakelijk om de website te laten functioneren en kunnen niet worden uitgeschakeld in onze systemen. Ze worden meestal alleen ingesteld naar aanleiding van acties die door u zijn ondernomen en die neerkomen op een verzoek om diensten, zoals het instellen van uw privacyvoorkeuren, het inloggen of het invullen van formulieren. U kunt uw browser zo instellen dat deze cookies worden geblokkeerd of dat u hierover wordt gewaarschuwd, maar sommige delen van de site zullen dan niet werken. Deze cookies slaan geen persoonlijk identificeerbare informatie op. Hier wat dingen testen om er zeker van te zijn dat het bespaart",
+                                        "essential_label": "Altijd aan"
+                                    },
+                                    "pt": {
+                                        "id": "e2bb542a-a22e-4aca-b05f-24bea316a390",
+                                        "locale": "pt",
+                                        "name": "Essencial",
+                                        "description": "Estes cookies são necessários para o funcionamento do website e não podem ser desligados nos nossos sistemas. Normalmente são definidos apenas em resposta a ações realizadas por si que equivalem a um pedido de serviços, tais como definir as suas preferências de privacidade, iniciar sessão ou preencher formulários. Pode configurar o seu navegador para bloquear ou alertá-lo sobre esses cookies, mas algumas partes do site não funcionarão então. Estes cookies não armazenam nenhuma informação pessoalmente identificável. Alguns testes de coisas aqui para garantir que salvam",
+                                        "essential_label": "Sempre ligado"
+                                    },
+                                    "zh-CN": {
+                                        "id": "1106b1fc-db26-4f9e-aad1-c6861ee210e5",
+                                        "locale": "zh-CN",
+                                        "name": "必备",
+                                        "description": "这些 Cookie 是网站正常运行所必需的，无法在我们的系统中关闭。它们通常仅针对您所做的相当于服务请求的操作而设置，例如设置您的隐私偏好、登录或填写表格。您可以将浏览器设置为屏蔽或提醒您有关这些 Cookie，但网站的某些部分将无法运行。这些 Cookie 不存储任何个人身份信息。在这里对东西进行一些测试以确保可以保存",
+                                        "essential_label": "永远在线"
+                                    },
+                                    "zh-TW": {
+                                        "id": "e2cf33c6-9043-468a-aef1-615d26a457c5",
+                                        "locale": "zh-TW",
+                                        "name": "必備",
+                                        "description": "這些 Cookie 是網站的運作必要，並且無法在我們的系統中關閉。它們通常只是為了回應您所做的操作而設置，這些操作即屬於服務請求，例如設定您的隱私偏好設定、登錄或填寫表單。您可以將瀏覽器設置為阻止或提醒您有關這些 cookie，但網站的某些部分將無法運作。這些 Cookie 不會儲存任何個人身份的資訊。在這裡進行一些測試，以確保它可以保存",
+                                        "essential_label": "永遠開啟"
+                                    }
+                                },
+                                "show_tracking_details_link": false
+                            },
+                            {
+                                "id": "5d2dea8e-f457-4cf4-b6b9-12b0079bccb9",
+                                "consent_category_id": "1d141f86-06b4-4696-816d-46d1f49d78a5",
+                                "order": 2,
+                                "hidden": false,
+                                "primitive": "dg-category-essential",
+                                "always_on": false,
+                                "gtm_key": "dg-category-mystery-category",
+                                "uuids": [],
+                                "cookie_patterns": [
+                                    "_fbpixie$",
+                                    "asdasda$",
+                                    "_fbpi$",
+                                    "testytest"
+                                ],
+                                "translations": {
+                                    "en": {
+                                        "id": "c86a88f3-1b86-4451-99dc-74a84751d9ad",
+                                        "locale": "en",
+                                        "name": "Mystery Category",
+                                        "description": "meow\nSome testing of things right here to make sure it saves",
+                                        "essential_label": "Always On"
+                                    },
+                                    "es": {
+                                        "id": "e04644da-802c-4192-91d0-90f1c7fc1fe0",
+                                        "locale": "es",
+                                        "name": "Categoría de misterio",
+                                        "description": "maullido\nAlgunas cosas están probándose aquí mismo para asegurarnos de que se guarda",
+                                        "essential_label": null
+                                    },
+                                    "cs": {
+                                        "id": "66a9922b-ef38-445a-abc9-8e50e32ca267",
+                                        "locale": "cs",
+                                        "name": "Tajemná kategorie",
+                                        "description": "mňoukat\nNějaké testování věcí právě zde, abyste se ujistili, že to uloží",
+                                        "essential_label": null
+                                    },
+                                    "nl": {
+                                        "id": "5fb3c9b9-92ad-4592-aade-57081e6046d6",
+                                        "locale": "nl",
+                                        "name": "Categorie Mysterie",
+                                        "description": "miauwen\nHier wat dingen testen om er zeker van te zijn dat het bespaart",
+                                        "essential_label": null
+                                    },
+                                    "pt": {
+                                        "id": "8c33ad3e-434b-4ab9-8068-94e41ec74c0a",
+                                        "locale": "pt",
+                                        "name": "Categoria Mistério",
+                                        "description": "miar\nAlguns testes de coisas aqui para garantir que salvam",
+                                        "essential_label": null
+                                    },
+                                    "zh-CN": {
+                                        "id": "6dc22d3f-e203-4616-99e8-2c12f6fd9474",
+                                        "locale": "zh-CN",
+                                        "name": "神秘类别",
+                                        "description": "喵\n在这里对东西进行一些测试以确保可以保存",
+                                        "essential_label": null
+                                    },
+                                    "zh-TW": {
+                                        "id": "eec31ceb-8ab1-4060-9285-ea5154b9f69d",
+                                        "locale": "zh-TW",
+                                        "name": "神秘類別",
+                                        "description": "\n在這裡進行一些測試，以確保它可以保存",
+                                        "essential_label": null
+                                    }
+                                },
+                                "show_tracking_details_link": false
+                            },
+                            {
+                                "id": "d9ff2e4d-701e-4826-bf74-5161f6495069",
+                                "consent_category_id": "6615641d-2a5e-4933-86be-482e2a1fc76e",
+                                "order": 5,
+                                "hidden": false,
+                                "primitive": "dg-category-functional",
+                                "always_on": false,
+                                "gtm_key": "dg-category-functional",
+                                "uuids": [],
+                                "cookie_patterns": [
+                                    "_hjTLDTest$",
+                                    "_hjSessionUser_",
+                                    "OptanonConsent$",
+                                    "[0-9a-fA-F]+_drift",
+                                    "_hjSession_"
+                                ],
+                                "translations": {
+                                    "en": {
+                                        "id": "23213789-6942-4274-b867-554504e9edc0",
+                                        "locale": "en",
+                                        "name": "Functional",
+                                        "description": "These cookies enable the website to provide enhanced functionality and personalization. They may be set by us or by third-party providers whose services we have added to our pages. If you do not allow these cookies, some or all of these services may not function properly. Some testing of things right here to make sure it saves",
+                                        "essential_label": null
+                                    },
+                                    "es": {
+                                        "id": "54e858dd-ca63-483e-b323-6ea35f687f4a",
+                                        "locale": "es",
+                                        "name": "Funcional",
+                                        "description": "Estas cookies permiten que el sitio web brinde una funcionalidad y personalización mejoradas. Pueden ser configuradas por nosotros o por proveedores externos cuyos servicios hayamos agregado a nuestras páginas. Si no permite estas cookies, es posible que algunos o todos estos servicios no funcionen correctamente. Aquí estamos haciendo algunas pruebas para asegurarnos de que se guarda",
+                                        "essential_label": null
+                                    },
+                                    "cs": {
+                                        "id": "f20f17d8-d624-4edb-bf87-cc73dbef69dc",
+                                        "locale": "cs",
+                                        "name": "Funkční",
+                                        "description": "Tyto soubory cookie umožňují webové stránce poskytovat vylepšenou funkčnost a personalizaci. Mohou být nastaveny námi nebo poskytovateli třetích stran, jejichž služby jsme přidali na naše stránky. Pokud tyto soubory cookie nepovolíte, některé nebo všechny tyto služby nemusí správně fungovat. Nějaké testování věcí právě zde, abyste se ujistili, že to uloží",
+                                        "essential_label": null
+                                    },
+                                    "nl": {
+                                        "id": "adb18a14-c8fe-468f-8117-a664c36af5b2",
+                                        "locale": "nl",
+                                        "name": "Functioneel",
+                                        "description": "Met deze cookies kan de website verbeterde functionaliteit en personalisatie bieden. Ze kunnen door ons worden ingesteld of door externe leveranciers wiens diensten we aan onze pagina's hebben toegevoegd. Als u deze cookies niet toestaat, is het mogelijk dat sommige of al deze diensten niet goed functioneren. Hier wat dingen testen om er zeker van te zijn dat het bespaart",
+                                        "essential_label": null
+                                    },
+                                    "pt": {
+                                        "id": "dca9a473-5935-4376-b012-3a1cd3ce16e6",
+                                        "locale": "pt",
+                                        "name": "Funcional",
+                                        "description": "Estes cookies permitem que o website forneça funcionalidade e personalização melhoradas. Podem ser definidos por nós ou por terceiros cujos serviços adicionamos às nossas páginas. Se não permitir esses cookies, alguns ou todos esses serviços podem não funcionar corretamente. Alguns testes de coisas aqui para garantir que salva",
+                                        "essential_label": null
+                                    },
+                                    "zh-CN": {
+                                        "id": "5f8911f5-bd2a-448f-b688-f2da4356835d",
+                                        "locale": "zh-CN",
+                                        "name": "功能性",
+                                        "description": "这些 Cookie 使网站能够提供增强的功能和个性化设置。它们可能由我们设置，也可能由我们在页面中添加服务的第三方提供商设置。如果您不允许这些 Cookie，则部分或全部服务可能无法正常运行。在这里对东西进行一些测试以确保可以保存",
+                                        "essential_label": null
+                                    },
+                                    "zh-TW": {
+                                        "id": "b4eb1c9a-89ad-415b-92b1-c7e7ef3f9537",
+                                        "locale": "zh-TW",
+                                        "name": "功能性",
+                                        "description": "這些 Cookie 使網站能夠提供增強功能和個性化。它們可能由我們或由我們已將服務添加到我們的頁面的第三方提供商設置。如果您不允許這些 Cookie，部分或全部這些服務可能無法正常運作。在這裡進行一些測試，以確保它可以保存",
+                                        "essential_label": null
+                                    }
+                                },
+                                "show_tracking_details_link": false
+                            },
+                            {
+                                "id": "d92ba51d-2f9d-4cae-bb82-ea85d109f860",
+                                "consent_category_id": "93878dd8-87f3-47d4-9af2-e70fae62cc09",
+                                "order": 4,
+                                "hidden": false,
+                                "primitive": "dg-category-performance",
+                                "always_on": false,
+                                "gtm_key": "dg-category-performance",
+                                "uuids": [
+                                    "5EDNmhBPLmJgtLIpAKsGBG"
+                                ],
+                                "cookie_patterns": [
+                                    "_google_\\d+",
+                                    "_lr_[^\\W_]+",
+                                    "_dd_[^\\W_]+",
+                                    "ajs_anonymous_id$",
+                                    "_gid$",
+                                    "gtm\\-msr\\.appspot\\.com$",
+                                    "_ga_",
+                                    "_gat",
+                                    "adroll"
+                                ],
+                                "translations": {
+                                    "en": {
+                                        "id": "fca78c64-f069-415b-a7af-8e865e5d0c33",
+                                        "locale": "en",
+                                        "name": "Performance",
+                                        "description": "These cookies allow us to count visits and traffic sources so we can measure and improve the performance of our site. They help us to know which pages are the most and least popular and see how visitors move around the site. All information these cookies collect is aggregated and therefore anonymous. If you do not allow these cookies we will not know when you have visited our site, and will not be able to monitor its performance. Some testing of things right here to make sure it saves",
+                                        "essential_label": null
+                                    },
+                                    "es": {
+                                        "id": "fd7a910e-a570-49f6-b97a-e1ade6ad82ab",
+                                        "locale": "es",
+                                        "name": "Rendimiento",
+                                        "description": "Estas cookies nos permiten contar las visitas y las fuentes de tráfico para poder medir y mejorar el rendimiento de nuestro sitio. Nos ayudan a saber qué páginas son las más y las menos populares y a ver cómo se mueven los visitantes por el sitio. Toda la información que recopilan estas cookies es agregada y, por lo tanto, anónima. Si no permite estas cookies, no sabremos cuándo ha visitado nuestro sitio y no podremos supervisar su rendimiento. Aquí están algunas pruebas para asegurarnos de que se guarda",
+                                        "essential_label": null
+                                    },
+                                    "cs": {
+                                        "id": "63b48186-8956-4d7c-bae7-57236da053d5",
+                                        "locale": "cs",
+                                        "name": "Výkon",
+                                        "description": "Tyto soubory cookie nám umožňují počítat návštěvy a zdroje provozu, abychom mohli měřit a zlepšovat výkon našich stránek. Pomáhají nám zjistit, které stránky jsou nejoblíbenější a nejméně populární, a zjistit, jak se návštěvníci pohybují po webu. Veškeré informace, které tyto soubory cookie shromažďují, jsou agregované, a proto anonymní. Pokud tyto soubory cookie nepovolíte, nebudeme vědět, kdy jste navštívili naše stránky, a nebudeme moci sledovat jejich výkon. Nějaké testování věcí právě zde, abyste se ujistili, že to uloží",
+                                        "essential_label": null
+                                    },
+                                    "nl": {
+                                        "id": "8a86b8d6-e2fe-43e4-8b4e-e3422ec7f326",
+                                        "locale": "nl",
+                                        "name": "Prestatie",
+                                        "description": "Met deze cookies kunnen we bezoeken en verkeersbronnen tellen, zodat we de prestaties van onze site kunnen meten en verbeteren. Ze helpen ons te weten welke pagina's het meest en het minst populair zijn en om te zien hoe bezoekers zich op de site verplaatsen. Alle informatie die deze cookies verzamelen is geaggregeerd en dus anoniem. Als u deze cookies niet toestaat, weten we niet wanneer u onze website hebt bezocht en kunnen we de prestaties ervan niet controleren. Hier wat dingen testen om er zeker van te zijn dat het bespaart",
+                                        "essential_label": null
+                                    },
+                                    "pt": {
+                                        "id": "e7babd54-569f-47f7-9465-272e8e03e687",
+                                        "locale": "pt",
+                                        "name": "Desempenho",
+                                        "description": "Estes cookies permitem-nos contar as visitas e as fontes de tráfego para que possamos medir e melhorar o desempenho do nosso site. Ajudam-nos a saber quais as páginas mais e menos populares e a ver como os visitantes se deslocam pelo site. Toda a informação que estes cookies recolhem é agregada e, portanto, anónima. Se não permitir estes cookies não saberemos quando visitou o nosso site, e não poderemos monitorizar o seu desempenho. Alguns testes de coisas aqui para garantir que salva",
+                                        "essential_label": null
+                                    },
+                                    "zh-CN": {
+                                        "id": "b6ea874b-b62b-49ee-9541-72f892ba8660",
+                                        "locale": "zh-CN",
+                                        "name": "性能",
+                                        "description": "这些 Cookie 使我们能够计算访问量和流量来源，以便我们可以衡量和改善我们网站的性能。它们帮助我们了解哪些页面最受欢迎，哪些页面最不受欢迎，并了解访问者如何在网站上移动。这些 Cookie 收集的所有信息都是汇总的，因此是匿名的。如果您不允许这些 Cookie，我们将不知道您何时访问了我们的网站，也无法监控其性能。在这里对东西进行一些测试以确保可以保存",
+                                        "essential_label": null
+                                    },
+                                    "zh-TW": {
+                                        "id": "4b41ea8c-e3c2-4ba7-b344-0c9408d54452",
+                                        "locale": "zh-TW",
+                                        "name": "性能",
+                                        "description": "這些 cookie 允許我們計算訪問次數和流量來源，以便我們可以衡量和改善我們網站的性能。它們可以幫助我們了解哪些頁面最受歡迎和最不受歡迎，並查看訪客如何在網站上移動。這些 cookie 收集的所有信息都是彙總的，因此是匿名的。如果您不允許這些 cookie，我們將不知道您何時訪問我們的網站，並無法監控其性能。在這裡進行一些測試，以確保它可以保存",
+                                        "essential_label": null
+                                    }
+                                },
+                                "show_tracking_details_link": false
+                            },
+                            {
+                                "id": "2a91b2fd-fc05-4af9-a3cc-f10a749b1eb2",
+                                "consent_category_id": "5d495446-7d7b-4145-9e5a-979d57e4a6db",
+                                "order": 3,
+                                "hidden": false,
+                                "primitive": "dg-category-marketing",
+                                "always_on": false,
+                                "gtm_key": "dg-category-marketing",
+                                "uuids": [
+                                    "2WuXIFs0sBEcnbNfYFw4Oh",
+                                    "4wLTf967dsYKgcPHKoqA7T",
+                                    "5UcrdiyWWFri0E8EqP4CHo",
+                                    "6t2lKZ3DVLXRVdbvccL7ke",
+                                    "7Sc2pt7xpxkWmPOVk6ba2z",
+                                    "7fa1ssEAphrsz1HfuKBVxK"
+                                ],
+                                "cookie_patterns": [
+                                    "\\d+_fb_tracking",
+                                    "_pin_unauth$",
+                                    "sa\\-user\\-id$",
+                                    "_fbpixies$",
+                                    "_dd_s",
+                                    "_derived_epik$",
+                                    "_fbp$",
+                                    "back\\-slash",
+                                    "__TAG_ASSISTANT$",
+                                    "foo$",
+                                    "_ga$",
+                                    "\\d+_check_cookie$",
+                                    "sync[^\\W_]+_\\d+",
+                                    "[^\\W_]+\\.lol",
+                                    "_gcl"
+                                ],
+                                "translations": {
+                                    "en": {
+                                        "id": "b780a94e-0056-4790-ab8f-91aba1375aa8",
+                                        "locale": "en",
+                                        "name": "Marketing",
+                                        "description": "These cookies may be set through our site by our advertising partners. Those companies may use them to build a profile of your interests and show you relevant adverts on other sites. They do not store directly personal information but are based on uniquely identifying your browser and internet device. If you do not allow these cookies, you will experience less targeted advertising. Some testing of things right here to make sure it saves",
+                                        "essential_label": null
+                                    },
+                                    "es": {
+                                        "id": "5b3404a5-6b6b-4c71-8ec5-9ed2be52cfb9",
+                                        "locale": "es",
+                                        "name": "Mercadeo",
+                                        "description": "Nuestros socios publicitarios pueden establecer estas cookies a través de nuestro sitio. Estas empresas pueden utilizarlas para crear un perfil de sus intereses y mostrarle anuncios relevantes en otros sitios. No almacenan información personal directa, sino que se basan en la identificación única de su navegador y dispositivo de Internet. Si no permite estas cookies, recibirá una publicidad menos segmentada. Aquí estamos haciendo algunas pruebas para asegurarnos de que se guarda",
+                                        "essential_label": null
+                                    },
+                                    "cs": {
+                                        "id": "97dbc7e8-4603-468f-9b60-726faad4c687",
+                                        "locale": "cs",
+                                        "name": "Marketingové",
+                                        "description": "Tyto soubory cookie mohou být nastaveny prostřednictvím našich stránek našimi reklamními partnery. Tyto společnosti je mohou použít k vytvoření profilu vašich zájmů a zobrazování relevantních reklam na jiných webech. Neukládají přímo osobní údaje, ale jsou založeny na jedinečné identifikaci vašeho prohlížeče a internetového zařízení. Pokud tyto soubory cookie nepovolíte, zaznamenáte méně cílenou reklamu. Nějaké testování věcí právě zde, abyste se ujistili, že to uloží",
+                                        "essential_label": null
+                                    },
+                                    "nl": {
+                                        "id": "69a5d387-34fc-4509-b6cc-ccec21f8440b",
+                                        "locale": "nl",
+                                        "name": "Marketing",
+                                        "description": "Deze cookies kunnen via onze website worden ingesteld door onze advertentiepartners. Die bedrijven kunnen ze gebruiken om een profiel van uw interesses op te bouwen en u relevante advertenties te tonen op andere sites. Ze slaan niet rechtstreeks persoonlijke informatie op, maar zijn gebaseerd op een unieke identificatie van uw browser en internetapparaat. Als je deze cookies niet toestaat, krijg je minder gerichte advertenties te zien. Hier wat dingen testen om er zeker van te zijn dat het bespaart",
+                                        "essential_label": null
+                                    },
+                                    "pt": {
+                                        "id": "51901da8-81a2-413e-8a12-d2527fe06145",
+                                        "locale": "pt",
+                                        "name": "Comercialização",
+                                        "description": "Estes cookies podem ser definidos através do nosso site pelos nossos parceiros de publicidade. Essas empresas podem usá-los para construir um perfil dos seus interesses e mostrar-lhe anúncios relevantes em outros sites. Eles não armazenam diretamente informações pessoais, mas baseiam-se na identificação exclusiva do seu navegador e dispositivo de internet. Se não permitir estes cookies, irá experimentar menos publicidade direcionada. Alguns testes de coisas aqui para garantir que salvam",
+                                        "essential_label": null
+                                    },
+                                    "zh-CN": {
+                                        "id": "7f792864-4d69-4942-95af-d8568f0c47ea",
+                                        "locale": "zh-CN",
+                                        "name": "市场营销",
+                                        "description": "这些 Cookie 可能由我们的广告合作伙伴通过我们的网站设置。这些公司可能会使用它们来建立您的兴趣简介，并在其他网站上向您展示相关的广告。它们不直接存储个人信息，而是基于对您的浏览器和互联网设备的唯一标识。如果您不允许这些 Cookie，您将体验到的定向广告会降低。在这里对东西进行一些测试以确保可以保存",
+                                        "essential_label": null
+                                    },
+                                    "zh-TW": {
+                                        "id": "14c75998-58aa-4d90-b119-9c28d9894a03",
+                                        "locale": "zh-TW",
+                                        "name": "市場行銷",
+                                        "description": "這些 cookie 可能由我們的廣告合作夥伴通過我們的網站設置。這些公司可能會使用它們來建立您興趣的個人資料，並在其他網站上向您展示相關廣告。它們不會直接存儲個人信息，而是基於唯一識別您的瀏覽器和互聯網設備。如果您不允許這些 Cookie，您將會體驗更少的針對性廣告。在這裡進行一些測試，以確保它可以保存",
+                                        "essential_label": null
+                                    }
+                                },
+                                "show_tracking_details_link": false
+                            }
+                        ],
+                        "show_tracking_details_link": false,
+                        "consent_layer_categories_config_id": "50130659723106074",
+                        "tracking_details_link_translations": {
+                            "en": {
+                                "locale": "en",
+                                "value": "View Tracking Details",
+                                "id": "50130660016664363"
+                            },
+                            "fr": {
+                                "locale": "fr",
+                                "value": "Afficher les informations de suivi",
+                                "id": "50130660033593132"
+                            },
+                            "ro": {
+                                "locale": "ro",
+                                "value": "Vizualizați detaliile de urmărire",
+                                "id": "50130660050194221"
+                            },
+                            "es-MX": {
+                                "locale": "es-MX",
+                                "value": "Ver detalles de seguimiento",
+                                "id": "50130660082757422"
+                            },
+                            "es": {
+                                "locale": "es",
+                                "value": "Ver detalles de seguimiento",
+                                "id": "50130660097399599"
+                            },
+                            "cs": {
+                                "locale": "cs",
+                                "value": "Zobrazit podrobnosti o sledování",
+                                "id": "50130660110157616"
+                            },
+                            "nl": {
+                                "locale": "nl",
+                                "value": "Trackinggegevens bekijken",
+                                "id": "50130660127316785"
+                            },
+                            "pt": {
+                                "locale": "pt",
+                                "value": "Ver Detalhes de Rastreamento",
+                                "id": "50130660143928114"
+                            },
+                            "zh-CN": {
+                                "locale": "zh-CN",
+                                "value": "查看追踪详情",
+                                "id": "50130660158644019"
+                            },
+                            "zh-TW": {
+                                "locale": "zh-TW",
+                                "value": "檢視追蹤詳細資訊",
+                                "id": "50130660171322164"
+                            }
+                        }
+                    },
+                    {
+                        "id": "8e00adbb-615c-4719-bb12-70be4094527b",
+                        "order": 5,
+                        "button_action": "custom",
+                        "type": "ConsentLayerButtonElement",
+                        "target_consent_layer": null,
+                        "translations": {
+                            "zh-TW": {
+                                "id": "6aaa295c-8a2f-4654-a3e3-6e46c45658a7",
+                                "locale": "zh-TW",
+                                "value": "接受測試"
+                            },
+                            "es": {
+                                "id": "b1dcb08f-7e88-4aa3-9fc3-b1c072dae6d8",
+                                "locale": "es",
+                                "value": "Aceptar 🤪🥸 TEST"
+                            },
+                            "en": {
+                                "id": "49f3518b-e429-46d6-a77c-a232a8b77c6c",
+                                "locale": "en",
+                                "value": "Accept TEST"
+                            },
+                            "cs": {
+                                "id": "92993321-e2d9-452d-aa63-e09c1d13abc2",
+                                "locale": "cs",
+                                "value": "Přijmout TEST"
+                            },
+                            "nl": {
+                                "id": "ad30b0dc-4c0f-4853-9b49-4e1c59a4faac",
+                                "locale": "nl",
+                                "value": "TEST accepteren"
+                            },
+                            "pt": {
+                                "id": "4bfd8291-a8cc-439d-b069-8a046b03408b",
+                                "locale": "pt",
+                                "value": "Aceitar TESTE"
+                            },
+                            "zh-CN": {
+                                "id": "275f9fc7-6eb4-49bd-9ac5-f62453bd3e20",
+                                "locale": "zh-CN",
+                                "value": "接受测试"
+                            }
+                        },
+                        "categories": []
+                    },
+                    {
+                        "id": "e3a61e89-a78a-4a63-bd66-8622de45e5a2",
+                        "order": 6,
+                        "type": "ConsentLayerLinkElement",
+                        "links": [
+                            {
+                                "id": "b50e3bde-bf93-46f5-89a0-083b0b8ee031",
+                                "order": 1,
+                                "translations": {
+                                    "en": {
+                                        "id": "e75a1466-e5ca-43d1-b0da-31ad00f25595",
+                                        "locale": "en",
+                                        "text": "Link",
+                                        "url": "Replace with a URL"
+                                    },
+                                    "es": {
+                                        "id": "51377617-32c6-46d1-bb83-2a09967e4d0e",
+                                        "locale": "es",
+                                        "text": "Enlace",
+                                        "url": "Replace with a URL"
+                                    },
+                                    "cs": {
+                                        "id": "8b9ed100-505c-4598-adac-a0f01bc15a10",
+                                        "locale": "cs",
+                                        "text": "Odkaz",
+                                        "url": "Replace with a URL"
+                                    },
+                                    "nl": {
+                                        "id": "d1b40db2-e1d6-48dc-9bc0-858a17079590",
+                                        "locale": "nl",
+                                        "text": "Link",
+                                        "url": "Replace with a URL"
+                                    },
+                                    "pt": {
+                                        "id": "04369dd0-f5df-4d7e-bedc-74f8643772fe",
+                                        "locale": "pt",
+                                        "text": "Ligação",
+                                        "url": "Replace with a URL"
+                                    },
+                                    "zh-CN": {
+                                        "id": "128806d0-271a-4be0-b1f7-3f13d40c6ea3",
+                                        "locale": "zh-CN",
+                                        "text": "链接",
+                                        "url": "Replace with a URL"
+                                    },
+                                    "zh-TW": {
+                                        "id": "c9ff269a-47b9-426f-8c24-822cc439dcb9",
+                                        "locale": "zh-TW",
+                                        "text": "連結",
+                                        "url": "Replace with a URL"
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "id": "05642aa8-f24b-4c42-bd8a-53a9b840abcd",
+                        "order": 7,
+                        "button_action": "noop",
+                        "type": "ConsentLayerButtonElement",
+                        "target_consent_layer": null,
+                        "translations": {
+                            "en": {
+                                "id": "798e08fe-2277-4aff-84d5-e0290d534019",
+                                "locale": "en",
+                                "value": "BIG Button Element"
+                            },
+                            "zh-TW": {
+                                "id": "d09147ed-7644-431d-a08f-a2a3351e01df",
+                                "locale": "zh-TW",
+                                "value": "大按鈕元素"
+                            },
+                            "es": {
+                                "id": "954a1a03-f9e3-4bd2-b38b-2346f213f8d8",
+                                "locale": "es",
+                                "value": "Elemento de botón"
+                            },
+                            "cs": {
+                                "id": "b16c454f-a7d4-42ec-a2df-8cd1476888ce",
+                                "locale": "cs",
+                                "value": "Tlačítkový prvek"
+                            },
+                            "nl": {
+                                "id": "6da93053-33eb-411b-ab6d-fdd5d309f580",
+                                "locale": "nl",
+                                "value": "Knoopelement"
+                            },
+                            "pt": {
+                                "id": "1b22f1ec-8064-415b-8eb6-9c01837bdfca",
+                                "locale": "pt",
+                                "value": "Elemento Botão"
+                            },
+                            "zh-CN": {
+                                "id": "6c473d04-a247-4842-988f-b11d324c628a",
+                                "locale": "zh-CN",
+                                "value": "按钮元素"
+                            }
+                        },
+                        "categories": []
+                    },
+                    {
+                        "id": "14802eba-c880-44b1-b5c3-d186ad691cf5",
+                        "order": 8,
+                        "type": "ConsentLayerTextElement",
+                        "style": null,
+                        "translations": {
+                            "en": {
+                                "id": "4c0ec2e5-ab55-48f3-88de-2685740b0313",
+                                "locale": "en",
+                                "value": "Text Element"
+                            },
+                            "zh-TW": {
+                                "id": "350be94e-7597-4ee8-b152-0143b11858a8",
+                                "locale": "zh-TW",
+                                "value": "文字元素"
+                            },
+                            "es": {
+                                "id": "0e76cf61-111e-4341-b4a1-ffa8fa921e17",
+                                "locale": "es",
+                                "value": "Elemento de texto"
+                            },
+                            "cs": {
+                                "id": "5219358d-d5f6-4294-99ed-2c42ffc7cbf8",
+                                "locale": "cs",
+                                "value": "Textový prvek"
+                            },
+                            "nl": {
+                                "id": "097b4500-b83c-4137-b35f-8d021c1a8c23",
+                                "locale": "nl",
+                                "value": "Tekstelement"
+                            },
+                            "pt": {
+                                "id": "f8af57b1-e544-402f-9119-715fb7e8af79",
+                                "locale": "pt",
+                                "value": "Elemento Texto"
+                            },
+                            "zh-CN": {
+                                "id": "0b4a9661-6b4f-428a-a95b-536453da1982",
+                                "locale": "zh-CN",
+                                "value": "文本元素"
+                            }
+                        }
+                    },
+                    {
+                        "id": "e2113262-d348-4ec4-b2c0-10c4d44d5bd6",
+                        "order": 9,
+                        "type": "ConsentLayerTextElement",
+                        "style": null,
+                        "translations": {
+                            "en": {
+                                "id": "2e3bc9d2-a1d3-439f-a6c5-ecdd585c86d6",
+                                "locale": "en",
+                                "value": "Text Element"
+                            },
+                            "zh-TW": {
+                                "id": "5af8a47d-b901-4fb4-bce7-2041b6c75fb1",
+                                "locale": "zh-TW",
+                                "value": "文字元素"
+                            },
+                            "es": {
+                                "id": "c049e650-ac62-45ae-82d9-7abb2b1b482b",
+                                "locale": "es",
+                                "value": "Elemento de texto"
+                            },
+                            "cs": {
+                                "id": "92824618-41d2-411b-8426-870506baf52c",
+                                "locale": "cs",
+                                "value": "Textový prvek"
+                            },
+                            "nl": {
+                                "id": "ccc5f5e4-d815-4d52-a986-acc2724b9222",
+                                "locale": "nl",
+                                "value": "Tekstelement"
+                            },
+                            "pt": {
+                                "id": "407cc894-e689-4e8b-b6db-82ec7be136f2",
+                                "locale": "pt",
+                                "value": "Elemento Texto"
+                            },
+                            "zh-CN": {
+                                "id": "93b4a5f6-f426-4a45-a546-a19695e495b6",
+                                "locale": "zh-CN",
+                                "value": "文本元素"
+                            }
+                        }
+                    },
+                    {
+                        "id": "d66f649a-ebfd-41b4-aab3-0632fc430a1f",
+                        "order": 10,
+                        "button_action": "accept_all",
+                        "type": "ConsentLayerButtonElement",
+                        "target_consent_layer": null,
+                        "translations": {
+                            "en": {
+                                "id": "cd53eec1-2901-41c7-acb0-640e0d0e27f9",
+                                "locale": "en",
+                                "value": "Button Element"
+                            },
+                            "zh-TW": {
+                                "id": "c7eca72c-09f2-41b2-9b9a-730e4b22064e",
+                                "locale": "zh-TW",
+                                "value": "按鈕元素"
+                            }
+                        },
+                        "categories": []
+                    }
+                ]
+            },
+            "cf762a82-5ae9-47de-9121-892a245dc9f9": {
+                "id": "cf762a82-5ae9-47de-9121-892a245dc9f9",
+                "name": "New Layer 2 (copy)",
+                "theme": "neutral",
+                "position": "left",
+                "show_close_button": true,
+                "banner_api_id": "new-layer-2-copy",
+                "elements": [
+                    {
+                        "id": "f3337836-dc96-4ddd-94fa-0d97764c873a",
+                        "order": 1,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-header",
+                        "translations": {
+                            "en": {
+                                "id": "b326f11c-d67d-4ce9-8f52-daa0fdb38c02",
+                                "locale": "en",
+                                "value": "Text Element"
+                            },
+                            "zh-TW": {
+                                "id": "311c0635-49dd-4b1f-bc91-268b5b4375df",
+                                "locale": "zh-TW",
+                                "value": "文字元素"
+                            },
+                            "es": {
+                                "id": "c52a2c3b-94a8-4a47-b6b2-437486f8b434",
+                                "locale": "es",
+                                "value": "Elemento de texto"
+                            },
+                            "cs": {
+                                "id": "0b64ab63-6607-4ab2-939f-5f5aaa439c02",
+                                "locale": "cs",
+                                "value": "Textový prvek"
+                            },
+                            "nl": {
+                                "id": "7abb680a-46c9-4c14-8540-040e150354a3",
+                                "locale": "nl",
+                                "value": "Tekstelement"
+                            },
+                            "pt": {
+                                "id": "4754e714-8fb9-4243-8ab5-b8ef5e0c233b",
+                                "locale": "pt",
+                                "value": "Elemento Texto"
+                            },
+                            "zh-CN": {
+                                "id": "dea01a57-a202-4f72-b62a-a3515c4ec50a",
+                                "locale": "zh-CN",
+                                "value": "文本元素"
+                            }
+                        }
+                    },
+                    {
+                        "id": "46604d6d-000d-4bf5-975d-557c5bee1878",
+                        "order": 2,
+                        "type": "ConsentLayerLanguagePickerElement"
+                    }
+                ]
+            }
+        }
+    }
+}

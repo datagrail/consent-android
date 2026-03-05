@@ -48,7 +48,7 @@ data class Plugins(
     val allCookieSubdomains: Boolean,
     val cookieBlocking: Boolean,
     val localStorageBlocking: Boolean,
-    val syncOTConsent: Boolean,
+    val syncOTConsent: Boolean = false,
 )
 
 /**
@@ -91,6 +91,8 @@ data class Layout(
     val collapsedOnMobile: Boolean,
     @SerialName("first_layer_id")
     val firstLayerId: String,
+    @SerialName("gpc_dnt_layer_id")
+    val gpcDntLayerId: String? = null,
     @SerialName("consent_layers")
     val consentLayers: Map<String, ConsentLayer>,
 )
