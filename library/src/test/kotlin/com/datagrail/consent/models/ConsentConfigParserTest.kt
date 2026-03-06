@@ -1,5 +1,6 @@
 package com.datagrail.consent.models
 
+import com.datagrail.consent.utils.ConfigValidator
 import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
@@ -273,5 +274,28 @@ class ConsentConfigParserTest {
         }
         """
         json.decodeFromString<ConsentConfig>(invalidConfig)
+    }
+
+    @Test
+    fun `test validate parsed config`() {
+        val configFile = File(javaClass.classLoader?.getResource("test-config.json")?.file ?: "")
+        assertTrue("Config file should exist", configFile.exists())
+
+        val configJson = configFile.readText()
+        val config = json.decodeFromString<ConsentConfig>(configJson)
+
+        // This should not throw any exceptions
+        ConfigValidator.validate(config)
+    }
+
+    @Test
+    fun `test validate config without syncOTConsent`() {
+        val configFile = File(javaClass.classLoader?.getResource("config-no-sync-ot.json")?.file ?: "")
+        assertTrue("Config file should exist", configFile.exists())
+
+        val config = json.decodeFromString<ConsentConfig>(configFile.readText())
+
+        // This should not throw any exceptions
+        ConfigValidator.validate(config)
     }
 }
