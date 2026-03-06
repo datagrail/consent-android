@@ -157,6 +157,25 @@ The SDK stores consent data in EncryptedSharedPreferences (`com.datagrail.consen
 
 See the demo app for a complete example.
 
+## Dark Mode & Customization
+
+The SDK automatically supports both light and dark modes, adapting to the user's system theme preference. The consent banner colors will automatically adjust for optimal readability in both modes.
+
+### Customizing Colors
+
+You can customize the banner colors to match your app's branding by overriding the SDK's color resources in your app's `res/values/colors.xml` and `res/values-night/colors.xml` files.
+
+**[→ Dark Mode & Customization Guide](DARK_MODE_CUSTOMIZATION.md)** - Complete customization documentation with examples
+
+Available customizable colors:
+- `consent_background` - Dialog/banner background
+- `consent_text_primary` - Main text and headings
+- `consent_text_secondary` - Secondary text and descriptions
+- `consent_button_background` - Button background color
+- `consent_button_text` - Button text color
+- `consent_link` - Link text color
+- `consent_surface` - Category cards and surface elements
+
 ## ProGuard / R8
 
 If you have ProGuard/R8 enabled, add these rules:
