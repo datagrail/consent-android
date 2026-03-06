@@ -72,6 +72,7 @@ object ConfigValidator {
                 "ConsentLayerCategoryElement",
                 "ConsentLayerTrackingDetailsElement",
                 "ConsentLayerBrowserSignalNoticeElement",
+                "ConsentLayerLanguagePickerElement"
             )
 
         config.layout.consentLayers.values.forEach { layer ->
@@ -97,9 +98,33 @@ object ConfigValidator {
                 }
 
                 // Validate translations exist
-                if (element.type != "ConsentLayerCategoryElement") {
-                    if (element.translations == null || element.translations.isEmpty()) {
-                        throw ConsentException.ValidationError("Element '${element.id}' has no translations")
+                when (element.type) {
+                    "ConsentLayerLinkElement" -> {
+                        // Links have translations in their links array
+                        if (element.links == null || element.links.isEmpty()) {
+                            throw ConsentException.ValidationError(
+                                "Link element '${element.id}' has no links"
+                            )
+                        }
+                        element.links.forEach { link ->
+                            if (link.translations.isEmpty()) {
+                                throw ConsentException.ValidationError(
+                                    "Link '${link.id}' in element '${element.id}' has no translations"
+                                )
+                            }
+                        }
+                    }
+                    "ConsentLayerCategoryElement",
+                    "ConsentLayerLanguagePickerElement",
+                    "ConsentLayerTrackingDetailsElement",
+                    "ConsentLayerBrowserSignalNoticeElement" -> {
+                        // These elements don't require standard translations
+                    }
+                    else -> {
+                        // Standard elements require translations
+                        if (element.translations == null || element.translations.isEmpty()) {
+                            throw ConsentException.ValidationError("Element '${element.id}' has no translations")
+                        }
                     }
                 }
             }
