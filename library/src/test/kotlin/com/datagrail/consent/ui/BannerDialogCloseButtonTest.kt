@@ -7,54 +7,73 @@ import org.junit.Test
 /**
  * Unit tests for BannerDialog close button visibility logic.
  *
- * These tests verify that the showCloseButton configuration is properly respected
- * for both MODAL and FULL_SCREEN display styles.
+ * These tests verify that shouldShowCloseButton() properly respects the showCloseButton
+ * configuration for both MODAL and FULL_SCREEN display styles, ensuring the fix
+ * prevents regression of the TRUST-1695 bug.
  */
 class BannerDialogCloseButtonTest {
     @Test
-    fun `close button respects config when showCloseButton is true for modal`() {
-        // Create a config with showCloseButton = true
+    fun `shouldShowCloseButton returns true when config is true for MODAL`() {
         val config = createTestConfig(showCloseButton = true)
-        val layer = config.layout.consentLayers[config.layout.firstLayerId]
+        val dialog = BannerDialog.newInstance(
+            config = config,
+            preferences = null,
+            displayStyle = BannerDisplayStyle.MODAL,
+            onDismiss = {}
+        )
 
-        assertNotNull("Test layer should exist", layer)
-        assertTrue("Layer should have showCloseButton = true", layer!!.showCloseButton)
-
-        // In the actual BannerDialog, shouldShowCloseButton() should return true
-        // for both MODAL and FULL_SCREEN when config says true
+        assertTrue(
+            "shouldShowCloseButton() should return true for MODAL when config is true",
+            dialog.shouldShowCloseButton()
+        )
     }
 
     @Test
-    fun `close button respects config when showCloseButton is false for modal`() {
-        // Create a config with showCloseButton = false
+    fun `shouldShowCloseButton returns false when config is false for MODAL`() {
         val config = createTestConfig(showCloseButton = false)
-        val layer = config.layout.consentLayers[config.layout.firstLayerId]
+        val dialog = BannerDialog.newInstance(
+            config = config,
+            preferences = null,
+            displayStyle = BannerDisplayStyle.MODAL,
+            onDismiss = {}
+        )
 
-        assertNotNull("Test layer should exist", layer)
-        assertFalse("Layer should have showCloseButton = false", layer!!.showCloseButton)
-
-        // In the actual BannerDialog, shouldShowCloseButton() should return false
-        // for both MODAL and FULL_SCREEN when config says false
+        assertFalse(
+            "shouldShowCloseButton() should return false for MODAL when config is false",
+            dialog.shouldShowCloseButton()
+        )
     }
 
     @Test
-    fun `close button respects config when showCloseButton is true for fullscreen`() {
-        // Create a config with showCloseButton = true
+    fun `shouldShowCloseButton returns true when config is true for FULL_SCREEN`() {
         val config = createTestConfig(showCloseButton = true)
-        val layer = config.layout.consentLayers[config.layout.firstLayerId]
+        val dialog = BannerDialog.newInstance(
+            config = config,
+            preferences = null,
+            displayStyle = BannerDisplayStyle.FULL_SCREEN,
+            onDismiss = {}
+        )
 
-        assertNotNull("Test layer should exist", layer)
-        assertTrue("Layer should have showCloseButton = true", layer!!.showCloseButton)
+        assertTrue(
+            "shouldShowCloseButton() should return true for FULL_SCREEN when config is true",
+            dialog.shouldShowCloseButton()
+        )
     }
 
     @Test
-    fun `close button respects config when showCloseButton is false for fullscreen`() {
-        // Create a config with showCloseButton = false
+    fun `shouldShowCloseButton returns false when config is false for FULL_SCREEN`() {
         val config = createTestConfig(showCloseButton = false)
-        val layer = config.layout.consentLayers[config.layout.firstLayerId]
+        val dialog = BannerDialog.newInstance(
+            config = config,
+            preferences = null,
+            displayStyle = BannerDisplayStyle.FULL_SCREEN,
+            onDismiss = {}
+        )
 
-        assertNotNull("Test layer should exist", layer)
-        assertFalse("Layer should have showCloseButton = false", layer!!.showCloseButton)
+        assertFalse(
+            "shouldShowCloseButton() should return false for FULL_SCREEN when config is false",
+            dialog.shouldShowCloseButton()
+        )
     }
 
     /**

@@ -158,7 +158,8 @@ class BannerDialog : DialogFragment() {
         return outerFrame
     }
 
-    private fun shouldShowCloseButton(): Boolean {
+    @androidx.annotation.VisibleForTesting
+    internal fun shouldShowCloseButton(): Boolean {
         val cfg = config ?: return true
         val layer = cfg.layout.consentLayers[currentLayerKey] ?: return true
 
