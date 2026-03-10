@@ -69,13 +69,13 @@ class BannerDialog : DialogFragment() {
     ): View {
         val rootView = createRootView()
 
-        // Add close button if needed
+        currentLayerKey?.let { renderLayer(it) }
+
+        // Add close button if needed (added last so it appears on top)
         if (shouldShowCloseButton()) {
             closeButton = createCloseButton()
             (rootView as FrameLayout).addView(closeButton)
         }
-
-        currentLayerKey?.let { renderLayer(it) }
 
         return rootView
     }
@@ -162,10 +162,7 @@ class BannerDialog : DialogFragment() {
         val cfg = config ?: return true
         val layer = cfg.layout.consentLayers[currentLayerKey] ?: return true
 
-        return when (displayStyle) {
-            BannerDisplayStyle.MODAL -> true // Modal always shows close button
-            BannerDisplayStyle.FULL_SCREEN -> layer.showCloseButton
-        }
+        return layer.showCloseButton
     }
 
     private fun createCloseButton(): ImageButton {
@@ -173,6 +170,7 @@ class BannerDialog : DialogFragment() {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
             setBackgroundResource(android.R.color.transparent)
             contentDescription = "Close"
+            elevation = 24f  // Ensure button appears above content (content has elevation 16f)
 
             val size = (48 * resources.displayMetrics.density).toInt()
             layoutParams =
