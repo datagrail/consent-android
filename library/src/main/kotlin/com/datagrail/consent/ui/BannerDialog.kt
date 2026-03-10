@@ -125,7 +125,7 @@ class BannerDialog : DialogFragment() {
                                 cornerRadius = 24f
                             }
                         background = shape
-                        elevation = 16f
+                        elevation = CONTENT_ELEVATION
                         setPadding(32, 48, 32, 32)
                     }
                 }
@@ -171,7 +171,7 @@ class BannerDialog : DialogFragment() {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
             setBackgroundResource(android.R.color.transparent)
             contentDescription = "Close"
-            elevation = 24f  // Ensure button appears above content (content has elevation 16f)
+            elevation = CLOSE_BUTTON_ELEVATION  // Ensure button appears above content
 
             val size = (48 * resources.displayMetrics.density).toInt()
             layoutParams =
@@ -802,6 +802,9 @@ class BannerDialog : DialogFragment() {
     }
 
     companion object {
+        private const val CONTENT_ELEVATION = 16f
+        private const val CLOSE_BUTTON_ELEVATION = 24f
+
         fun newInstance(
             config: ConsentConfig,
             preferences: ConsentPreferences?,
