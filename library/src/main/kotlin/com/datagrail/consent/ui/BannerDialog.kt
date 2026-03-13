@@ -69,11 +69,10 @@ class BannerDialog : DialogFragment() {
     ): View {
         val rootView = createRootView()
 
-        // Add close button if needed
-        if (shouldShowCloseButton()) {
-            closeButton = createCloseButton()
-            (rootView as FrameLayout).addView(closeButton)
-        }
+        // Always create close button (added last so it appears on top)
+        // Visibility will be updated by renderLayer() based on the current layer's config
+        closeButton = createCloseButton()
+        (rootView as FrameLayout).addView(closeButton)
 
         currentLayerKey?.let { renderLayer(it) }
 
@@ -125,7 +124,7 @@ class BannerDialog : DialogFragment() {
                                 cornerRadius = 24f
                             }
                         background = shape
-                        elevation = 16f
+                        elevation = CONTENT_ELEVATION
                         setPadding(32, 48, 32, 32)
                     }
                 }
@@ -158,14 +157,12 @@ class BannerDialog : DialogFragment() {
         return outerFrame
     }
 
-    private fun shouldShowCloseButton(): Boolean {
+    @androidx.annotation.VisibleForTesting
+    internal fun shouldShowCloseButton(): Boolean {
         val cfg = config ?: return true
         val layer = cfg.layout.consentLayers[currentLayerKey] ?: return true
 
-        return when (displayStyle) {
-            BannerDisplayStyle.MODAL -> true // Modal always shows close button
-            BannerDisplayStyle.FULL_SCREEN -> layer.showCloseButton
-        }
+        return layer.showCloseButton
     }
 
     private fun createCloseButton(): ImageButton {
@@ -173,6 +170,7 @@ class BannerDialog : DialogFragment() {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
             setBackgroundResource(android.R.color.transparent)
             contentDescription = "Close"
+            elevation = CLOSE_BUTTON_ELEVATION  // Ensure button appears above content
 
             val size = (48 * resources.displayMetrics.density).toInt()
             layoutParams =
@@ -232,6 +230,9 @@ class BannerDialog : DialogFragment() {
                 },
             )
         }
+
+        // Update close button visibility for this layer
+        closeButton?.visibility = if (shouldShowCloseButton()) View.VISIBLE else View.GONE
     }
 
     /**
@@ -803,6 +804,9 @@ class BannerDialog : DialogFragment() {
     }
 
     companion object {
+        private const val CONTENT_ELEVATION = 16f
+        private const val CLOSE_BUTTON_ELEVATION = 24f
+
         fun newInstance(
             config: ConsentConfig,
             preferences: ConsentPreferences?,
