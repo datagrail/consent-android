@@ -7,13 +7,15 @@ enum class BannerDisplayStyle {
     /**
      * Modal dialog that covers approximately 90% of the screen height.
      * Has rounded corners and a shadow.
-     * Close button visibility is controlled by the config's show_close_button setting.
+     * Close button visibility is controlled by the show_close_button setting
+     * of the currently active consent layer (based on currentLayerKey).
      */
     MODAL,
 
     /**
      * Full screen dialog covering the entire screen.
-     * Close button visibility is controlled by the config's show_close_button setting.
+     * Close button visibility is controlled by the show_close_button setting
+     * of the currently active consent layer (based on currentLayerKey).
      */
     FULL_SCREEN,
 }
