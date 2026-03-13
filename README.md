@@ -13,7 +13,7 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("io.datagrail:consent:1.1.0")
+    implementation("io.datagrail:consent:1.2.0")
 }
 ```
 
