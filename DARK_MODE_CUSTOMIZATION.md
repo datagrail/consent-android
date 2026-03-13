@@ -41,8 +41,6 @@ The following colors can be customized:
 | `consent_button_text` | Button text color |
 | `consent_link` | Link text color |
 | `consent_surface` | Category cards, surface elements |
-| `consent_browser_notice_background` | Browser signal notice background |
-| `consent_browser_notice_text` | Browser signal notice text |
 
 ### How to Override
 

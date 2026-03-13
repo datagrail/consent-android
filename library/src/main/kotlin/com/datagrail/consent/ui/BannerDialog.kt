@@ -1,7 +1,6 @@
 package com.datagrail.consent.ui
 
 import android.app.Dialog
-import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
@@ -238,7 +237,7 @@ class BannerDialog : DialogFragment() {
     /**
      * Helper to get color resource with proper context
      */
-    private fun getColor(colorRes: Int): Int {
+    private fun getColor(@androidx.annotation.ColorRes colorRes: Int): Int {
         return ContextCompat.getColor(requireContext(), colorRes)
     }
 
@@ -602,61 +601,6 @@ class BannerDialog : DialogFragment() {
                 }
             container.addView(descView)
         }
-
-        return container
-    }
-
-    private fun createBrowserSignalNoticeView(element: ConsentLayerElement): LinearLayout {
-        val container =
-            LinearLayout(requireContext()).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams =
-                    LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    )
-                setPadding(16, 16, 16, 16)
-                setBackgroundColor(getColor(com.datagrail.consent.R.color.consent_browser_notice_background))
-            }
-
-        // Get translation with locale fallback
-        val translation = getTranslationWithFallback(element.browserSignalNoticeTranslations)
-        val noticeText = translation?.value ?: "Your browser's opt-out signal is being honored."
-
-        // Icon
-        if (element.showIcon == true) {
-            val iconView =
-                TextView(requireContext()).apply {
-                    text = "\u26A0\uFE0F" // Warning emoji
-                    textSize = 16f
-                    layoutParams =
-                        LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.WRAP_CONTENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT,
-                        ).apply {
-                            rightMargin = 12
-                        }
-                }
-            container.addView(iconView)
-        }
-
-        // Notice text
-        val textView =
-            TextView(requireContext()).apply {
-                text = noticeText
-                textSize = 14f
-                setTextColor(getColor(com.datagrail.consent.R.color.consent_browser_notice_text))
-                layoutParams =
-                    LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f,
-                    )
-                // Accessibility
-                contentDescription = noticeText
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-            }
-        container.addView(textView)
 
         return container
     }
