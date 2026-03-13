@@ -76,6 +76,38 @@ class BannerDialogCloseButtonTest {
         )
     }
 
+    @Test
+    fun `shouldShowCloseButton returns true when config is null`() {
+        val dialog = BannerDialog().apply {
+            // Leave config as null
+        }
+
+        assertTrue(
+            "shouldShowCloseButton() should default to true when config is null",
+            dialog.shouldShowCloseButton()
+        )
+    }
+
+    @Test
+    fun `shouldShowCloseButton returns true when layer key does not exist`() {
+        val config = createTestConfig(showCloseButton = false)
+        val dialog = BannerDialog().apply {
+            // Manually set config and use a non-existent layer key
+            val configField = BannerDialog::class.java.getDeclaredField("config")
+            configField.isAccessible = true
+            configField.set(this, config)
+
+            val layerField = BannerDialog::class.java.getDeclaredField("currentLayerKey")
+            layerField.isAccessible = true
+            layerField.set(this, "non-existent-layer-key")
+        }
+
+        assertTrue(
+            "shouldShowCloseButton() should default to true when currentLayerKey doesn't exist in config",
+            dialog.shouldShowCloseButton()
+        )
+    }
+
     /**
      * Helper function to create a test config with a specific showCloseButton value
      */
