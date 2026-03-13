@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light mode colors for consent banner -->
+    <color name="consent_background">#FFFFFF</color>
+    <color name="consent_text_primary">#000000</color>
+    <color name="consent_text_secondary">#666666</color>
+    <color name="consent_button_background">#2196F3</color>
+    <color name="consent_button_text">#FFFFFF</color>
+    <color name="consent_link">#2196F3</color>
+    <color name="consent_surface">#F5F5F5</color>
+</resources>
