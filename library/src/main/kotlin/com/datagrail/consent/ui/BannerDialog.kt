@@ -58,7 +58,7 @@ class BannerDialog : DialogFragment() {
     private fun getDialogTheme(): Int {
         return when (displayStyle) {
             BannerDisplayStyle.FULL_SCREEN -> android.R.style.Theme_Black_NoTitleBar_Fullscreen
-            BannerDisplayStyle.MODAL -> android.R.style.Theme_DeviceDefault_Light_Dialog_NoActionBar
+            BannerDisplayStyle.MODAL -> android.R.style.Theme_DeviceDefault_Dialog_NoActionBar
         }
     }
 
@@ -168,6 +168,7 @@ class BannerDialog : DialogFragment() {
     private fun createCloseButton(): ImageButton {
         return ImageButton(requireContext()).apply {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            setColorFilter(getColor(com.datagrail.consent.R.color.consent_text_primary))
             setBackgroundResource(android.R.color.transparent)
             contentDescription = "Close"
             elevation = CLOSE_BUTTON_ELEVATION  // Ensure button appears above content
