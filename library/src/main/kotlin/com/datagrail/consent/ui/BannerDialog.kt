@@ -69,13 +69,12 @@ class BannerDialog : DialogFragment() {
     ): View {
         val rootView = createRootView()
 
-        currentLayerKey?.let { renderLayer(it) }
+        // Always create close button (added last so it appears on top)
+        // Visibility will be updated by renderLayer() based on the current layer's config
+        closeButton = createCloseButton()
+        (rootView as FrameLayout).addView(closeButton)
 
-        // Add close button if needed (added last so it appears on top)
-        if (shouldShowCloseButton()) {
-            closeButton = createCloseButton()
-            (rootView as FrameLayout).addView(closeButton)
-        }
+        currentLayerKey?.let { renderLayer(it) }
 
         return rootView
     }
@@ -231,6 +230,9 @@ class BannerDialog : DialogFragment() {
                 },
             )
         }
+
+        // Update close button visibility for this layer
+        closeButton?.visibility = if (shouldShowCloseButton()) View.VISIBLE else View.GONE
     }
 
     /**
