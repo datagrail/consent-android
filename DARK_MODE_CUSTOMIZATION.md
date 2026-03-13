@@ -159,21 +159,22 @@ All other colors will use the SDK defaults.
 You can temporarily override the system theme for testing:
 
 ```kotlin
-import android.content.res.Configuration
+import androidx.appcompat.app.AppCompatDelegate
 
 // In your Activity/Fragment
-fun testDarkMode() {
-    val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-    when (nightMode) {
-        Configuration.UI_MODE_NIGHT_YES -> {
-            // Currently in dark mode
-        }
-        Configuration.UI_MODE_NIGHT_NO -> {
-            // Currently in light mode
-        }
-    }
+fun toggleDarkMode() {
+    // Force dark mode
+    AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
+
+    // Force light mode
+    AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
+
+    // Follow system setting (default)
+    AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
 }
 ```
+
+**Note:** The ADB approach below is simpler for most testing scenarios as it doesn't require code changes.
 
 ### Using Command Line
 
