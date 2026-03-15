@@ -1,7 +1,6 @@
 package com.datagrail.consent.ui
 
 import android.app.Dialog
-import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
@@ -10,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.*
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.DialogFragment
 import com.datagrail.consent.models.CategoryConsent
 import com.datagrail.consent.models.ConsentConfig
@@ -58,7 +58,7 @@ class BannerDialog : DialogFragment() {
     private fun getDialogTheme(): Int {
         return when (displayStyle) {
             BannerDisplayStyle.FULL_SCREEN -> android.R.style.Theme_Black_NoTitleBar_Fullscreen
-            BannerDisplayStyle.MODAL -> android.R.style.Theme_DeviceDefault_Light_Dialog_NoActionBar
+            BannerDisplayStyle.MODAL -> android.R.style.Theme_DeviceDefault_Dialog_NoActionBar
         }
     }
 
@@ -99,7 +99,7 @@ class BannerDialog : DialogFragment() {
                                 FrameLayout.LayoutParams.MATCH_PARENT,
                                 FrameLayout.LayoutParams.MATCH_PARENT,
                             )
-                        setBackgroundColor(Color.WHITE)
+                        setBackgroundColor(getColor(com.datagrail.consent.R.color.consent_background))
                         setPadding(32, 64, 32, 32)
                     }
                     BannerDisplayStyle.MODAL -> {
@@ -120,7 +120,7 @@ class BannerDialog : DialogFragment() {
                         // Rounded corners with shadow
                         val shape =
                             GradientDrawable().apply {
-                                setColor(Color.WHITE)
+                                setColor(getColor(com.datagrail.consent.R.color.consent_background))
                                 cornerRadius = 24f
                             }
                         background = shape
@@ -168,6 +168,7 @@ class BannerDialog : DialogFragment() {
     private fun createCloseButton(): ImageButton {
         return ImageButton(requireContext()).apply {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            setColorFilter(getColor(com.datagrail.consent.R.color.consent_text_primary))
             setBackgroundResource(android.R.color.transparent)
             contentDescription = "Close"
             elevation = CLOSE_BUTTON_ELEVATION  // Ensure button appears above content
@@ -236,6 +237,13 @@ class BannerDialog : DialogFragment() {
     }
 
     /**
+     * Helper to get color resource with proper context
+     */
+    private fun getColor(@androidx.annotation.ColorRes colorRes: Int): Int {
+        return ContextCompat.getColor(requireContext(), colorRes)
+    }
+
+    /**
      * Normalizes element type from config format to standard format.
      * The config may use types like "ConsentLayerTextElement" which should map to "text".
      */
@@ -298,7 +306,7 @@ class BannerDialog : DialogFragment() {
             else ->
                 TextView(requireContext()).apply {
                     text = "Unknown type: ${element.type}"
-                    setTextColor(Color.GRAY)
+                    setTextColor(getColor(com.datagrail.consent.R.color.consent_text_secondary))
                     textSize = 12f
                 }
         }
@@ -309,7 +317,7 @@ class BannerDialog : DialogFragment() {
             val textContent = getTranslationText(element)
             text = textContent
             textSize = 14f
-            setTextColor(Color.BLACK)
+            setTextColor(getColor(com.datagrail.consent.R.color.consent_text_primary))
             layoutParams =
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -327,8 +335,8 @@ class BannerDialog : DialogFragment() {
             val action = element.buttonAction ?: ""
             text = buttonText
             textSize = 16f
-            setBackgroundColor(Color.parseColor("#2196F3"))
-            setTextColor(Color.WHITE)
+            setBackgroundColor(getColor(com.datagrail.consent.R.color.consent_button_background))
+            setTextColor(getColor(com.datagrail.consent.R.color.consent_button_text))
             layoutParams =
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -382,7 +390,7 @@ class BannerDialog : DialogFragment() {
                     val linkText = translation?.text ?: translation?.value ?: "Link"
                     text = linkText
                     textSize = 14f
-                    setTextColor(Color.parseColor("#2196F3"))
+                    setTextColor(getColor(com.datagrail.consent.R.color.consent_link))
                     paintFlags = paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
 
                     // Accessibility
@@ -440,7 +448,7 @@ class BannerDialog : DialogFragment() {
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                     )
                 setPadding(24, 24, 24, 24)
-                setBackgroundColor(Color.parseColor("#F5F5F5"))
+                setBackgroundColor(getColor(com.datagrail.consent.R.color.consent_surface))
             }
 
         val categoryTranslation = getTranslationWithFallback(category.translations)
@@ -448,6 +456,7 @@ class BannerDialog : DialogFragment() {
             TextView(requireContext()).apply {
                 text = categoryTranslation?.name ?: "Category"
                 textSize = 15f
+                setTextColor(getColor(com.datagrail.consent.R.color.consent_text_primary))
                 layoutParams =
                     LinearLayout.LayoutParams(
                         0,
@@ -511,6 +520,7 @@ class BannerDialog : DialogFragment() {
             TextView(requireContext()).apply {
                 text = getTranslationText(element).ifEmpty { "Tracking Technologies" }
                 textSize = 16f
+                setTextColor(getColor(com.datagrail.consent.R.color.consent_text_primary))
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
                 layoutParams =
                     LinearLayout.LayoutParams(
@@ -558,7 +568,7 @@ class BannerDialog : DialogFragment() {
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                     )
                 setPadding(16, 16, 16, 16)
-                setBackgroundColor(Color.parseColor("#F5F5F5"))
+                setBackgroundColor(getColor(com.datagrail.consent.R.color.consent_surface))
             }
 
         val translation = getTranslationWithFallback(category.translations)
@@ -567,6 +577,7 @@ class BannerDialog : DialogFragment() {
             TextView(requireContext()).apply {
                 text = translation?.name ?: "Category"
                 textSize = 14f
+                setTextColor(getColor(com.datagrail.consent.R.color.consent_text_primary))
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
                 layoutParams =
                     LinearLayout.LayoutParams(
@@ -581,7 +592,7 @@ class BannerDialog : DialogFragment() {
                 TextView(requireContext()).apply {
                     text = desc
                     textSize = 12f
-                    setTextColor(Color.parseColor("#666666"))
+                    setTextColor(getColor(com.datagrail.consent.R.color.consent_text_secondary))
                     layoutParams =
                         LinearLayout.LayoutParams(
                             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -592,61 +603,6 @@ class BannerDialog : DialogFragment() {
                 }
             container.addView(descView)
         }
-
-        return container
-    }
-
-    private fun createBrowserSignalNoticeView(element: ConsentLayerElement): LinearLayout {
-        val container =
-            LinearLayout(requireContext()).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams =
-                    LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    )
-                setPadding(16, 16, 16, 16)
-                setBackgroundColor(Color.parseColor("#FFF3E0")) // Light orange background
-            }
-
-        // Get translation with locale fallback
-        val translation = getTranslationWithFallback(element.browserSignalNoticeTranslations)
-        val noticeText = translation?.value ?: "Your browser's opt-out signal is being honored."
-
-        // Icon
-        if (element.showIcon == true) {
-            val iconView =
-                TextView(requireContext()).apply {
-                    text = "\u26A0\uFE0F" // Warning emoji
-                    textSize = 16f
-                    layoutParams =
-                        LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.WRAP_CONTENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT,
-                        ).apply {
-                            rightMargin = 12
-                        }
-                }
-            container.addView(iconView)
-        }
-
-        // Notice text
-        val textView =
-            TextView(requireContext()).apply {
-                text = noticeText
-                textSize = 14f
-                setTextColor(Color.parseColor("#E65100")) // Dark orange text
-                layoutParams =
-                    LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f,
-                    )
-                // Accessibility
-                contentDescription = noticeText
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-            }
-        container.addView(textView)
 
         return container
     }
