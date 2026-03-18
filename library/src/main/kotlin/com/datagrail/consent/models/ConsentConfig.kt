@@ -104,7 +104,6 @@ data class Layout(
 data class ConsentLayer(
     val id: String,
     val name: String,
-    val theme: String,
     val position: String,
     @SerialName("show_close_button")
     val showCloseButton: Boolean,

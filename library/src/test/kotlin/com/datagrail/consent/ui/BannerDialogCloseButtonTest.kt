@@ -130,7 +130,6 @@ class BannerDialogCloseButtonTest {
         val layer = ConsentLayer(
             id = layerId,
             name = "Test Layer",
-            theme = "neutral",
             position = "center",
             showCloseButton = showCloseButton,
             bannerApiId = "test-banner",

@@ -111,7 +111,6 @@ class ConsentConfigParserTest {
 
         categoriesLayer?.let { layer ->
             assertEquals("Categories Ler", layer.name)
-            assertEquals("neutral", layer.theme)
             assertEquals("left", layer.position)
             assertTrue(layer.showCloseButton)
             assertEquals("categories-layer", layer.bannerApiId)
