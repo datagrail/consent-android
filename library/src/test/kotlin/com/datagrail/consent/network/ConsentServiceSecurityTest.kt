@@ -201,7 +201,6 @@ class ConsentServiceSecurityTest {
                 ConsentLayer(
                     id = "layer1",
                     name = "Main",
-                    theme = "neutral",
                     position = "bottom",
                     showCloseButton = true,
                     bannerApiId = "main",

@@ -54,7 +54,6 @@
             "0b9fbfad-8501-498d-81c7-d7d1434700ed": {
                 "id": "0b9fbfad-8501-498d-81c7-d7d1434700ed",
                 "name": "Default Layer",
-                "theme": "neutral",
                 "position": "bottom",
                 "show_close_button": false,
                 "banner_api_id": "default-layer",
@@ -346,7 +345,6 @@
             "3735692f-efe1-4ac3-b671-afdc9922b9b8": {
                 "id": "3735692f-efe1-4ac3-b671-afdc9922b9b8",
                 "name": "New Layer 4",
-                "theme": "neutral",
                 "position": "left",
                 "show_close_button": true,
                 "banner_api_id": "new-layer-4",
@@ -406,7 +404,6 @@
             "4de8260b-d70c-4601-9232-6d9631e49622": {
                 "id": "4de8260b-d70c-4601-9232-6d9631e49622",
                 "name": "GPC Notice",
-                "theme": "neutral",
                 "position": "left",
                 "show_close_button": true,
                 "banner_api_id": "new-layer-2",
@@ -496,7 +493,6 @@
             "83648dc1-3f43-4d79-b704-26ee1f58d99c": {
                 "id": "83648dc1-3f43-4d79-b704-26ee1f58d99c",
                 "name": "Categories Ler",
-                "theme": "neutral",
                 "position": "right",
                 "show_close_button": true,
                 "banner_api_id": "categories-layer",
@@ -1293,7 +1289,6 @@
             "cf762a82-5ae9-47de-9121-892a245dc9f9": {
                 "id": "cf762a82-5ae9-47de-9121-892a245dc9f9",
                 "name": "New Layer 2 (copy)",
-                "theme": "neutral",
                 "position": "left",
                 "show_close_button": true,
                 "banner_api_id": "new-layer-2-copy",

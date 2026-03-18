@@ -460,7 +460,6 @@ class ConsentManagerTests {
             ConsentLayer(
                 id = java.util.UUID.randomUUID().toString(),
                 name = "Main Layer",
-                theme = "neutral",
                 position = "bottom",
                 showCloseButton = true,
                 bannerApiId = "main",
@@ -554,7 +553,6 @@ class ConsentManagerTests {
             ConsentLayer(
                 id = java.util.UUID.randomUUID().toString(),
                 name = "Main Layer",
-                theme = "neutral",
                 position = "bottom",
                 showCloseButton = true,
                 bannerApiId = "main",

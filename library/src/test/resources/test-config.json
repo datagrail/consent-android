@@ -54,7 +54,6 @@
             "00a6e2c3-f1d5-4d3f-bd91-7d45cc0b75c5": {
                 "id": "00a6e2c3-f1d5-4d3f-bd91-7d45cc0b75c5",
                 "name": "New Layer 4",
-                "theme": "neutral",
                 "position": "left",
                 "show_close_button": true,
                 "banner_api_id": "new-layer-4",
@@ -79,7 +78,6 @@
             "26259ccb-e5e0-4305-b696-fa2b7413c239": {
                 "id": "26259ccb-e5e0-4305-b696-fa2b7413c239",
                 "name": "Categories Ler",
-                "theme": "neutral",
                 "position": "left",
                 "show_close_button": true,
                 "banner_api_id": "categories-layer",
@@ -366,7 +364,6 @@
             "7ffc5655-7fe9-4fcd-96ef-4494b875c8eb": {
                 "id": "7ffc5655-7fe9-4fcd-96ef-4494b875c8eb",
                 "name": "New Layer 2 (copy)",
-                "theme": "neutral",
                 "position": "left",
                 "show_close_button": true,
                 "banner_api_id": "new-layer-2-copy",
@@ -389,7 +386,6 @@
             "ae948d41-65aa-4ffc-941c-5ff029cd2291": {
                 "id": "ae948d41-65aa-4ffc-941c-5ff029cd2291",
                 "name": "New Layer 2",
-                "theme": "neutral",
                 "position": "left",
                 "show_close_button": true,
                 "banner_api_id": "new-layer-2",
@@ -412,7 +408,6 @@
             "b0b9fc31-4ea2-4026-8aa1-25fd647aa265": {
                 "id": "b0b9fc31-4ea2-4026-8aa1-25fd647aa265",
                 "name": "Default Layer",
-                "theme": "neutral",
                 "position": "bottom",
                 "show_close_button": false,
                 "banner_api_id": "default-layer",
