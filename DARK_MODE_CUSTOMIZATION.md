@@ -7,6 +7,7 @@ The DataGrail Consent SDK automatically supports both light and dark modes. The 
 The SDK provides sensible defaults for both light and dark modes:
 
 ### Light Mode (Default)
+
 - **Background**: White (`#FFFFFF`)
 - **Primary Text**: Black (`#000000`)
 - **Secondary Text**: Gray (`#666666`)
@@ -16,6 +17,7 @@ The SDK provides sensible defaults for both light and dark modes:
 - **Surface/Cards**: Light Gray (`#F5F5F5`)
 
 ### Dark Mode (Default)
+
 - **Background**: Dark Gray (`#121212`)
 - **Primary Text**: White (`#FFFFFF`)
 - **Secondary Text**: Light Gray (`#B0B0B0`)
