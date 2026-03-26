@@ -258,6 +258,121 @@ class ConsentConfigParserTest {
         assertEquals("19fcd340-6fb6-4363-bc9b-df10af839800", config.layout.gpcDntLayerId)
     }
 
+    @Test
+    fun `test parse CPRA config`() {
+        val configFile = File(javaClass.classLoader?.getResource("config-cpra.json")?.file ?: "")
+        assertTrue("Config file should exist", configFile.exists())
+
+        val config = json.decodeFromString<ConsentConfig>(configFile.readText())
+
+        // Verify top-level properties
+        assertEquals("f697b4ac-341a-4e5a-9794-d09e23148771", config.version)
+        assertEquals("72c28510-a607-4bfc-8eb9-512273b9c625", config.consentContainerVersionId)
+        assertEquals("c30be0d2-795f-40af-9f70-502b83f7bb68", config.dgCustomerId)
+        assertEquals("bradleyy.dg-dev.com", config.privacyDomain)
+        assertFalse(config.testMode)
+        assertFalse(config.ignoreDoNotTrack)
+        assertEquals("optout", config.consentMode)
+        assertTrue(config.showBanner)
+        assertFalse(config.gppUsNat)
+
+        // Verify plugins
+        assertTrue(config.plugins.scriptControl)
+        assertTrue(config.plugins.cookieBlocking)
+        assertTrue(config.plugins.localStorageBlocking)
+        assertTrue(config.plugins.syncOTConsent)
+
+        // Verify consent policy
+        assertEquals("CPRA", config.consentPolicy.name)
+        assertFalse(config.consentPolicy.default)
+
+        // Verify initial categories — optout mode has all 4 categories initially on
+        assertEquals(4, config.initialCategories.initial.size)
+        assertTrue(config.initialCategories.initial.contains("dg-category-essential"))
+        assertTrue(config.initialCategories.initial.contains("dg-category-performance"))
+        assertTrue(config.initialCategories.initial.contains("dg-category-functional"))
+        assertTrue(config.initialCategories.initial.contains("dg-category-marketing"))
+        assertEquals(1, config.initialCategories.gpc.size)
+        assertEquals("dg-category-essential", config.initialCategories.gpc.first())
+
+        // Verify layout
+        assertEquals("d5e6b99f-90bc-4124-9954-8ae4880599cd", config.layout.id)
+        assertEquals("Global Layout", config.layout.name)
+        assertNull(config.layout.gpcDntLayerId)
+        assertEquals(2, config.layout.consentLayers.size)
+
+        // Verify first layer
+        assertEquals("1b4c5952-ab0b-4f6d-82f4-c28a430e9d59", config.layout.firstLayerId)
+        val defaultLayer = config.layout.consentLayers[config.layout.firstLayerId]
+        assertNotNull(defaultLayer)
+        assertEquals("Default Layer", defaultLayer?.name)
+        assertEquals("left", defaultLayer?.position)
+
+        // Verify categories layer
+        val categoriesLayer = config.layout.consentLayers["33e8abaf-f967-44d8-8ad4-56c9f18028f6"]
+        assertNotNull(categoriesLayer)
+        assertEquals("Categories Layer", categoriesLayer?.name)
+        assertEquals("modal", categoriesLayer?.position)
+
+        // Validate config
+        ConfigValidator.validate(config)
+    }
+
+    @Test
+    fun `test parse GDPR config`() {
+        val configFile = File(javaClass.classLoader?.getResource("config-gdpr.json")?.file ?: "")
+        assertTrue("Config file should exist", configFile.exists())
+
+        val config = json.decodeFromString<ConsentConfig>(configFile.readText())
+
+        // Verify top-level properties
+        assertEquals("f697b4ac-341a-4e5a-9794-d09e23148771", config.version)
+        assertEquals("72c28510-a607-4bfc-8eb9-512273b9c625", config.consentContainerVersionId)
+        assertEquals("c30be0d2-795f-40af-9f70-502b83f7bb68", config.dgCustomerId)
+        assertEquals("bradleyy.dg-dev.com", config.privacyDomain)
+        assertFalse(config.testMode)
+        assertFalse(config.ignoreDoNotTrack)
+        assertEquals("optin", config.consentMode)
+        assertTrue(config.showBanner)
+        assertFalse(config.gppUsNat)
+
+        // Verify plugins
+        assertTrue(config.plugins.scriptControl)
+        assertTrue(config.plugins.cookieBlocking)
+        assertTrue(config.plugins.localStorageBlocking)
+        assertTrue(config.plugins.syncOTConsent)
+
+        // Verify consent policy
+        assertEquals("GDPR", config.consentPolicy.name)
+        assertFalse(config.consentPolicy.default)
+
+        // Verify initial categories — optin mode has only essential initially on
+        assertEquals(1, config.initialCategories.initial.size)
+        assertEquals("dg-category-essential", config.initialCategories.initial.first())
+        assertEquals(1, config.initialCategories.gpc.size)
+        assertEquals("dg-category-essential", config.initialCategories.gpc.first())
+
+        // Verify layout — same layout as CPRA, different policy
+        assertEquals("d5e6b99f-90bc-4124-9954-8ae4880599cd", config.layout.id)
+        assertEquals("Global Layout", config.layout.name)
+        assertNull(config.layout.gpcDntLayerId)
+        assertEquals(2, config.layout.consentLayers.size)
+
+        // Verify first layer
+        assertEquals("1b4c5952-ab0b-4f6d-82f4-c28a430e9d59", config.layout.firstLayerId)
+        val defaultLayer = config.layout.consentLayers[config.layout.firstLayerId]
+        assertNotNull(defaultLayer)
+        assertEquals("Default Layer", defaultLayer?.name)
+
+        // Verify categories layer
+        val categoriesLayer = config.layout.consentLayers["33e8abaf-f967-44d8-8ad4-56c9f18028f6"]
+        assertNotNull(categoriesLayer)
+        assertEquals("Categories Layer", categoriesLayer?.name)
+
+        // Validate config
+        ConfigValidator.validate(config)
+    }
+
     @Test(expected = Exception::class)
     fun `test parse invalid JSON`() {
         val invalidJSON = "{ invalid json }"
