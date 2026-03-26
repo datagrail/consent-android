@@ -260,8 +260,10 @@ class ConsentConfigParserTest {
 
     @Test
     fun `test parse CPRA config`() {
-        val configFile = File(javaClass.classLoader?.getResource("config-cpra.json")?.file ?: "")
-        assertTrue("Config file should exist", configFile.exists())
+        val resource = requireNotNull(javaClass.classLoader?.getResource("config-cpra.json")) {
+            "Resource config-cpra.json not found on classpath"
+        }
+        val configFile = File(resource.toURI())
 
         val config = json.decodeFromString<ConsentConfig>(configFile.readText())
 
@@ -320,8 +322,10 @@ class ConsentConfigParserTest {
 
     @Test
     fun `test parse GDPR config`() {
-        val configFile = File(javaClass.classLoader?.getResource("config-gdpr.json")?.file ?: "")
-        assertTrue("Config file should exist", configFile.exists())
+        val resource = requireNotNull(javaClass.classLoader?.getResource("config-gdpr.json")) {
+            "Resource config-gdpr.json not found on classpath"
+        }
+        val configFile = File(resource.toURI())
 
         val config = json.decodeFromString<ConsentConfig>(configFile.readText())
 
