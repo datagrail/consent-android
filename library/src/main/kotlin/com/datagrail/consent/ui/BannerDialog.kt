@@ -250,6 +250,7 @@ class BannerDialog : DialogFragment() {
     private fun normalizeElementType(type: String): String {
         return when {
             type.contains("BrowserSignalNotice", ignoreCase = true) -> "browser_signal_notice"
+            type.contains("LanguagePicker", ignoreCase = true) -> "language_picker"
             type.contains("Text", ignoreCase = true) -> "text"
             type.contains("Button", ignoreCase = true) -> "button"
             type.contains("Link", ignoreCase = true) -> "link"
@@ -298,6 +299,14 @@ class BannerDialog : DialogFragment() {
             "browser_signal_notice" -> {
                 // GPC/DNT are web browser signals that don't apply to mobile apps
                 // Return an empty view instead of showing the notice
+                View(requireContext()).apply {
+                    layoutParams = LinearLayout.LayoutParams(0, 0)
+                    visibility = View.GONE
+                }
+            }
+            "language_picker" -> {
+                // Language picker is not supported in the Android SDK
+                // Return an empty view to avoid showing an error message
                 View(requireContext()).apply {
                     layoutParams = LinearLayout.LayoutParams(0, 0)
                     visibility = View.GONE
