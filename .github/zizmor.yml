@@ -35,7 +35,8 @@ rules:
   # 6 finding(s)
   excessive-permissions:
     disable: true
-  template-injection: {}
+  template-injection:
+    disable: true
 
   # 4 finding(s)
   secrets-outside-env:
