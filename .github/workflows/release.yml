@@ -19,12 +19,13 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
         with:
           java-version: "17"
           distribution: temurin
@@ -37,19 +38,23 @@ jobs:
         id: version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "version=${INPUTS_VERSION}" >> "$GITHUB_OUTPUT"
           else
             # Strip 'v' prefix from tag
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           fi
+        env:
+          INPUTS_VERSION: ${{ inputs.version }}
 
       - name: Validate version in build.gradle.kts
         run: |
           GRADLE_VERSION=$(grep -oP 'coordinates\("io\.datagrail",\s*"consent",\s*"\K[^"]+' library/build.gradle.kts)
-          if [ "$GRADLE_VERSION" != "${{ steps.version.outputs.version }}" ]; then
-            echo "::error::Version mismatch: tag=${{ steps.version.outputs.version }}, build.gradle.kts=$GRADLE_VERSION"
+          if [ "$GRADLE_VERSION" != "${STEPS_VERSION_OUTPUTS_VERSION}" ]; then
+            echo "::error::Version mismatch: tag=${STEPS_VERSION_OUTPUTS_VERSION}, build.gradle.kts=$GRADLE_VERSION"
             exit 1
           fi
+        env:
+          STEPS_VERSION_OUTPUTS_VERSION: ${{ steps.version.outputs.version }}
 
       - name: Run tests
         run: ./gradlew :library:test
@@ -66,7 +71,7 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
           name: v${{ steps.version.outputs.version }}
