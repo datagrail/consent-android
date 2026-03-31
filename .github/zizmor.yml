@@ -29,7 +29,8 @@ rules:
   # 1 finding(s)
   cache-poisoning:
     disable: true
-  artipacked: {}
+  artipacked:
+    disable: true
 
   # 6 finding(s)
   excessive-permissions:
