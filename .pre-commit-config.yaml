@@ -1,0 +1,32 @@
+repos:
+  ### Supply Chain Security
+  - repo: local
+    hooks:
+      - id: enforce-sha-pins
+        name: Enforce SHA pinning in pre-commit config
+        entry: '^\s+rev: (?![\x27"]?[A-Fa-f0-9]{40}[\x27"]?(\s+#|$))'
+        language: pygrep
+        files: ^\.pre-commit-config\.yaml$
+        description: "Fails if a 'rev:' value is not a 40-character hex SHA."
+
+  ### Github Action Hooks
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 8b56df2563bc61670b7bf8bace6f9488bbb67eac  # 0.33.3
+    hooks:
+      - id: check-github-workflows
+        args: ["--verbose"]
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: 03d0035246f3e81f36aed592ffb4bebf33a03106  # v1.7.7
+    hooks:
+      - id: actionlint
+        files: ^\.github/workflows/
+        exclude: ^\.github/workflows/scripts/
+        # TODO Remove when this can be done in actionlint.yml https://github.com/rhysd/actionlint/issues/481
+        args: ["-ignore", "shellcheck reported issue in this script: SC2086:.+"]
+
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: ea2eb407b4cbce87cf0d502f36578950494f5ac9  # v1.23.1
+    hooks:
+      - id: zizmor
+        files: ^\.github/(workflows|actions)/
