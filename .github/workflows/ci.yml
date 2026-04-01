@@ -31,7 +31,7 @@ jobs:
 
       - name: Generate test report
         if: always()
-        uses: dorny/test-reporter@d61b558e8df85cb60d09ca3e5b09653b4477cea7 # v1
+        uses: dorny/test-reporter@ab50174d2cce6a041bb0a86aa99d11858f914df9 # v1
         with:
           name: Test Results
           path: library/build/test-results/test*/*.xml
