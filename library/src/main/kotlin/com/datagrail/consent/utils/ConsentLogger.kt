@@ -8,6 +8,7 @@ import android.util.Log
 enum class LogLevel {
     NONE,
     ERROR,
+    WARN,
     DEBUG,
 }
 
@@ -27,8 +28,14 @@ internal object ConsentLogger {
         }
     }
 
+    fun w(message: String) {
+        if (level == LogLevel.WARN || level == LogLevel.DEBUG) {
+            Log.w(TAG, message)
+        }
+    }
+
     fun e(message: String) {
-        if (level == LogLevel.ERROR || level == LogLevel.DEBUG) {
+        if (level == LogLevel.ERROR || level == LogLevel.WARN || level == LogLevel.DEBUG) {
             Log.e(TAG, message)
         }
     }
