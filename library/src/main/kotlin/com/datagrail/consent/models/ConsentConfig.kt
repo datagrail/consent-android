@@ -25,7 +25,7 @@ data class ConsentConfig(
     val dgCustomerId: String,
     val p: Long,
     val dch: String,
-    val dc: String,
+    val dc: String?,
     val privacyDomain: String,
     val plugins: Plugins,
     val testMode: Boolean,
