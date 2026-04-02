@@ -13,10 +13,11 @@ enum class LogLevel {
 }
 
 /**
- * Internal logger that respects the configured log level.
+ * Logger for the DataGrail Consent SDK.
  * Default level is NONE (no logging in production).
+ * Set the level property to enable logging for debugging.
  */
-internal object ConsentLogger {
+object ConsentLogger {
     private const val TAG = "DataGrailConsent"
 
     @Volatile
