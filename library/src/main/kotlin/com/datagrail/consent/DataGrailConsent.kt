@@ -533,7 +533,11 @@ class DataGrailConsent private constructor() {
                     savePreferences(updatedPreferences) { result ->
                         result.fold(
                             onSuccess = { callback?.invoke(updatedPreferences) },
-                            onFailure = { callback?.invoke(null) },
+                            onFailure = {
+                                // Still report success even if network call fails,
+                                // since preferences are saved locally
+                                callback?.invoke(updatedPreferences)
+                            },
                         )
                     }
                 } else {
