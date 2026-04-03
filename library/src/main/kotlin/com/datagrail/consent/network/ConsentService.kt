@@ -63,7 +63,7 @@ internal class ConsentService(
                 uniqueId = uniqueId,
             )
 
-        val url = "https://$privacyDomain/api/v1/save_preferences"
+        val url = "https://$privacyDomain/save_preferences"
         val jsonBody = Json.encodeToString(requestBody)
 
         try {
@@ -113,7 +113,7 @@ internal class ConsentService(
         val sessionId = UUID.randomUUID().toString()
 
         val url =
-            "https://$privacyDomain/api/v1/save_open" +
+            "https://$privacyDomain/save_open" +
                 "?customerId=${encodeParam(config.dgCustomerId)}" +
                 "&sessionId=${encodeParam(sessionId)}" +
                 "&uniqueId=${encodeParam(uniqueId)}" +
