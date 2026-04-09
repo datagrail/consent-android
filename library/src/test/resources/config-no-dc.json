@@ -1,0 +1,108 @@
+{
+    "version": "cc959465-747d-4c81-8bc1-5dcd34dc3756",
+    "consentContainerVersionId": "0dd5bdf3-b55e-4d97-8a06-e14b17660b94",
+    "dgCustomerId": "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
+    "p": 1765415800250,
+    "dch": "categorize",
+    "privacyDomain": "api.consentjs.datagrailstaging.com",
+    "plugins": {
+        "scriptControl": true,
+        "allCookieSubdomains": true,
+        "cookieBlocking": true,
+        "localStorageBlocking": true,
+        "syncOTConsent": false
+    },
+    "testMode": false,
+    "ignoreDoNotTrack": false,
+    "trackingDetailsUrl": "https://api.consentjs.datagrailstaging.com/ac46d8ad-a67a-431f-a5d5-9e3eb922dae7/service-metadata.json",
+    "consentMode": "optout",
+    "showBanner": false,
+    "consentPolicy": {
+        "name": "CPRA",
+        "default": false
+    },
+    "gppUsNat": true,
+    "initialCategories": {
+        "respect_gpc": true,
+        "respect_dnt": true,
+        "respect_optout": false,
+        "initial": [
+            "dg-category-essential",
+            "dg-category-performance",
+            "dg-category-functional",
+            "dg-category-marketing"
+        ],
+        "gpc": [
+            "dg-category-essential"
+        ],
+        "optout": [
+            "dg-category-essential",
+            "dg-category-performance",
+            "dg-category-functional"
+        ]
+    },
+    "layout": {
+        "id": "a788c60d-ec2c-40a9-bd3b-cfd371d62889",
+        "name": "CPRA only",
+        "description": null,
+        "status": "published",
+        "default_layout": false,
+        "collapsed_on_mobile": true,
+        "first_layer_id": "26259ccb-e5e0-4305-b696-fa2b7413c239",
+        "consent_layers": {
+            "26259ccb-e5e0-4305-b696-fa2b7413c239": {
+                "id": "26259ccb-e5e0-4305-b696-fa2b7413c239",
+                "name": "Categories Ler",
+                "position": "left",
+                "show_close_button": true,
+                "banner_api_id": "categories-layer",
+                "elements": [
+                    {
+                        "id": "0d8f26cf-1ac6-43ab-9f1e-d25722be04b9",
+                        "order": 1,
+                        "type": "ConsentLayerTextElement",
+                        "style": "dg-title",
+                        "translations": {
+                            "en": {
+                                "id": "884fe056-5787-43c8-bb96-08c9b013e62c",
+                                "locale": "en",
+                                "value": "Privacy Settings"
+                            }
+                        }
+                    },
+                    {
+                        "id": "5a7f3c06-eb6c-473e-b004-d2a5bde00fc9",
+                        "order": 3,
+                        "type": "ConsentLayerCategoryElement",
+                        "consent_layer_categories": [
+                            {
+                                "id": "5be5f52d-bcdb-4937-957f-740cab4d302f",
+                                "consent_category_id": "936160e0-06fd-4de7-8b13-1ac51c6f0125",
+                                "order": 1,
+                                "hidden": false,
+                                "primitive": "dg-category-essential",
+                                "always_on": true,
+                                "gtm_key": "dg-category-essential",
+                                "uuids": [],
+                                "cookie_patterns": [],
+                                "translations": {
+                                    "en": {
+                                        "id": "63528d02-2251-4b9d-8665-c9c921829e85",
+                                        "locale": "en",
+                                        "name": "Essential",
+                                        "description": "These cookies are necessary for the website to function.",
+                                        "essential_label": "Always On"
+                                    }
+                                },
+                                "show_tracking_details_link": false
+                            }
+                        ],
+                        "show_tracking_details_link": false,
+                        "consent_layer_categories_config_id": "34980026956232425",
+                        "tracking_details_link_translations": []
+                    }
+                ]
+            }
+        }
+    }
+}
