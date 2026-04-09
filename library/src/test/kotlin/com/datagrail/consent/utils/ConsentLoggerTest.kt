@@ -20,6 +20,8 @@ class ConsentLoggerTest {
         mockLog = mockStatic(Log::class.java)
         mockLog.`when`<Int> { Log.d(org.mockito.kotlin.any(), org.mockito.kotlin.any()) }.thenReturn(0)
         mockLog.`when`<Int> { Log.e(org.mockito.kotlin.any(), org.mockito.kotlin.any()) }.thenReturn(0)
+        mockLog.`when`<Int> { Log.w(org.mockito.kotlin.any<String>(), org.mockito.kotlin.any<String>()) }.thenReturn(0)
+        mockLog.`when`<Int> { Log.i(org.mockito.kotlin.any<String>(), org.mockito.kotlin.any<String>()) }.thenReturn(0)
         ConsentLogger.level = LogLevel.NONE
     }
 
@@ -74,6 +76,82 @@ class ConsentLoggerTest {
         ConsentLogger.e("test error")
 
         mockLog.verify({ Log.e("DataGrailConsent", "test error") }, times(1))
+    }
+
+    // MARK: - WARN Level
+
+    @Test
+    fun `w() at WARN level calls Log_w`() {
+        ConsentLogger.level = LogLevel.WARN
+
+        ConsentLogger.w("test warning")
+
+        mockLog.verify({ Log.w("DataGrailConsent", "test warning") }, times(1))
+    }
+
+    @Test
+    fun `e() at WARN level calls Log_e`() {
+        ConsentLogger.level = LogLevel.WARN
+
+        ConsentLogger.e("test error")
+
+        mockLog.verify({ Log.e("DataGrailConsent", "test error") }, times(1))
+    }
+
+    @Test
+    fun `i() at WARN level does not call Log_i`() {
+        ConsentLogger.level = LogLevel.WARN
+
+        ConsentLogger.i("test info")
+
+        mockLog.verify({ Log.i(org.mockito.kotlin.any(), org.mockito.kotlin.any()) }, times(0))
+    }
+
+    @Test
+    fun `d() at WARN level does not call Log_d`() {
+        ConsentLogger.level = LogLevel.WARN
+
+        ConsentLogger.d("test message")
+
+        mockLog.verify({ Log.d(org.mockito.kotlin.any(), org.mockito.kotlin.any()) }, times(0))
+    }
+
+    // MARK: - INFO Level
+
+    @Test
+    fun `i() at INFO level calls Log_i`() {
+        ConsentLogger.level = LogLevel.INFO
+
+        ConsentLogger.i("test info")
+
+        mockLog.verify({ Log.i("DataGrailConsent", "test info") }, times(1))
+    }
+
+    @Test
+    fun `w() at INFO level calls Log_w`() {
+        ConsentLogger.level = LogLevel.INFO
+
+        ConsentLogger.w("test warning")
+
+        mockLog.verify({ Log.w("DataGrailConsent", "test warning") }, times(1))
+    }
+
+    @Test
+    fun `e() at INFO level calls Log_e`() {
+        ConsentLogger.level = LogLevel.INFO
+
+        ConsentLogger.e("test error")
+
+        mockLog.verify({ Log.e("DataGrailConsent", "test error") }, times(1))
+    }
+
+    @Test
+    fun `d() at INFO level does not call Log_d`() {
+        ConsentLogger.level = LogLevel.INFO
+
+        ConsentLogger.d("test message")
+
+        mockLog.verify({ Log.d(org.mockito.kotlin.any(), org.mockito.kotlin.any()) }, times(0))
     }
 
     // MARK: - DEBUG Level
