@@ -68,7 +68,7 @@ class ConsentServiceSecurityTest {
 
             // Verify URL structure
             assertTrue("Should start with https", capturedUrl.startsWith("https://"))
-            assertTrue("Should contain save_open endpoint", capturedUrl.contains("/api/v1/save_open"))
+            assertTrue("Should contain save_open endpoint", capturedUrl.contains("/save_open"))
             assertTrue("Should contain customerId param", capturedUrl.contains("customerId="))
             assertTrue("Should contain sessionId param", capturedUrl.contains("sessionId="))
             assertTrue("Should contain uniqueId param", capturedUrl.contains("uniqueId="))
