@@ -17,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
 import com.datagrail.consent.DataGrailConsent
 import com.datagrail.consent.ui.BannerDisplayStyle
+import com.datagrail.consent.utils.LogLevel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -102,6 +103,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         log("NETWORK", "Calling DataGrailConsent.initialize()...")
+
+        // Enable warning-level logging to see SDK validation warnings in Logcat
+        DataGrailConsent.setLogLevel(LogLevel.WARN)
 
         DataGrailConsent.getInstance().initialize(
             context = applicationContext,

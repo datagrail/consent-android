@@ -67,6 +67,32 @@ class ConfigValidatorTest {
         }
     }
 
+    @Test
+    fun testEmptyLayerElementsLogsWarningWithoutThrowing() {
+        // Create a config with a layer that has no elements
+        val emptyLayer =
+            ConsentLayer(
+                id = "emptyLayer",
+                name = "Empty Layer",
+                position = "bottom",
+                showCloseButton = true,
+                bannerApiId = "empty",
+                elements = emptyList(), // No elements
+            )
+
+        val config =
+            createValidConfig().copy(
+                layout =
+                    createValidConfig().layout.copy(
+                        firstLayerId = "emptyLayer",
+                        consentLayers = mapOf("emptyLayer" to emptyLayer),
+                    ),
+            )
+
+        // Should not throw - the validator now logs a warning instead
+        ConfigValidator.validate(config)
+    }
+
     // MARK: - Helper Methods
 
     private fun createValidConfig(): ConsentConfig {
