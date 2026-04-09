@@ -765,6 +765,7 @@ class BannerDialog : DialogFragment() {
 
     private fun dismissWithPreferences(prefs: ConsentPreferences) {
         onDismissListener?.invoke(prefs)
+        onDismissListener = null  // Clear listener to prevent double invocation in onDismiss()
         dismiss()
     }
 

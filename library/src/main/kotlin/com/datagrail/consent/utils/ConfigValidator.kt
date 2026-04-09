@@ -58,7 +58,7 @@ object ConfigValidator {
         // Validate that all layers have at least one element
         config.layout.consentLayers.forEach { (layerId, layer) ->
             if (layer.elements.isEmpty()) {
-                throw ConsentException.ValidationError("Layer '$layerId' has no elements")
+                ConsentLogger.w("Layer '$layerId' has no elements")
             }
         }
     }

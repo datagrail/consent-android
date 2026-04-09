@@ -235,6 +235,24 @@ class ConsentConfigParserTest {
     }
 
     @Test
+    fun `test parse config without dc field defaults to null`() {
+        val configFile = File(javaClass.classLoader?.getResource("config-no-dc.json")?.file ?: "")
+        assertTrue("Config file should exist", configFile.exists())
+
+        val config = json.decodeFromString<ConsentConfig>(configFile.readText())
+
+        // dc is absent from this config and should be null
+        assertNull(config.dc)
+
+        // Verify the rest of the config parsed correctly
+        assertEquals("cc959465-747d-4c81-8bc1-5dcd34dc3756", config.version)
+        assertEquals("0dd5bdf3-b55e-4d97-8a06-e14b17660b94", config.consentContainerVersionId)
+        assertEquals("ac46d8ad-a67a-431f-a5d5-9e3eb922dae7", config.dgCustomerId)
+        assertEquals("categorize", config.dch)
+        assertFalse(config.testMode)
+    }
+
+    @Test
     fun `test parse config with gpcDntLayerId present in no-sync-ot config`() {
         val configFile = File(javaClass.classLoader?.getResource("config-no-sync-ot.json")?.file ?: "")
         val config = json.decodeFromString<ConsentConfig>(configFile.readText())
