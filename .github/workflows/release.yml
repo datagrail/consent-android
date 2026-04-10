@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Tag & Publish
@@ -51,6 +55,15 @@ jobs:
         if: steps.tag_check.outputs.exists == 'false'
         run: ./gradlew :library:assembleRelease
 
+      - name: Publish to Maven Central
+        if: steps.tag_check.outputs.exists == 'false'
+        run: ./gradlew :library:publishAndReleaseToMavenCentral --no-configuration-cache
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+
       - name: Create git tag
         if: steps.tag_check.outputs.exists == 'false'
         run: |
@@ -66,12 +79,3 @@ jobs:
             --title "${{ steps.version.outputs.version }}" \
             --generate-notes \
             library/build/outputs/aar/*-release.aar
-
-      - name: Publish to Maven Central
-        if: steps.tag_check.outputs.exists == 'false'
-        run: ./gradlew :library:publishAndReleaseToMavenCentral --no-configuration-cache
-        env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
