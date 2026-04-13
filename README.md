@@ -124,6 +124,23 @@ The SDK is written in Kotlin but provides **full Java interoperability** through
 
 **[→ Java Integration Guide](JAVA_INTEGRATION.md)** - Complete examples for Java applications
 
+## WebView Integration
+
+The SDK provides **WebView consent injection** to synchronize native consent preferences with web content loaded in your app's WebViews. This ensures consistent consent state between native and web contexts.
+
+**[→ WebView Integration Guide](WEBVIEW_INTEGRATION.md)** - Inject consent into WebViews
+
+Quick example:
+
+```kotlin
+webView.webViewClient = object : WebViewClient() {
+    override fun onPageFinished(view: WebView?, url: String?) {
+        super.onPageFinished(view, url)
+        view?.let { DataGrailWebViewHelper.injectConsentPreferences(it) }
+    }
+}
+```
+
 ## Permissions
 
 Add to your `AndroidManifest.xml`:
@@ -137,6 +154,7 @@ Add to your `AndroidManifest.xml`:
 The SDK stores consent data in EncryptedSharedPreferences (`com.datagrail.consent.prefs`). To prevent this data from being included in cloud backups or device transfers, add backup exclusion rules to your app:
 
 **Pre-API 31** (`fullBackupContent`):
+
 ```xml
 <full-backup-content>
     <exclude domain="sharedpref" path="com.datagrail.consent.prefs.xml" />
@@ -144,6 +162,7 @@ The SDK stores consent data in EncryptedSharedPreferences (`com.datagrail.consen
 ```
 
 **API 31+** (`dataExtractionRules`):
+
 ```xml
 <data-extraction-rules>
     <cloud-backup>
@@ -168,6 +187,7 @@ You can customize the banner colors to match your app's branding by overriding t
 **[→ Dark Mode & Customization Guide](DARK_MODE_CUSTOMIZATION.md)** - Complete customization documentation with examples
 
 Available customizable colors:
+
 - `consent_background` - Dialog/banner background
 - `consent_text_primary` - Main text and headings
 - `consent_text_secondary` - Secondary text and descriptions

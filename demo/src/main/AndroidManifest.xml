@@ -22,5 +22,9 @@
             android:name=".JavaMainActivity"
             android:exported="false"
             android:label="Java Demo" />
+        <activity
+            android:name=".WebViewDemoActivity"
+            android:exported="false"
+            android:label="WebView Demo" />
     </application>
 </manifest>

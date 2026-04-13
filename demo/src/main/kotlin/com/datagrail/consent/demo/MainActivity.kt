@@ -3,6 +3,7 @@ package com.datagrail.consent.demo
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -30,6 +31,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var showBannerModalButton: Button
     private lateinit var showBannerFullScreenButton: Button
     private lateinit var resetButton: Button
+    private lateinit var webViewDemoButton: Button
     private lateinit var policyCard: CardView
     private lateinit var policyContainer: LinearLayout
     private lateinit var preferencesCard: CardView
@@ -69,6 +71,7 @@ class MainActivity : AppCompatActivity() {
         showBannerModalButton = findViewById(R.id.showBannerModalButton)
         showBannerFullScreenButton = findViewById(R.id.showBannerFullScreenButton)
         resetButton = findViewById(R.id.resetButton)
+        webViewDemoButton = findViewById(R.id.webViewDemoButton)
         policyCard = findViewById(R.id.policyCard)
         policyContainer = findViewById(R.id.policyContainer)
         preferencesCard = findViewById(R.id.preferencesCard)
@@ -84,6 +87,7 @@ class MainActivity : AppCompatActivity() {
         showBannerModalButton.setOnClickListener { showBanner(BannerDisplayStyle.MODAL) }
         showBannerFullScreenButton.setOnClickListener { showBanner(BannerDisplayStyle.FULL_SCREEN) }
         resetButton.setOnClickListener { resetSdk() }
+        webViewDemoButton.setOnClickListener { launchWebViewDemo() }
         clearLogButton.setOnClickListener { clearLogs() }
         copyLogButton.setOnClickListener { copyLogs() }
     }
@@ -251,6 +255,12 @@ class MainActivity : AppCompatActivity() {
         updateStatus("SDK reset - reinitialize")
         policyCard.visibility = View.GONE
         preferencesCard.visibility = View.GONE
+    }
+
+    private fun launchWebViewDemo() {
+        log("INFO", "Launching WebView demo")
+        val intent = Intent(this, WebViewDemoActivity::class.java)
+        startActivity(intent)
     }
 
     private fun enableButtons(enabled: Boolean) {
