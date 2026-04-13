@@ -4,10 +4,15 @@ import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
 import com.datagrail.consent.storage.ConsentStorage
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.net.URLEncoder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 
 /**
@@ -26,6 +31,22 @@ internal class ConsentService(
         val cookieOptions: Map<String, Boolean>,
         val sessionId: String,
         val uniqueId: String,
+    )
+
+    @Serializable
+    private data class SaveOpenRequest(
+        val customer: String,
+        @SerialName("user_id")
+        val userId: String,
+        @SerialName("current_page")
+        val currentPage: String,
+        @SerialName("policy_name")
+        val policyName: String,
+        val action: String,
+        @SerialName("user_agent")
+        val userAgent: String,
+        val language: String,
+        val timestamp: String,
     )
 
     companion object {
@@ -110,17 +131,29 @@ internal class ConsentService(
      */
     suspend fun saveOpen(config: ConsentConfig) {
         val uniqueId = storage.getOrCreateUniqueId()
-        val sessionId = UUID.randomUUID().toString()
 
-        val url =
-            "https://$privacyDomain/api/v1/save_open" +
-                "?customerId=${encodeParam(config.dgCustomerId)}" +
-                "&sessionId=${encodeParam(sessionId)}" +
-                "&uniqueId=${encodeParam(uniqueId)}" +
-                "&consentPolicy=${encodeParam("ConsentPolicy")}"
+        val baseUrl = config.analyticsEndpoint?.let { "https://$it" } ?: "https://$privacyDomain"
+        val url = "$baseUrl/save_open"
+
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+
+        val jsonBody = Json.encodeToString(
+            SaveOpenRequest(
+                customer = config.dgCustomerId,
+                userId = uniqueId,
+                currentPage = "",
+                policyName = config.consentPolicy.name,
+                action = "open",
+                userAgent = System.getProperty("http.agent") ?: "",
+                language = Locale.getDefault().toLanguageTag(),
+                timestamp = dateFormat.format(Date()),
+            ),
+        )
 
         try {
-            networkClient.request(url = url, method = HTTPMethod.GET)
+            networkClient.request(url = url, method = HTTPMethod.POST, body = jsonBody)
         } catch (e: Exception) {
             // Queue for retry on failure
             val eventJson =
@@ -128,6 +161,7 @@ internal class ConsentService(
                     mapOf(
                         "type" to "save_open",
                         "url" to url,
+                        "body" to jsonBody,
                         "timestamp" to System.currentTimeMillis().toString(),
                     ),
                 )
@@ -170,7 +204,13 @@ internal class ConsentService(
                         successCount++
                     }
                     "save_open" -> {
-                        networkClient.request(url = url, method = HTTPMethod.GET)
+                        val body = event["body"]
+                        if (body != null) {
+                            networkClient.request(url = url, method = HTTPMethod.POST, body = body)
+                        } else {
+                            // Legacy format (pre-analytics-endpoint) — GET fallback
+                            networkClient.request(url = url, method = HTTPMethod.GET)
+                        }
                         successCount++
                     }
                 }

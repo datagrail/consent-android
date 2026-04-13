@@ -27,6 +27,7 @@ data class ConsentConfig(
     val dch: String,
     val dc: String,
     val privacyDomain: String,
+    val analyticsEndpoint: String? = null,
     val plugins: Plugins,
     val testMode: Boolean,
     val ignoreDoNotTrack: Boolean,

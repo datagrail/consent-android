@@ -33,30 +33,53 @@ class ConsentServiceSecurityTest {
         service = ConsentService(mockNetworkClient, mockStorage, "consent.example.com")
     }
 
-    // MARK: - URL Encoding Tests
+    // MARK: - saveOpen POST Tests
 
     @Test
-    fun `saveOpen URL-encodes customerId parameter`() =
+    fun `saveOpen sends POST request with JSON body`() =
         runTest {
-            val configWithSpecialChars =
-                testConfig.copy(dgCustomerId = "customer&id=with spaces")
             whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
 
-            service.saveOpen(configWithSpecialChars)
+            service.saveOpen(testConfig)
+
+            val urlCaptor = argumentCaptor<String>()
+            val methodCaptor = argumentCaptor<HTTPMethod>()
+            val bodyCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), methodCaptor.capture(), bodyCaptor.capture(), anyOrNull())
+
+            assertEquals("Should use POST", HTTPMethod.POST, methodCaptor.firstValue)
+            assertTrue("Should target /save_open", urlCaptor.firstValue.endsWith("/save_open"))
+            assertTrue("Should start with https", urlCaptor.firstValue.startsWith("https://"))
+
+            val body = bodyCaptor.firstValue
+            assertTrue("Body should contain customer", body.contains("\"customer\":\"test-customer-id\""))
+            assertTrue("Body should contain user_id", body.contains("\"user_id\":"))
+            assertTrue("Body should contain policy_name", body.contains("\"policy_name\":"))
+            assertTrue("Body should contain action", body.contains("\"action\":\"open\""))
+            assertTrue("Body should contain user_agent", body.contains("\"user_agent\":"))
+            assertTrue("Body should contain language", body.contains("\"language\":"))
+            assertTrue("Body should contain timestamp", body.contains("\"timestamp\":"))
+        }
+
+    @Test
+    fun `saveOpen uses analyticsEndpoint when configured`() =
+        runTest {
+            val configWithEndpoint = testConfig.copy(analyticsEndpoint = "analytics.example.com")
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            service.saveOpen(configWithEndpoint)
 
             val urlCaptor = argumentCaptor<String>()
             verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
-            val capturedUrl = urlCaptor.firstValue
 
-            // Should be URL-encoded: & -> %26, = -> %3D, space -> +
             assertTrue(
-                "URL should contain encoded customerId, got: $capturedUrl",
-                capturedUrl.contains("customerId=customer%26id%3Dwith+spaces"),
+                "Should use analyticsEndpoint, got: ${urlCaptor.firstValue}",
+                urlCaptor.firstValue.startsWith("https://analytics.example.com/"),
             )
         }
 
     @Test
-    fun `saveOpen URL-encodes all query parameters`() =
+    fun `saveOpen falls back to privacyDomain when analyticsEndpoint is null`() =
         runTest {
             whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
 
@@ -64,19 +87,15 @@ class ConsentServiceSecurityTest {
 
             val urlCaptor = argumentCaptor<String>()
             verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
-            val capturedUrl = urlCaptor.firstValue
 
-            // Verify URL structure
-            assertTrue("Should start with https", capturedUrl.startsWith("https://"))
-            assertTrue("Should contain save_open endpoint", capturedUrl.contains("/api/v1/save_open"))
-            assertTrue("Should contain customerId param", capturedUrl.contains("customerId="))
-            assertTrue("Should contain sessionId param", capturedUrl.contains("sessionId="))
-            assertTrue("Should contain uniqueId param", capturedUrl.contains("uniqueId="))
-            assertTrue("Should contain consentPolicy param", capturedUrl.contains("consentPolicy="))
+            assertTrue(
+                "Should use privacyDomain, got: ${urlCaptor.firstValue}",
+                urlCaptor.firstValue.startsWith("https://consent.example.com/"),
+            )
         }
 
     @Test
-    fun `saveOpen does not contain unencoded special characters in params`() =
+    fun `saveOpen body does not contain unescaped HTML in customer field`() =
         runTest {
             val configWithHtml =
                 testConfig.copy(dgCustomerId = "<script>alert('xss')</script>")
@@ -84,12 +103,12 @@ class ConsentServiceSecurityTest {
 
             service.saveOpen(configWithHtml)
 
-            val urlCaptor = argumentCaptor<String>()
-            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
-            val capturedUrl = urlCaptor.firstValue
+            val bodyCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(any(), any(), bodyCaptor.capture(), anyOrNull())
+            val body = bodyCaptor.firstValue
 
-            assertFalse("URL should not contain raw <", capturedUrl.contains("<script>"))
-            assertFalse("URL should not contain raw >", capturedUrl.contains("</script>"))
+            // JSON encoding escapes angle brackets
+            assertFalse("Body should not contain raw <script>", body.contains("<script>"))
         }
 
     // MARK: - Queue Cap Tests
