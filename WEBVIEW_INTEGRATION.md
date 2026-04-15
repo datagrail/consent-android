@@ -1,32 +1,58 @@
 # WebView Integration Guide
 
-This guide shows how to inject DataGrail consent preferences into WebViews in your Android app.
+This guide shows how to inject DataGrail consent preferences into WebViews in your Android app using HTTP cookies.
 
 ## Overview
 
-The `DataGrailWebViewHelper` allows you to synchronize consent preferences from the native Android SDK into WebViews. This ensures that:
+The `DataGrailWebViewHelper` synchronizes consent preferences from the native Android SDK into WebViews via HTTP cookies. This ensures that:
 
-- Web pages loaded in your app's WebViews respect the user's consent choices
+- Consent preferences are available **before** the page loads (no timing issues)
+- Web pages respect the user's consent choices from the first network request
 - Consent state is consistent between native and web contexts
-- The web banner API (`DG_BANNER_API`) receives the correct preferences
+- Web applications can read consent from cookies
 
 ## How It Works
 
-The helper injects JavaScript that:
+The helper injects three HTTP cookies **before** loading the web page:
 
-1. **Stores preferences** in `window.datagrailConsent` for debugging and inspection
-2. **Calls `DG_BANNER_API.setConsentPreferences()`** if the web banner API is available on the page
-3. **Uses the `runPreferenceCallbacks: false` config** to avoid triggering GTM callbacks during injection
+1. **`datagrail_consent_preferences[_s]`** - Consent state per category (format: `"key1:1|key2:0"`)
+2. **`datagrail_consent_id[_s]`** - User identifier (format: `"{customerId}.{uuid}"`)
+3. **`datagrail_consent_version[_s]`** - Configuration version string
+
+The `_s` suffix is added when `allCookieSubdomains` is enabled in your SDK configuration.
+
+**Cookie domain** is automatically extracted from the target URL:
+- **Cross-subdomain mode** (allCookieSubdomains=true): `.example.com` (applies to all subdomains)
+- **Exact domain mode** (allCookieSubdomains=false): `www.example.com` (applies only to exact host)
+
+## Migration from JavaScript Injection
+
+**⚠️ Breaking Changes in v1.5.0:**
+
+The WebView helper has been completely rewritten to use HTTP cookie injection instead of JavaScript injection.
+
+**Removed:**
+- `injectConsentPreferences(webView)` - replaced by `loadWebViewWithConsent(webView, url, callback)`
+- `updateConsentPreferences(webView, callback)` - replaced by `updateConsentCookies(webView, callback)`
+- JavaScript injection via `evaluateJavascript()`
+- `window.datagrailConsent` global variable
+- `DG_BANNER_API.setConsentPreferences()` calls
+
+**Benefits of cookie-based approach:**
+- ✅ No timing issues - consent available from first request
+- ✅ No JavaScript required
+- ✅ Works even if page blocks JavaScript execution
+- ✅ Matches iOS SDK behavior
+- ✅ More reliable and secure
 
 ## Usage
 
-### 1. Basic WebView Setup
+### 1. Load WebView with Consent Cookies (Recommended)
 
-Inject consent preferences when pages load:
+The recommended approach is to use `loadWebViewWithConsent()` which injects cookies and loads the URL in one call:
 
 ```kotlin
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import com.datagrail.consent.webview.DataGrailWebViewHelper
 
 class MyActivity : AppCompatActivity() {
@@ -36,29 +62,46 @@ class MyActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         webView = findViewById(R.id.webView)
-        webView.settings.javaScriptEnabled = true
+        webView.settings.javaScriptEnabled = true // Still recommended for web apps
 
-        // Inject consent when page finishes loading
-        webView.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(
-                view: WebView?,
-                url: String?
-            ) {
-                super.onPageFinished(view, url)
-                view?.let {
-                    DataGrailWebViewHelper.injectConsentPreferences(it)
+        val url = "https://example.com"
+
+        DataGrailWebViewHelper.loadWebViewWithConsent(webView, url) { result ->
+            result.fold(
+                onSuccess = {
+                    Log.d("Consent", "Cookies injected, page loaded")
+                },
+                onFailure = { error ->
+                    Log.e("Consent", "Failed to inject cookies: ${error.message}")
                 }
-            }
+            )
         }
-
-        webView.loadUrl("https://example.com")
     }
 }
 ```
 
-### 2. Updating Consent Dynamically
+### 2. Manual Cookie Injection
 
-Update preferences in an already-loaded WebView when consent changes:
+If you need more control over URL loading, use `injectConsentCookies()`:
+
+```kotlin
+import com.datagrail.consent.webview.DataGrailWebViewHelper
+
+val url = "https://example.com"
+
+DataGrailWebViewHelper.injectConsentCookies(webView, url) { result ->
+    if (result.isSuccess) {
+        // Cookies injected successfully, now load URL
+        webView.loadUrl(url)
+    } else {
+        Log.e("Consent", "Cookie injection failed: ${result.exceptionOrNull()?.message}")
+    }
+}
+```
+
+### 3. Update Cookies When Consent Changes
+
+Update cookies in an already-loaded WebView when consent preferences change:
 
 ```kotlin
 import com.datagrail.consent.DataGrailConsent
@@ -66,24 +109,23 @@ import com.datagrail.consent.webview.DataGrailWebViewHelper
 
 // Listen for consent changes
 DataGrailConsent.getInstance().onConsentChanged { _ ->
-    DataGrailWebViewHelper.updateConsentPreferences(webView) { success ->
-        if (success) {
-            Log.d("Consent", "WebView updated successfully")
-        } else {
-            Log.e("Consent", "WebView update failed")
-        }
+    DataGrailWebViewHelper.updateConsentCookies(webView) { result ->
+        result.fold(
+            onSuccess = { Log.d("Consent", "Cookies updated successfully") },
+            onFailure = { e -> Log.e("Consent", "Cookie update failed: ${e.message}") }
+        )
     }
 }
 ```
 
-### 3. Java Usage
+### 4. Java Usage
 
 The helper is fully compatible with Java:
 
 ```java
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import com.datagrail.consent.webview.DataGrailWebViewHelper;
+import kotlin.Unit;
 
 public class MyActivity extends AppCompatActivity {
     private WebView webView;
@@ -95,105 +137,159 @@ public class MyActivity extends AppCompatActivity {
         webView = findViewById(R.id.webView);
         webView.getSettings().setJavaScriptEnabled(true);
 
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                if (view != null) {
-                    DataGrailWebViewHelper.injectConsentPreferences(view);
-                }
-            }
-        });
+        String url = "https://example.com";
 
-        webView.loadUrl("https://example.com");
+        DataGrailWebViewHelper.loadWebViewWithConsent(webView, url, result -> {
+            if (result.isSuccess()) {
+                Log.d("Consent", "Cookies injected, page loaded");
+            } else {
+                Throwable error = result.exceptionOrNull();
+                Log.e("Consent", "Failed: " + (error != null ? error.getMessage() : "Unknown error"));
+            }
+            return Unit.INSTANCE;
+        });
     }
 }
 ```
 
 ## API Reference
 
-### `injectConsentPreferences(webView: WebView)`
+### `loadWebViewWithConsent(webView: WebView, url: String, callback: ((Result<Unit>) -> Unit)?)`
 
-Injects current consent preferences into a WebView.
+Injects consent cookies into a WebView and loads the URL.
 
-- **When to call**: In `WebViewClient.onPageFinished()` (recommended) or `onPageStarted()` for earlier injection
-- **Behavior**:
-  - Gets current preferences via `DataGrailConsent.getInstance().getCategories()`
-  - Injects JavaScript immediately via `evaluateJavascript()`
-  - Does nothing if SDK is not initialized or no preferences exist
+**Parameters:**
+- `webView`: The WebView to inject cookies into and load
+- `url`: The URL to load (must include protocol, e.g., "https://example.com")
+- `callback`: Optional callback with Result.success or Result.failure
 
-**Example:**
-```kotlin
-DataGrailWebViewHelper.injectConsentPreferences(webView)
-```
-
-### `updateConsentPreferences(webView: WebView, callback: ((Boolean) -> Unit)?)`
-
-Updates consent preferences in an already-loaded WebView.
-
-- **When to call**: When consent changes after the page has loaded
-- **Parameters**:
-  - `webView`: The WebView to update
-  - `callback`: Optional callback invoked with `true` if successful, `false` otherwise
-- **Behavior**: Same as `injectConsentPreferences` but includes result callback
+**Behavior:**
+1. Gets current SDK configuration and preferences
+2. Extracts cookie domain from target URL
+3. Injects three HTTP cookies via `CookieManager`
+4. Loads the specified URL
+5. Invokes callback with success or error
 
 **Example:**
 ```kotlin
-DataGrailWebViewHelper.updateConsentPreferences(webView) { success ->
-    Log.d("Consent", "Update result: $success")
+DataGrailWebViewHelper.loadWebViewWithConsent(webView, "https://example.com") { result ->
+    // Handle result
 }
 ```
 
-## Injected JavaScript
+### `injectConsentCookies(webView: WebView, url: String, callback: ((Result<Unit>) -> Unit)?)`
 
-The helper injects this JavaScript code:
+Injects consent cookies without loading the URL.
 
-```javascript
-(function() {
-    const preferences = {"isCustomised":true,"cookieOptions":[...]};
-    const config = { "runPreferenceCallbacks": false };
+**Parameters:**
+- `webView`: The WebView to inject cookies into
+- `url`: The target URL (used for cookie domain, not loaded)
+- `callback`: Optional callback with Result.success or Result.failure
 
-    // Store preferences globally for debugging
-    window.datagrailConsent = preferences;
+**Use case:** When you need to inject cookies but want to handle URL loading yourself.
 
-    // If DG_BANNER_API is available, use it to set preferences
-    if (window.DG_BANNER_API && typeof window.DG_BANNER_API.setConsentPreferences === 'function') {
-        window.DG_BANNER_API.setConsentPreferences(preferences, config);
-        console.log('[DataGrail Android SDK] Set consent preferences via DG_BANNER_API');
-    } else {
-        console.log('[DataGrail Android SDK] DG_BANNER_API not available, preferences stored in window.datagrailConsent');
+**Example:**
+```kotlin
+DataGrailWebViewHelper.injectConsentCookies(webView, "https://example.com") { result ->
+    if (result.isSuccess) {
+        webView.loadUrl("https://example.com")
     }
-})();
+}
 ```
+
+### `updateConsentCookies(webView: WebView, callback: ((Result<Unit>) -> Unit)?)`
+
+Updates consent cookies in an already-loaded WebView.
+
+**Parameters:**
+- `webView`: The WebView to update (must have a loaded URL)
+- `callback`: Optional callback with Result.success or Result.failure
+
+**Use case:** When consent preferences change after the page has loaded.
+
+**Example:**
+```kotlin
+DataGrailWebViewHelper.updateConsentCookies(webView) { result ->
+    // Handle result
+}
+```
+
+## Cookie Details
+
+### Cookie Names
+
+**Base names:**
+- `datagrail_consent_preferences`
+- `datagrail_consent_id`
+- `datagrail_consent_version`
+
+**With cross-subdomain suffix (when `allCookieSubdomains` is true):**
+- `datagrail_consent_preferences_s`
+- `datagrail_consent_id_s`
+- `datagrail_consent_version_s`
+
+### Cookie Format
+
+**Preferences cookie:**
+```
+datagrail_consent_preferences=category_marketing:1|category_analytics:0|category_essential:1
+```
+
+**ID cookie:**
+```
+datagrail_consent_id=8fb34a12-dfe5-41c4-99e2-b8d2fe3f4f89.a1b2c3d4-e5f6-7890-abcd-ef1234567890
+```
+Format: `{customerId}.{persistentUUID}`
+
+**Version cookie:**
+```
+datagrail_consent_version=1.2.3
+```
+
+### Cookie Attributes
+
+All cookies are set with:
+- `Path=/` - Available across entire domain
+- `Max-Age=31536000` - 1 year expiration
+- `Domain=.example.com` or `Domain=www.example.com` - Based on cross-subdomain setting
 
 ### Verification
 
-You can verify injection in your WebView by executing JavaScript:
+Verify cookies are set correctly using JavaScript in the WebView:
 
 ```kotlin
 webView.evaluateJavascript("""
     (function() {
-        return JSON.stringify(window.datagrailConsent, null, 2);
+        return document.cookie;
     })();
 """) { result ->
-    Log.d("Consent", "Injected preferences: $result")
+    Log.d("Consent", "Cookies: $result")
 }
 ```
 
+Or use Chrome DevTools:
+1. Connect device and enable USB debugging
+2. Open `chrome://inspect` in Chrome
+3. Inspect your WebView
+4. Open Application tab → Cookies
+5. Verify DataGrail cookies are present
+
 ## Requirements
 
-- **JavaScript must be enabled**: `webView.settings.javaScriptEnabled = true`
 - **SDK must be initialized**: Call `DataGrailConsent.getInstance().initialize()` first
+- **Valid URL**: Must include protocol (e.g., "https://example.com")
 - **Internet permission**: Already required by the SDK
+- **JavaScript enabled**: Recommended for web applications (not required for cookie injection)
 
 ## Demo
 
 See `WebViewDemoActivity` in the demo app for a complete working example with:
 
 - URL input and navigation
+- Cookie injection before page load
+- Cookie verification via JavaScript
+- Consent change listener with automatic cookie updates
 - Console log capture
-- Preference verification buttons
-- Auto-checking injection on page load
 
 Run the demo:
 
@@ -205,43 +301,63 @@ Then navigate to "WebView Demo" from the main screen.
 
 ## Troubleshooting
 
-### Preferences not injecting
+### Cookies not being set
 
-**Problem**: `window.datagrailConsent` is undefined
+**Problem**: Cookies are not visible in the WebView
 
 **Solutions**:
 - Ensure SDK is initialized: `DataGrailConsent.getInstance().initialize()`
-- Check JavaScript is enabled: `webView.settings.javaScriptEnabled = true`
-- Verify injection timing: Call in `onPageFinished()` not `onPageStarted()` or earlier
+- Check callback for errors: Look at `result.exceptionOrNull()?.message`
+- Verify URL includes protocol: Use `https://example.com`, not `example.com`
+- Enable logging: `DataGrailConsent.setLogLevel(LogLevel.DEBUG)`
+- Check third-party cookie settings: Helper calls `setAcceptThirdPartyCookies(webView, true)`
 
-### DG_BANNER_API not available
+### Wrong cookie domain
 
-**Problem**: Console shows "DG_BANNER_API not available"
+**Problem**: Cookies set for wrong domain
 
-**Explanation**: This is normal if the web page doesn't have the DataGrail web banner installed. The preferences are still stored in `window.datagrailConsent` for your own use.
+**Explanation**: Cookie domain is extracted from the **target URL**, not from the SDK's `privacyDomain` config field. If loading `https://www.example.com`, cookies will be set for `www.example.com` or `.example.com` (depending on cross-subdomain setting).
 
-### Preferences not updating
+### Cookies not updating after consent change
 
-**Problem**: Consent changes in native app but WebView doesn't update
+**Problem**: User changes consent but WebView still shows old consent
 
 **Solution**: Set up a consent change listener:
 
 ```kotlin
 DataGrailConsent.getInstance().onConsentChanged { _ ->
-    DataGrailWebViewHelper.updateConsentPreferences(webView)
+    DataGrailWebViewHelper.updateConsentCookies(webView) { result ->
+        // Optionally reload page to apply new consent
+        if (result.isSuccess) {
+            webView.reload()
+        }
+    }
 }
 ```
 
+**Note**: `updateConsentCookies()` updates cookies but does not reload the page. The web application may need to detect cookie changes, or you can call `webView.reload()` after updating.
+
+### Cross-subdomain cookies not working
+
+**Problem**: Cookies don't work across subdomains
+
+**Solutions**:
+- Verify `allCookieSubdomains` is true in your SDK configuration
+- Check cookie domain has leading dot: `.example.com` (not `example.com`)
+- Ensure cookies are set before any navigation to subdomains
+
 ## Best Practices
 
-1. **Inject at the right time**: Use `onPageFinished()` to ensure the WebView is ready to execute JavaScript
-2. **Handle errors gracefully**: The helper logs errors but doesn't throw exceptions
+1. **Use `loadWebViewWithConsent()`**: This is the simplest and most reliable approach
+2. **Handle errors**: Check the Result callback and log failures
 3. **Listen for changes**: Set up `onConsentChanged` to keep WebViews synchronized
-4. **Test without banner**: The helper works even if `DG_BANNER_API` isn't present
-5. **Enable logging**: Use `DataGrailConsent.setLogLevel(LogLevel.DEBUG)` during development
+4. **Verify in development**: Use Chrome DevTools to inspect cookies during development
+5. **Enable logging**: Use `DataGrailConsent.setLogLevel(LogLevel.DEBUG)` to see cookie injection logs
+6. **Consider page reload**: After updating cookies, your web app may need to reload to apply new consent
 
 ## Related Documentation
 
 - [README.md](README.md) - SDK overview and setup
 - [JAVA_INTEGRATION.md](JAVA_INTEGRATION.md) - Java usage examples
+- [REANCHOR_ANDROID_WEBVIEW_COOKIES.md](REANCHOR_ANDROID_WEBVIEW_COOKIES.md) - Technical implementation details
 - iOS equivalent: See `consent-ios` repository's WebView integration guide

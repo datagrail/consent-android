@@ -1,13 +1,11 @@
 package com.datagrail.consent.demo
 
 import android.annotation.SuppressLint
-import android.graphics.Bitmap
 import android.os.Bundle
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ScrollView
@@ -20,17 +18,17 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Demo activity showing how to inject DataGrail consent preferences into a WebView.
+ * Demo activity showing how to inject DataGrail consent preferences into a WebView via HTTP cookies.
  *
  * This demonstrates:
- * - Injecting consent on page load
- * - Updating consent when it changes
- * - Verifying injection via JavaScript console
+ * - Injecting consent cookies before page load
+ * - Updating consent cookies when preferences change
+ * - Verifying cookie injection via JavaScript console
  */
 class WebViewDemoActivity : AppCompatActivity() {
     private lateinit var urlInput: EditText
     private lateinit var goButton: Button
-    private lateinit var getPreferencesButton: Button
+    private lateinit var verifyCookiesButton: Button
     private lateinit var checkApiButton: Button
     private lateinit var webView: WebView
     private lateinit var logTextView: TextView
@@ -38,32 +36,34 @@ class WebViewDemoActivity : AppCompatActivity() {
     private lateinit var clearLogButton: Button
 
     private val logEntries = mutableListOf<String>()
-    private var lastInjectedUrl: String? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_webview_demo)
 
-        supportActionBar?.title = "WebView Demo"
+        supportActionBar?.title = "WebView Demo (Cookies)"
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         initViews()
         setupWebView()
         setupButtons()
 
-        log("[Demo] WebView Demo launched")
+        log("[Demo] WebView Demo launched (cookie injection mode)")
     }
 
     private fun initViews() {
         urlInput = findViewById(R.id.urlInput)
         goButton = findViewById(R.id.goButton)
-        getPreferencesButton = findViewById(R.id.getPreferencesButton)
+        verifyCookiesButton = findViewById(R.id.getPreferencesButton) // Reuse existing button
         checkApiButton = findViewById(R.id.checkApiButton)
         webView = findViewById(R.id.webView)
         logTextView = findViewById(R.id.logTextView)
         logScrollView = findViewById(R.id.logScrollView)
         clearLogButton = findViewById(R.id.clearLogButton)
+
+        // Update button text
+        verifyCookiesButton.text = "Verify Cookies"
 
         // Set default URL
         urlInput.setText("https://datagrail.io")
@@ -77,36 +77,6 @@ class WebViewDemoActivity : AppCompatActivity() {
             databaseEnabled = true
         }
 
-        // Set WebViewClient to intercept page loads and inject consent
-        webView.webViewClient =
-            object : WebViewClient() {
-                override fun onPageFinished(
-                    view: WebView?,
-                    url: String?,
-                ) {
-                    super.onPageFinished(view, url)
-                    log("[WebView] Page loaded: $url")
-
-                    // Only inject if this is a new URL (prevent duplicate injections on same page)
-                    if (url != lastInjectedUrl) {
-                        lastInjectedUrl = url
-
-                        // Inject consent preferences after page loads
-                        view?.let {
-                            DataGrailWebViewHelper.injectConsentPreferences(it)
-                            log("[Android SDK] Injected consent preferences into WebView")
-                        }
-
-                        // Automatically check if consent preferences were injected (with small delay)
-                        view?.postDelayed({
-                            checkInjectedConsent()
-                        }, 500)
-                    } else {
-                        log("[WebView] Same URL, skipping injection")
-                    }
-                }
-            }
-
         // Set WebChromeClient to capture console messages
         webView.webChromeClient =
             object : WebChromeClient() {
@@ -116,11 +86,14 @@ class WebViewDemoActivity : AppCompatActivity() {
                 }
             }
 
-        // Listen for consent changes and update the WebView
+        // Listen for consent changes and update cookies
         DataGrailConsent.getInstance().onConsentChanged { _ ->
-            log("[Android SDK] Consent changed, updating WebView...")
-            DataGrailWebViewHelper.updateConsentPreferences(webView) { success ->
-                log("[Android SDK] WebView update ${if (success) "succeeded" else "failed"}")
+            log("[Android SDK] Consent changed, updating cookies...")
+            DataGrailWebViewHelper.updateConsentCookies(webView) { result ->
+                result.fold(
+                    onSuccess = { log("[Android SDK] Cookies updated successfully") },
+                    onFailure = { e -> log("[Android SDK] Cookie update failed: ${e.message}") },
+                )
             }
         }
     }
@@ -133,8 +106,8 @@ class WebViewDemoActivity : AppCompatActivity() {
             }
         }
 
-        getPreferencesButton.setOnClickListener {
-            getConsentPreferences()
+        verifyCookiesButton.setOnClickListener {
+            verifyCookies()
         }
 
         checkApiButton.setOnClickListener {
@@ -149,38 +122,58 @@ class WebViewDemoActivity : AppCompatActivity() {
     }
 
     private fun loadUrl(url: String) {
-        log("[Demo] Loading URL: $url")
+        log("[Demo] Loading URL with consent cookies: $url")
         var urlToLoad = url
         if (!urlToLoad.startsWith("http://") && !urlToLoad.startsWith("https://")) {
             urlToLoad = "https://$urlToLoad"
         }
-        webView.loadUrl(urlToLoad)
+
+        DataGrailWebViewHelper.loadWebViewWithConsent(webView, urlToLoad) { result ->
+            result.fold(
+                onSuccess = {
+                    log("[Android SDK] Cookies injected successfully, page loaded")
+                    // Verify cookies after a short delay
+                    webView.postDelayed({
+                        verifyCookies()
+                    }, 500)
+                },
+                onFailure = { e ->
+                    log("[Android SDK] Cookie injection failed: ${e.message}")
+                },
+            )
+        }
     }
 
-    private fun getConsentPreferences() {
-        log("[Test] Calling DG_BANNER_API.getConsentPreferences()...")
+    private fun verifyCookies() {
+        log("[Test] Reading cookies via JavaScript...")
 
         val script =
             """
             (function() {
-                if (window.DG_BANNER_API && typeof window.DG_BANNER_API.getConsentPreferences === 'function') {
-                    const prefs = window.DG_BANNER_API.getConsentPreferences();
-                    return JSON.stringify(prefs, null, 2);
+                const cookies = document.cookie;
+                if (cookies) {
+                    const cookieArray = cookies.split('; ');
+                    const dgCookies = cookieArray.filter(c => c.startsWith('datagrail_'));
+                    if (dgCookies.length > 0) {
+                        return 'Found ' + dgCookies.length + ' DataGrail cookie(s):\n' + dgCookies.join('\n');
+                    } else {
+                        return 'No DataGrail cookies found. All cookies:\n' + cookieArray.join('\n');
+                    }
                 } else {
-                    return "DG_BANNER_API.getConsentPreferences() not available";
+                    return 'No cookies found';
                 }
             })();
             """.trimIndent()
 
         webView.evaluateJavascript(script) { result ->
             if (result != null && result != "null") {
-                val cleanResult = result.trim('"').replace("\\n", "\n").replace("\\\"", "\"")
-                log("[Test] DG_BANNER_API.getConsentPreferences():")
+                val cleanResult = result.trim('"').replace("\\n", "\n")
+                log("[Test] Cookies:")
                 cleanResult.split("\n").forEach { line ->
                     log("[Test]   $line")
                 }
             } else {
-                log("[Test] No result returned")
+                log("[Test] No cookies returned")
             }
         }
     }
@@ -195,8 +188,18 @@ class WebViewDemoActivity : AppCompatActivity() {
                     hasDG_BANNER_API: typeof window.DG_BANNER_API !== 'undefined',
                     hasGetConsentPreferences: typeof window.DG_BANNER_API?.getConsentPreferences === 'function',
                     hasSetConsentPreferences: typeof window.DG_BANNER_API?.setConsentPreferences === 'function',
-                    hasDatagrailConsent: typeof window.datagrailConsent !== 'undefined'
                 };
+
+                // Also check if we can read consent cookies
+                const cookies = document.cookie.split('; ');
+                const prefCookie = cookies.find(c => c.startsWith('datagrail_consent_preferences'));
+                const idCookie = cookies.find(c => c.startsWith('datagrail_consent_id'));
+                const versionCookie = cookies.find(c => c.startsWith('datagrail_consent_version'));
+
+                checks.hasPreferencesCookie = !!prefCookie;
+                checks.hasIdCookie = !!idCookie;
+                checks.hasVersionCookie = !!versionCookie;
+
                 return JSON.stringify(checks, null, 2);
             })();
             """.trimIndent()
@@ -204,42 +207,12 @@ class WebViewDemoActivity : AppCompatActivity() {
         webView.evaluateJavascript(script) { result ->
             if (result != null && result != "null") {
                 val cleanResult = result.trim('"').replace("\\n", "\n").replace("\\\"", "\"")
-                log("[Test] API Status:")
+                log("[Test] API & Cookie Status:")
                 cleanResult.split("\n").forEach { line ->
                     log("[Test]   $line")
                 }
             } else {
                 log("[Test] No result returned")
-            }
-        }
-    }
-
-    private fun checkInjectedConsent() {
-        val script =
-            """
-            (function() {
-                if (window.datagrailConsent) {
-                    return JSON.stringify(window.datagrailConsent, null, 2);
-                } else {
-                    return "window.datagrailConsent is undefined";
-                }
-            })();
-            """.trimIndent()
-
-        webView.evaluateJavascript(script) { result ->
-            if (result != null && result != "null") {
-                val cleanResult = result.trim('"').replace("\\n", "\n").replace("\\\"", "\"")
-                if (!cleanResult.contains("undefined")) {
-                    log("[Auto-Check] Consent preferences injected:")
-                    cleanResult.split("\n").take(5).forEach { line ->
-                        log("[Auto-Check]   $line")
-                    }
-                    if (cleanResult.split("\n").size > 5) {
-                        log("[Auto-Check]   ...")
-                    }
-                } else {
-                    log("[Auto-Check] $cleanResult")
-                }
             }
         }
     }
