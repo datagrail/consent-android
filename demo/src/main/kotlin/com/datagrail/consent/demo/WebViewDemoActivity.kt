@@ -50,20 +50,26 @@ class WebViewDemoActivity : AppCompatActivity() {
         setupButtons()
 
         log("[Demo] WebView Demo launched (cookie injection mode)")
+
+        // Auto-load default URL on launch (matching iOS behavior)
+        val defaultUrl = urlInput.text.toString()
+        if (defaultUrl.isNotEmpty()) {
+            loadUrl(defaultUrl)
+        }
     }
 
     private fun initViews() {
         urlInput = findViewById(R.id.urlInput)
         goButton = findViewById(R.id.goButton)
-        verifyCookiesButton = findViewById(R.id.getPreferencesButton) // Reuse existing button
+        verifyCookiesButton = findViewById(R.id.getPreferencesButton) // Keep as "Get Preferences"
         checkApiButton = findViewById(R.id.checkApiButton)
         webView = findViewById(R.id.webView)
         logTextView = findViewById(R.id.logTextView)
         logScrollView = findViewById(R.id.logScrollView)
         clearLogButton = findViewById(R.id.clearLogButton)
 
-        // Update button text
-        verifyCookiesButton.text = "Verify Cookies"
+        // Keep original button text "Get Preferences" (matches iOS)
+        // No need to change button text - it's already "Get Preferences" in XML
 
         // Set default URL
         urlInput.setText("https://datagrail.io")
@@ -76,6 +82,23 @@ class WebViewDemoActivity : AppCompatActivity() {
             domStorageEnabled = true
             databaseEnabled = true
         }
+
+        // Set WebViewClient to handle navigation within the WebView
+        webView.webViewClient =
+            object : android.webkit.WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    log("[WebView] ✅ Page loaded: $url")
+                }
+
+                override fun shouldOverrideUrlLoading(
+                    view: WebView?,
+                    request: android.webkit.WebResourceRequest?,
+                ): Boolean {
+                    // Keep navigation within the WebView
+                    return false
+                }
+            }
 
         // Set WebChromeClient to capture console messages
         webView.webChromeClient =
@@ -107,7 +130,7 @@ class WebViewDemoActivity : AppCompatActivity() {
         }
 
         verifyCookiesButton.setOnClickListener {
-            verifyCookies()
+            getConsentPreferences()
         }
 
         checkApiButton.setOnClickListener {
@@ -132,9 +155,9 @@ class WebViewDemoActivity : AppCompatActivity() {
             result.fold(
                 onSuccess = {
                     log("[Android SDK] Cookies injected successfully, page loaded")
-                    // Verify cookies after a short delay
+                    // Auto-check cookies after a short delay
                     webView.postDelayed({
-                        verifyCookies()
+                        checkConsentCookies()
                     }, 500)
                 },
                 onFailure = { e ->
@@ -144,37 +167,60 @@ class WebViewDemoActivity : AppCompatActivity() {
         }
     }
 
-    private fun verifyCookies() {
-        log("[Test] Reading cookies via JavaScript...")
+    private fun getConsentPreferences() {
+        log("[Test] Calling DG_BANNER_API.getConsentPreferences()...")
 
         val script =
             """
             (function() {
-                const cookies = document.cookie;
-                if (cookies) {
-                    const cookieArray = cookies.split('; ');
-                    const dgCookies = cookieArray.filter(c => c.startsWith('datagrail_'));
-                    if (dgCookies.length > 0) {
-                        return 'Found ' + dgCookies.length + ' DataGrail cookie(s):\n' + dgCookies.join('\n');
-                    } else {
-                        return 'No DataGrail cookies found. All cookies:\n' + cookieArray.join('\n');
-                    }
+                if (window.DG_BANNER_API && typeof window.DG_BANNER_API.getConsentPreferences === 'function') {
+                    const prefs = window.DG_BANNER_API.getConsentPreferences();
+                    return JSON.stringify(prefs, null, 2);
                 } else {
-                    return 'No cookies found';
+                    return "DG_BANNER_API.getConsentPreferences() not available";
                 }
             })();
             """.trimIndent()
 
         webView.evaluateJavascript(script) { result ->
             if (result != null && result != "null") {
-                val cleanResult = result.trim('"').replace("\\n", "\n")
-                log("[Test] Cookies:")
+                val cleanResult = result.trim('"').replace("\\n", "\n").replace("\\\"", "\"")
+                log("[Test] DG_BANNER_API.getConsentPreferences():")
                 cleanResult.split("\n").forEach { line ->
                     log("[Test]   $line")
                 }
             } else {
-                log("[Test] No cookies returned")
+                log("[Test] No result returned")
             }
+        }
+    }
+
+    private fun checkConsentCookies() {
+        // Read cookies natively using CookieManager (not via JavaScript)
+        // This matches iOS behavior which uses native WKHTTPCookieStore
+        val cookieManager = android.webkit.CookieManager.getInstance()
+        val url = webView.url
+
+        if (url != null) {
+            val allCookies = cookieManager.getCookie(url)
+
+            if (allCookies != null) {
+                val cookieList = allCookies.split("; ")
+                val consentCookies = cookieList.filter { it.startsWith("datagrail_consent") }
+
+                if (consentCookies.isNotEmpty()) {
+                    log("[Auto-Check] Found ${consentCookies.size} DataGrail cookie(s):")
+                    consentCookies.forEach { cookie ->
+                        log("[Auto-Check]   - $cookie")
+                    }
+                } else {
+                    log("[Auto-Check] ⚠️ No DataGrail consent cookies found")
+                }
+            } else {
+                log("[Auto-Check] No cookies found for this URL")
+            }
+        } else {
+            log("[Auto-Check] WebView has no URL")
         }
     }
 
@@ -187,19 +233,8 @@ class WebViewDemoActivity : AppCompatActivity() {
                 const checks = {
                     hasDG_BANNER_API: typeof window.DG_BANNER_API !== 'undefined',
                     hasGetConsentPreferences: typeof window.DG_BANNER_API?.getConsentPreferences === 'function',
-                    hasSetConsentPreferences: typeof window.DG_BANNER_API?.setConsentPreferences === 'function',
+                    hasSetConsentPreferences: typeof window.DG_BANNER_API?.setConsentPreferences === 'function'
                 };
-
-                // Also check if we can read consent cookies
-                const cookies = document.cookie.split('; ');
-                const prefCookie = cookies.find(c => c.startsWith('datagrail_consent_preferences'));
-                const idCookie = cookies.find(c => c.startsWith('datagrail_consent_id'));
-                const versionCookie = cookies.find(c => c.startsWith('datagrail_consent_version'));
-
-                checks.hasPreferencesCookie = !!prefCookie;
-                checks.hasIdCookie = !!idCookie;
-                checks.hasVersionCookie = !!versionCookie;
-
                 return JSON.stringify(checks, null, 2);
             })();
             """.trimIndent()
@@ -207,7 +242,7 @@ class WebViewDemoActivity : AppCompatActivity() {
         webView.evaluateJavascript(script) { result ->
             if (result != null && result != "null") {
                 val cleanResult = result.trim('"').replace("\\n", "\n").replace("\\\"", "\"")
-                log("[Test] API & Cookie Status:")
+                log("[Test] API Status:")
                 cleanResult.split("\n").forEach { line ->
                     log("[Test]   $line")
                 }
