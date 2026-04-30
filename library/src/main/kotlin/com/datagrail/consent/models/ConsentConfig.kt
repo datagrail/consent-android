@@ -57,6 +57,7 @@ data class Plugins(
 @Serializable
 data class ConsentPolicy(
     val name: String,
+    val uuid: String? = null,
     val default: Boolean,
 )
 

@@ -21,6 +21,7 @@ internal class ConsentService(
     @Serializable
     private data class SavePreferencesRequest(
         val consentPolicy: String,
+        val policyUuid: String? = null,
         val customerId: String,
         val isCustomised: Boolean,
         val cookieOptions: Map<String, Boolean>,
@@ -55,7 +56,8 @@ internal class ConsentService(
 
         val requestBody =
             SavePreferencesRequest(
-                consentPolicy = "ConsentPolicy",
+                consentPolicy = config.consentPolicy.name,
+                policyUuid = config.consentPolicy.uuid,
                 customerId = config.dgCustomerId,
                 isCustomised = preferences.isCustomised,
                 cookieOptions = cookieOptionsMap,
@@ -112,12 +114,14 @@ internal class ConsentService(
         val uniqueId = storage.getOrCreateUniqueId()
         val sessionId = UUID.randomUUID().toString()
 
+        val policyUuidParam = config.consentPolicy.uuid?.let { "&policy_uuid=${encodeParam(it)}" } ?: ""
         val url =
             "https://$privacyDomain/save_open" +
                 "?customerId=${encodeParam(config.dgCustomerId)}" +
                 "&sessionId=${encodeParam(sessionId)}" +
                 "&uniqueId=${encodeParam(uniqueId)}" +
-                "&consentPolicy=${encodeParam("ConsentPolicy")}"
+                "&consentPolicy=${encodeParam(config.consentPolicy.name)}" +
+                policyUuidParam
 
         try {
             networkClient.request(url = url, method = HTTPMethod.GET)

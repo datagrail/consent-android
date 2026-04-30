@@ -239,7 +239,7 @@ class ConsentServiceSecurityTest {
                 trackingDetailsUrl = "https://example.com/tracking",
                 consentMode = "optin",
                 showBanner = true,
-                consentPolicy = ConsentPolicy("GDPR", true),
+                consentPolicy = ConsentPolicy("GDPR", "a1b2c3d4-e5f6-7890-abcd-ef1234567890", true),
                 gppUsNat = false,
                 initialCategories =
                     InitialCategories(
