@@ -120,7 +120,7 @@ internal class ConsentService(
                 "?customerId=${encodeParam(config.dgCustomerId)}" +
                 "&sessionId=${encodeParam(sessionId)}" +
                 "&uniqueId=${encodeParam(uniqueId)}" +
-                "&consentPolicy=${encodeParam(config.consentPolicy.name)}" +
+                "&policy_name=${encodeParam(config.consentPolicy.name)}" +
                 policyUuidParam
 
         try {

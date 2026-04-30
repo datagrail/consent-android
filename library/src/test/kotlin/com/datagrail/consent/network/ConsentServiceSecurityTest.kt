@@ -72,7 +72,7 @@ class ConsentServiceSecurityTest {
             assertTrue("Should contain customerId param", capturedUrl.contains("customerId="))
             assertTrue("Should contain sessionId param", capturedUrl.contains("sessionId="))
             assertTrue("Should contain uniqueId param", capturedUrl.contains("uniqueId="))
-            assertTrue("Should contain consentPolicy param", capturedUrl.contains("consentPolicy="))
+            assertTrue("Should contain policy_name param", capturedUrl.contains("policy_name="))
         }
 
     @Test
@@ -164,7 +164,7 @@ class ConsentServiceSecurityTest {
 
             assertTrue(
                 "URL should contain real policy name",
-                capturedUrl.contains("consentPolicy=GDPR"),
+                capturedUrl.contains("policy_name=GDPR"),
             )
             assertTrue(
                 "URL should contain policy_uuid param",
@@ -189,7 +189,7 @@ class ConsentServiceSecurityTest {
 
             assertTrue(
                 "URL should contain real policy name",
-                capturedUrl.contains("consentPolicy=GDPR"),
+                capturedUrl.contains("policy_name=GDPR"),
             )
             assertFalse(
                 "URL should not contain policy_uuid when uuid is null",
