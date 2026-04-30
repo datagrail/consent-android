@@ -159,7 +159,7 @@ class ConfigValidatorTest {
             trackingDetailsUrl = "https://example.com/tracking",
             consentMode = "optin",
             showBanner = true,
-            consentPolicy = ConsentPolicy("GDPR", true),
+            consentPolicy = ConsentPolicy(name = "GDPR", default = true),
             gppUsNat = false,
             initialCategories =
                 InitialCategories(

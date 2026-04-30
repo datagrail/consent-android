@@ -58,6 +58,7 @@ data class Plugins(
 data class ConsentPolicy(
     val name: String,
     val default: Boolean,
+    val uuid: String? = null,
 )
 
 /**

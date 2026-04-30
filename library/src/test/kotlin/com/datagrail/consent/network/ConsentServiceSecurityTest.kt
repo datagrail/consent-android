@@ -72,7 +72,7 @@ class ConsentServiceSecurityTest {
             assertTrue("Should contain customerId param", capturedUrl.contains("customerId="))
             assertTrue("Should contain sessionId param", capturedUrl.contains("sessionId="))
             assertTrue("Should contain uniqueId param", capturedUrl.contains("uniqueId="))
-            assertTrue("Should contain consentPolicy param", capturedUrl.contains("consentPolicy="))
+            assertTrue("Should contain policy_name param", capturedUrl.contains("policy_name="))
         }
 
     @Test
@@ -90,6 +90,111 @@ class ConsentServiceSecurityTest {
 
             assertFalse("URL should not contain raw <", capturedUrl.contains("<script>"))
             assertFalse("URL should not contain raw >", capturedUrl.contains("</script>"))
+        }
+
+    // MARK: - Policy UUID Tests
+
+    @Test
+    fun `savePreferences sends real policy name and policyUuid in body`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            val preferences =
+                ConsentPreferences(
+                    isCustomised = true,
+                    cookieOptions = listOf(CategoryConsent("cat1", true)),
+                )
+
+            service.savePreferences(preferences, testConfig)
+
+            val bodyCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(any(), any(), bodyCaptor.capture(), anyOrNull())
+            val capturedBody = bodyCaptor.firstValue
+
+            assertTrue(
+                "Body should contain real policy name",
+                capturedBody.contains("\"consentPolicy\":\"GDPR\""),
+            )
+            assertTrue(
+                "Body should contain policyUuid",
+                capturedBody.contains("\"policyUuid\":\"a1b2c3d4-e5f6-7890-abcd-ef1234567890\""),
+            )
+        }
+
+    @Test
+    fun `savePreferences omits policyUuid when uuid is null`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            val configWithoutUuid = testConfig.copy(
+                consentPolicy = ConsentPolicy(name = "GDPR", default = true),
+            )
+            val preferences =
+                ConsentPreferences(
+                    isCustomised = true,
+                    cookieOptions = listOf(CategoryConsent("cat1", true)),
+                )
+
+            service.savePreferences(preferences, configWithoutUuid)
+
+            val bodyCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(any(), any(), bodyCaptor.capture(), anyOrNull())
+            val capturedBody = bodyCaptor.firstValue
+
+            assertTrue(
+                "Body should contain real policy name",
+                capturedBody.contains("\"consentPolicy\":\"GDPR\""),
+            )
+            assertFalse(
+                "Body should not contain policyUuid key when null",
+                capturedBody.contains("policyUuid"),
+            )
+        }
+
+    @Test
+    fun `saveOpen sends real policy name and policy_uuid in URL`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            service.saveOpen(testConfig)
+
+            val urlCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+            val capturedUrl = urlCaptor.firstValue
+
+            assertTrue(
+                "URL should contain real policy name",
+                capturedUrl.contains("policy_name=GDPR"),
+            )
+            assertTrue(
+                "URL should contain policy_uuid param",
+                capturedUrl.contains("policy_uuid=a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
+            )
+        }
+
+    @Test
+    fun `saveOpen omits policy_uuid param when uuid is null`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            val configWithoutUuid = testConfig.copy(
+                consentPolicy = ConsentPolicy(name = "GDPR", default = true),
+            )
+
+            service.saveOpen(configWithoutUuid)
+
+            val urlCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+            val capturedUrl = urlCaptor.firstValue
+
+            assertTrue(
+                "URL should contain real policy name",
+                capturedUrl.contains("policy_name=GDPR"),
+            )
+            assertFalse(
+                "URL should not contain policy_uuid when uuid is null",
+                capturedUrl.contains("policy_uuid"),
+            )
         }
 
     // MARK: - Queue Cap Tests
@@ -239,7 +344,12 @@ class ConsentServiceSecurityTest {
                 trackingDetailsUrl = "https://example.com/tracking",
                 consentMode = "optin",
                 showBanner = true,
-                consentPolicy = ConsentPolicy("GDPR", true),
+                consentPolicy =
+                    ConsentPolicy(
+                        name = "GDPR",
+                        default = true,
+                        uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                    ),
                 gppUsNat = false,
                 initialCategories =
                     InitialCategories(
