@@ -14,10 +14,10 @@ import org.junit.Test
 class BannerDialogRichTextTest {
     /**
      * Mirrors the HTML detection logic in BannerDialog.renderRichText().
-     * Returns true if the text would be treated as HTML.
+     * Returns true if the text contains actual HTML tags.
      */
     private fun containsHtml(text: String): Boolean {
-        return text.contains("<")
+        return text.contains(Regex("<[a-zA-Z][^>]*>"))
     }
 
     /**
@@ -76,10 +76,18 @@ class BannerDialogRichTextTest {
     }
 
     @Test
-    fun `text with less-than in math expression is detected as HTML`() {
-        // This is a known edge case — math expressions with < will trigger HTML rendering,
-        // but Html.fromHtml handles non-tag < gracefully
-        assertTrue(containsHtml("Value must be < 100"))
+    fun `text with less-than in math expression is not detected as HTML`() {
+        assertFalse(containsHtml("Value must be < 100"))
+    }
+
+    @Test
+    fun `text with less-than followed by space is not detected as HTML`() {
+        assertFalse(containsHtml("if x < y then z"))
+    }
+
+    @Test
+    fun `text with less-than followed by digit is not detected as HTML`() {
+        assertFalse(containsHtml("count <3"))
     }
 
     // MARK: - Content Description Sanitization

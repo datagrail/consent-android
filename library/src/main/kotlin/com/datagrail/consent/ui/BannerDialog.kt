@@ -242,20 +242,36 @@ class BannerDialog : DialogFragment() {
     /**
      * Renders text as HTML if it contains markup, otherwise sets it as plain text.
      * Makes links clickable when HTML anchor tags are present.
+     * Non-http/https URL spans are stripped for security.
      */
     private fun renderRichText(text: String, textView: TextView) {
-        if (text.contains("<")) {
+        if (text.containsHtmlTags()) {
             val spanned = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 Html.fromHtml(text, Html.FROM_HTML_MODE_COMPACT)
             } else {
                 @Suppress("DEPRECATION") // Required for API 23 support
                 Html.fromHtml(text)
             }
-            textView.text = spanned
+            val spannable = android.text.SpannableString(spanned)
+            for (span in spannable.getSpans(0, spannable.length, android.text.style.URLSpan::class.java)) {
+                val url = span.url
+                if (url != null && !url.startsWith("http://") && !url.startsWith("https://")) {
+                    spannable.removeSpan(span)
+                }
+            }
+            textView.text = spannable
             textView.movementMethod = LinkMovementMethod.getInstance()
         } else {
             textView.text = text
         }
+    }
+
+    /**
+     * Checks whether a string contains actual HTML tags (e.g. <b>, <a href="...">) rather than
+     * incidental less-than characters (e.g. "Value < 100").
+     */
+    private fun String.containsHtmlTags(): Boolean {
+        return contains(Regex("<[a-zA-Z][^>]*>"))
     }
 
     /**
@@ -354,8 +370,8 @@ class BannerDialog : DialogFragment() {
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 )
-            // Accessibility: use raw text for screen readers to avoid reading HTML tags
-            contentDescription = textContent.replace(Regex("<[^>]*>"), "")
+            // Accessibility: use the rendered plain text which strips tags and decodes entities
+            contentDescription = text.toString()
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         }
     }
