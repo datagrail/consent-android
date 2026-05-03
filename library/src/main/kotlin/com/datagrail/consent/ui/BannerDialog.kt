@@ -254,8 +254,8 @@ class BannerDialog : DialogFragment() {
             }
             val spannable = android.text.SpannableString(spanned)
             for (span in spannable.getSpans(0, spannable.length, android.text.style.URLSpan::class.java)) {
-                val url = span.url
-                if (url != null && !url.startsWith("http://") && !url.startsWith("https://")) {
+                val lowerUrl = span.url?.lowercase() ?: ""
+                if (!lowerUrl.startsWith("http://") && !lowerUrl.startsWith("https://")) {
                     spannable.removeSpan(span)
                 }
             }
