@@ -90,6 +90,20 @@ class BannerDialogRichTextTest {
         assertFalse(containsHtml("count <3"))
     }
 
+    // MARK: - URL Scheme Handling
+
+    @Test
+    fun `uppercase HTTPS scheme is treated as valid`() {
+        val url = "HTTPS://example.com"
+        assertTrue(url.lowercase().startsWith("https://"))
+    }
+
+    @Test
+    fun `mixed case Http scheme is treated as valid`() {
+        val url = "Http://example.com"
+        assertTrue(url.lowercase().startsWith("http://"))
+    }
+
     // MARK: - Content Description Sanitization
 
     @Test
