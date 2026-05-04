@@ -370,8 +370,6 @@ class BannerDialog : DialogFragment() {
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 )
-            // Accessibility: use the rendered plain text which strips tags and decodes entities
-            contentDescription = text.toString()
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         }
     }
