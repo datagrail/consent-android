@@ -2,7 +2,10 @@ package com.datagrail.consent.ui
 
 import android.app.Dialog
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
+import android.text.Html
+import android.text.method.LinkMovementMethod
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
@@ -237,6 +240,41 @@ class BannerDialog : DialogFragment() {
     }
 
     /**
+     * Renders text as HTML if it contains markup, otherwise sets it as plain text.
+     * Makes links clickable when HTML anchor tags are present.
+     * Non-http/https URL spans are stripped for security.
+     */
+    private fun renderRichText(text: String, textView: TextView) {
+        if (text.containsHtmlTags()) {
+            val spanned = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                Html.fromHtml(text, Html.FROM_HTML_MODE_COMPACT)
+            } else {
+                @Suppress("DEPRECATION") // Required for API 23 support
+                Html.fromHtml(text)
+            }
+            val spannable = android.text.SpannableString(spanned)
+            for (span in spannable.getSpans(0, spannable.length, android.text.style.URLSpan::class.java)) {
+                val lowerUrl = span.url?.lowercase() ?: ""
+                if (!lowerUrl.startsWith("http://") && !lowerUrl.startsWith("https://")) {
+                    spannable.removeSpan(span)
+                }
+            }
+            textView.text = spannable
+            textView.movementMethod = LinkMovementMethod.getInstance()
+        } else {
+            textView.text = text
+        }
+    }
+
+    /**
+     * Checks whether a string contains actual HTML tags (e.g. <b>, <a href="...">) rather than
+     * incidental less-than characters (e.g. "Value < 100").
+     */
+    private fun String.containsHtmlTags(): Boolean {
+        return contains(Regex("<[a-zA-Z][^>]*>"))
+    }
+
+    /**
      * Helper to get color resource with proper context
      */
     private fun getColor(@androidx.annotation.ColorRes colorRes: Int): Int {
@@ -322,9 +360,9 @@ class BannerDialog : DialogFragment() {
     }
 
     private fun createTextView(element: ConsentLayerElement): TextView {
+        val textContent = getTranslationText(element)
         return TextView(requireContext()).apply {
-            val textContent = getTranslationText(element)
-            text = textContent
+            renderRichText(textContent, this)
             textSize = 14f
             setTextColor(getColor(com.datagrail.consent.R.color.consent_text_primary))
             layoutParams =
@@ -332,8 +370,6 @@ class BannerDialog : DialogFragment() {
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 )
-            // Accessibility
-            contentDescription = textContent
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         }
     }
@@ -599,7 +635,7 @@ class BannerDialog : DialogFragment() {
         translation?.description?.let { desc ->
             val descView =
                 TextView(requireContext()).apply {
-                    text = desc
+                    renderRichText(desc, this)
                     textSize = 12f
                     setTextColor(getColor(com.datagrail.consent.R.color.consent_text_secondary))
                     layoutParams =
