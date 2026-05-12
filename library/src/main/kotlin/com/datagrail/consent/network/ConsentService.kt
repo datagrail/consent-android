@@ -119,7 +119,7 @@ internal class ConsentService(
         val sessionId = UUID.randomUUID().toString()
 
         val policyUuidParam = config.consentPolicy.uuid?.let { "&policy_uuid=${encodeParam(it)}" } ?: ""
-        val layerParam = layer?.let { "&layer=${encodeParam(it)}" } ?: ""
+        val layerParam = if (action == OpenAction.SHOW_LAYER) layer?.let { "&layer=${encodeParam(it)}" } ?: "" else ""
         val url =
             "https://$privacyDomain/save_open" +
                 "?customer=${encodeParam(config.dgCustomerId)}" +
@@ -184,7 +184,8 @@ internal class ConsentService(
                         successCount++
                     }
                     "save_open" -> {
-                        networkClient.request(url = url, method = HTTPMethod.GET)
+                        val migratedUrl = url.replace("customerId=", "customer=")
+                        networkClient.request(url = migratedUrl, method = HTTPMethod.GET)
                         successCount++
                     }
                 }
