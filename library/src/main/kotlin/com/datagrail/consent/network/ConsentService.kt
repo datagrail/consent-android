@@ -121,6 +121,7 @@ internal class ConsentService(
                 "&sessionId=${encodeParam(sessionId)}" +
                 "&uniqueId=${encodeParam(uniqueId)}" +
                 "&policy_name=${encodeParam(config.consentPolicy.name)}" +
+                "&consent_container_version_id=${encodeParam(config.consentContainerVersionId)}" +
                 policyUuidParam
 
         try {
