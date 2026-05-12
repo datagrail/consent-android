@@ -9,6 +9,7 @@ import org.junit.Test
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.*
+import java.util.Locale
 
 /**
  * Tests for ConsentService security enhancements:
@@ -36,7 +37,7 @@ class ConsentServiceSecurityTest {
     // MARK: - URL Encoding Tests
 
     @Test
-    fun `saveOpen URL-encodes customerId parameter`() =
+    fun `saveOpen URL-encodes customer parameter`() =
         runTest {
             val configWithSpecialChars =
                 testConfig.copy(dgCustomerId = "customer&id=with spaces")
@@ -50,8 +51,8 @@ class ConsentServiceSecurityTest {
 
             // Should be URL-encoded: & -> %26, = -> %3D, space -> +
             assertTrue(
-                "URL should contain encoded customerId, got: $capturedUrl",
-                capturedUrl.contains("customerId=customer%26id%3Dwith+spaces"),
+                "URL should contain encoded customer, got: $capturedUrl",
+                capturedUrl.contains("customer=customer%26id%3Dwith+spaces"),
             )
         }
 
@@ -69,10 +70,14 @@ class ConsentServiceSecurityTest {
             // Verify URL structure
             assertTrue("Should start with https", capturedUrl.startsWith("https://"))
             assertTrue("Should contain save_open endpoint", capturedUrl.contains("/save_open"))
-            assertTrue("Should contain customerId param", capturedUrl.contains("customerId="))
+            assertTrue("Should contain customer param", capturedUrl.contains("customer="))
+            assertTrue("Should contain action param", capturedUrl.contains("action=open"))
             assertTrue("Should contain sessionId param", capturedUrl.contains("sessionId="))
             assertTrue("Should contain uniqueId param", capturedUrl.contains("uniqueId="))
             assertTrue("Should contain policy_name param", capturedUrl.contains("policy_name="))
+            assertTrue("Should contain revision param", capturedUrl.contains("revision=1.0.0"))
+            assertTrue("Should contain default_policy param", capturedUrl.contains("default_policy=true"))
+            assertTrue("Should contain locale_code param", capturedUrl.contains("locale_code="))
         }
 
     @Test
@@ -90,6 +95,119 @@ class ConsentServiceSecurityTest {
 
             assertFalse("URL should not contain raw <", capturedUrl.contains("<script>"))
             assertFalse("URL should not contain raw >", capturedUrl.contains("</script>"))
+        }
+
+    // MARK: - Action Parameter Tests
+
+    @Test
+    fun `saveOpen sends non_open action`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            service.saveOpen(testConfig, OpenAction.NON_OPEN)
+
+            val urlCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+            val capturedUrl = urlCaptor.firstValue
+
+            assertTrue("Should contain action=non_open", capturedUrl.contains("action=non_open"))
+        }
+
+    @Test
+    fun `saveOpen sends show_layer action with layer param`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            service.saveOpen(testConfig, OpenAction.SHOW_LAYER, layer = "details_layer")
+
+            val urlCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+            val capturedUrl = urlCaptor.firstValue
+
+            assertTrue("Should contain action=show_layer", capturedUrl.contains("action=show_layer"))
+            assertTrue("Should contain layer=details_layer", capturedUrl.contains("layer=details_layer"))
+        }
+
+    @Test
+    fun `saveOpen sends set_hidden action`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            service.saveOpen(testConfig, OpenAction.SET_HIDDEN)
+
+            val urlCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+            val capturedUrl = urlCaptor.firstValue
+
+            assertTrue("Should contain action=set_hidden", capturedUrl.contains("action=set_hidden"))
+        }
+
+    @Test
+    fun `saveOpen omits layer param when null`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            service.saveOpen(testConfig, OpenAction.OPEN)
+
+            val urlCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+            val capturedUrl = urlCaptor.firstValue
+
+            assertFalse("Should not contain layer param", capturedUrl.contains("layer="))
+        }
+
+    @Test
+    fun `saveOpen sends revision from config version`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            val configWithVersion = testConfig.copy(version = "2.5.1")
+
+            service.saveOpen(configWithVersion)
+
+            val urlCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+            val capturedUrl = urlCaptor.firstValue
+
+            assertTrue("Should contain revision=2.5.1", capturedUrl.contains("revision=2.5.1"))
+        }
+
+    @Test
+    fun `saveOpen sends default_policy from config`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            val configNotDefault = testConfig.copy(
+                consentPolicy = ConsentPolicy(name = "CCPA", default = false, uuid = "test-uuid"),
+            )
+
+            service.saveOpen(configNotDefault)
+
+            val urlCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+            val capturedUrl = urlCaptor.firstValue
+
+            assertTrue("Should contain default_policy=false", capturedUrl.contains("default_policy=false"))
+        }
+
+    @Test
+    fun `saveOpen sends locale_code`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            val originalLocale = Locale.getDefault()
+            try {
+                Locale.setDefault(Locale("fr"))
+                service.saveOpen(testConfig)
+
+                val urlCaptor = argumentCaptor<String>()
+                verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+                val capturedUrl = urlCaptor.firstValue
+
+                assertTrue("Should contain locale_code=fr", capturedUrl.contains("locale_code=fr"))
+            } finally {
+                Locale.setDefault(originalLocale)
+            }
         }
 
     // MARK: - Policy UUID Tests
@@ -162,6 +280,14 @@ class ConsentServiceSecurityTest {
             verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
             val capturedUrl = urlCaptor.firstValue
 
+            assertTrue(
+                "URL should contain customer param (not customerId)",
+                capturedUrl.contains("customer=test-customer-id"),
+            )
+            assertFalse(
+                "URL should not contain old customerId param",
+                capturedUrl.contains("customerId="),
+            )
             assertTrue(
                 "URL should contain real policy name",
                 capturedUrl.contains("policy_name=GDPR"),

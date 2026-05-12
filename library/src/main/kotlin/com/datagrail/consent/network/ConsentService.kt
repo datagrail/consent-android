@@ -3,11 +3,13 @@ package com.datagrail.consent.network
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
+import com.datagrail.consent.models.OpenAction
 import com.datagrail.consent.storage.ConsentStorage
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.net.URLEncoder
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -108,20 +110,28 @@ internal class ConsentService(
     /**
      * Save banner open event to backend
      * @param config The consent configuration
+     * @param action The open action type
+     * @param layer Optional layer name (used with SHOW_LAYER action)
      * @throws ConsentException on failure
      */
-    suspend fun saveOpen(config: ConsentConfig) {
+    suspend fun saveOpen(config: ConsentConfig, action: OpenAction = OpenAction.OPEN, layer: String? = null) {
         val uniqueId = storage.getOrCreateUniqueId()
         val sessionId = UUID.randomUUID().toString()
 
         val policyUuidParam = config.consentPolicy.uuid?.let { "&policy_uuid=${encodeParam(it)}" } ?: ""
+        val layerParam = layer?.let { "&layer=${encodeParam(it)}" } ?: ""
         val url =
             "https://$privacyDomain/save_open" +
-                "?customerId=${encodeParam(config.dgCustomerId)}" +
+                "?customer=${encodeParam(config.dgCustomerId)}" +
+                "&action=${encodeParam(action.value)}" +
                 "&sessionId=${encodeParam(sessionId)}" +
                 "&uniqueId=${encodeParam(uniqueId)}" +
                 "&policy_name=${encodeParam(config.consentPolicy.name)}" +
-                policyUuidParam
+                policyUuidParam +
+                "&revision=${encodeParam(config.version)}" +
+                "&default_policy=${config.consentPolicy.default}" +
+                "&locale_code=${encodeParam(Locale.getDefault().language)}" +
+                layerParam
 
         try {
             networkClient.request(url = url, method = HTTPMethod.GET)

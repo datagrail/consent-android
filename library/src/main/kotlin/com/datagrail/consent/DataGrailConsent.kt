@@ -409,6 +409,80 @@ class DataGrailConsent private constructor() {
         }
     }
 
+    /**
+     * Track that the banner was not shown (Java-friendly)
+     * @param callback Callback interface for success/failure
+     */
+    fun trackBannerNotShown(callback: ConsentCallback) {
+        trackBannerNotShown { result -> adaptResult(result, callback) }
+    }
+
+    /**
+     * Track that the banner was not shown (Kotlin-friendly)
+     * @param callback Callback with result
+     */
+    fun trackBannerNotShown(callback: (Result<Unit>) -> Unit) {
+        val mgr = manager
+        if (mgr == null) {
+            callback(Result.failure(ConsentException.NotInitialized()))
+            return
+        }
+
+        scope.launch {
+            mgr.trackBannerNotShown(callback)
+        }
+    }
+
+    /**
+     * Track that a consent layer was shown (Java-friendly)
+     * @param layerName The name of the layer shown
+     * @param callback Callback interface for success/failure
+     */
+    fun trackLayerShown(layerName: String, callback: ConsentCallback) {
+        trackLayerShown(layerName) { result -> adaptResult(result, callback) }
+    }
+
+    /**
+     * Track that a consent layer was shown (Kotlin-friendly)
+     * @param layerName The name of the layer shown
+     * @param callback Callback with result
+     */
+    fun trackLayerShown(layerName: String, callback: (Result<Unit>) -> Unit) {
+        val mgr = manager
+        if (mgr == null) {
+            callback(Result.failure(ConsentException.NotInitialized()))
+            return
+        }
+
+        scope.launch {
+            mgr.trackLayerShown(layerName, callback)
+        }
+    }
+
+    /**
+     * Track that the banner was hidden (Java-friendly)
+     * @param callback Callback interface for success/failure
+     */
+    fun trackBannerHidden(callback: ConsentCallback) {
+        trackBannerHidden { result -> adaptResult(result, callback) }
+    }
+
+    /**
+     * Track that the banner was hidden (Kotlin-friendly)
+     * @param callback Callback with result
+     */
+    fun trackBannerHidden(callback: (Result<Unit>) -> Unit) {
+        val mgr = manager
+        if (mgr == null) {
+            callback(Result.failure(ConsentException.NotInitialized()))
+            return
+        }
+
+        scope.launch {
+            mgr.trackBannerHidden(callback)
+        }
+    }
+
     // MARK: - Callbacks
 
     /**
