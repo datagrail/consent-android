@@ -3,13 +3,11 @@ package com.datagrail.consent.network
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
-import com.datagrail.consent.models.OpenAction
 import com.datagrail.consent.storage.ConsentStorage
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.net.URLEncoder
-import java.util.Locale
 import java.util.UUID
 
 /**
@@ -110,28 +108,20 @@ internal class ConsentService(
     /**
      * Save banner open event to backend
      * @param config The consent configuration
-     * @param action The open action type
-     * @param layer Optional layer name (used with SHOW_LAYER action)
      * @throws ConsentException on failure
      */
-    suspend fun saveOpen(config: ConsentConfig, action: OpenAction = OpenAction.OPEN, layer: String? = null) {
+    suspend fun saveOpen(config: ConsentConfig) {
         val uniqueId = storage.getOrCreateUniqueId()
         val sessionId = UUID.randomUUID().toString()
 
         val policyUuidParam = config.consentPolicy.uuid?.let { "&policy_uuid=${encodeParam(it)}" } ?: ""
-        val layerParam = if (action == OpenAction.SHOW_LAYER) layer?.let { "&layer=${encodeParam(it)}" } ?: "" else ""
         val url =
             "https://$privacyDomain/save_open" +
                 "?customer=${encodeParam(config.dgCustomerId)}" +
-                "&action=${encodeParam(action.value)}" +
                 "&sessionId=${encodeParam(sessionId)}" +
                 "&uniqueId=${encodeParam(uniqueId)}" +
                 "&policy_name=${encodeParam(config.consentPolicy.name)}" +
-                policyUuidParam +
-                "&revision=${encodeParam(config.version)}" +
-                "&default_policy=${config.consentPolicy.default}" +
-                "&locale_code=${encodeParam(Locale.getDefault().language)}" +
-                layerParam
+                policyUuidParam
 
         try {
             networkClient.request(url = url, method = HTTPMethod.GET)
@@ -184,8 +174,7 @@ internal class ConsentService(
                         successCount++
                     }
                     "save_open" -> {
-                        val migratedUrl = url.replace("customerId=", "customer=")
-                        networkClient.request(url = migratedUrl, method = HTTPMethod.GET)
+                        networkClient.request(url = url, method = HTTPMethod.GET)
                         successCount++
                     }
                 }

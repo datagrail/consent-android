@@ -4,7 +4,6 @@ import com.datagrail.consent.models.CategoryConsent
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
-import com.datagrail.consent.models.OpenAction
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
@@ -148,65 +147,7 @@ internal class ConsentManager(
         }
 
         try {
-            consentService.saveOpen(config, OpenAction.OPEN)
-            callback(Result.success(Unit))
-        } catch (e: Exception) {
-            callback(Result.failure(e))
-        }
-    }
-
-    /**
-     * Track that the banner was not shown
-     * @param callback Callback with result
-     */
-    suspend fun trackBannerNotShown(callback: (Result<Unit>) -> Unit) {
-        val config = currentConfig
-        if (config == null) {
-            callback(Result.failure(ConsentException.NotInitialized()))
-            return
-        }
-
-        try {
-            consentService.saveOpen(config, OpenAction.NON_OPEN)
-            callback(Result.success(Unit))
-        } catch (e: Exception) {
-            callback(Result.failure(e))
-        }
-    }
-
-    /**
-     * Track that a consent layer was shown
-     * @param layerName The name of the layer shown
-     * @param callback Callback with result
-     */
-    suspend fun trackLayerShown(layerName: String, callback: (Result<Unit>) -> Unit) {
-        val config = currentConfig
-        if (config == null) {
-            callback(Result.failure(ConsentException.NotInitialized()))
-            return
-        }
-
-        try {
-            consentService.saveOpen(config, OpenAction.SHOW_LAYER, layer = layerName)
-            callback(Result.success(Unit))
-        } catch (e: Exception) {
-            callback(Result.failure(e))
-        }
-    }
-
-    /**
-     * Track that the banner was hidden
-     * @param callback Callback with result
-     */
-    suspend fun trackBannerHidden(callback: (Result<Unit>) -> Unit) {
-        val config = currentConfig
-        if (config == null) {
-            callback(Result.failure(ConsentException.NotInitialized()))
-            return
-        }
-
-        try {
-            consentService.saveOpen(config, OpenAction.SET_HIDDEN)
+            consentService.saveOpen(config)
             callback(Result.success(Unit))
         } catch (e: Exception) {
             callback(Result.failure(e))
