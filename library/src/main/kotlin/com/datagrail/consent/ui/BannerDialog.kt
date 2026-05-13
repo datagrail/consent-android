@@ -1,6 +1,7 @@
 package com.datagrail.consent.ui
 
 import android.app.Dialog
+import android.content.res.Configuration
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
@@ -212,6 +213,55 @@ class BannerDialog : DialogFragment() {
     override fun onDismiss(dialog: android.content.DialogInterface) {
         super.onDismiss(dialog)
         onDismissListener?.invoke(null)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // When UI mode changes (light/dark mode), reapply all colors to avoid stale color references
+        reapplyColors()
+    }
+
+    /**
+     * Reapplies all color resources to existing views.
+     * Called when configuration changes (e.g., dark mode toggle) to prevent stale colors.
+     */
+    private fun reapplyColors() {
+        // Reapply colors to the root content container
+        view?.findViewById<ViewGroup>(android.R.id.content)?.let { root ->
+            reapplyColorsRecursively(root)
+        }
+
+        // Reapply close button color
+        closeButton?.setColorFilter(getColor(com.datagrail.consent.R.color.consent_text_primary))
+
+        // Re-render the current layer to refresh all element colors
+        currentLayerKey?.let { renderLayer(it) }
+    }
+
+    /**
+     * Recursively reapplies colors to all views in the hierarchy.
+     */
+    private fun reapplyColorsRecursively(viewGroup: ViewGroup) {
+        for (i in 0 until viewGroup.childCount) {
+            val child = viewGroup.getChildAt(i)
+            when (child) {
+                is LinearLayout -> {
+                    // Check if this is a content container or category container
+                    val background = child.background
+                    if (background is GradientDrawable) {
+                        background.setColor(getColor(com.datagrail.consent.R.color.consent_background))
+                    } else if (child.id != android.R.id.content) {
+                        // Reapply surface color for category containers
+                        val currentColor = (child.background as? android.graphics.drawable.ColorDrawable)?.color
+                        if (currentColor != null) {
+                            child.setBackgroundColor(getColor(com.datagrail.consent.R.color.consent_surface))
+                        }
+                    }
+                    reapplyColorsRecursively(child)
+                }
+                is ViewGroup -> reapplyColorsRecursively(child)
+            }
+        }
     }
 
     private fun renderLayer(layerKey: String) {
