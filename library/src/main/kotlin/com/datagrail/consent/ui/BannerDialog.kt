@@ -22,6 +22,26 @@ import com.datagrail.consent.models.ConsentPreferences
 import java.util.Locale
 
 /**
+ * Font size and style configuration for text elements in the consent banner.
+ * Override individual sizes/styles while keeping the rest at their defaults.
+ *
+ * @param titleTextSizeSp Text size in SP for `dg-title` elements (e.g. banner headline).
+ * @param titleTypefaceStyle Typeface style for `dg-title` elements.
+ * @param headerTextSizeSp Text size in SP for `dg-header` elements (e.g. section headings).
+ * @param headerTypefaceStyle Typeface style for `dg-header` elements.
+ * @param bodyTextSizeSp Text size in SP for `dg-main-content-explanation` and all other text elements.
+ * @param bodyTypefaceStyle Typeface style for body text elements.
+ */
+data class BannerTextStyleConfig(
+    val titleTextSizeSp: Float = 22f,
+    val titleTypefaceStyle: Int = android.graphics.Typeface.BOLD,
+    val headerTextSizeSp: Float = 18f,
+    val headerTypefaceStyle: Int = android.graphics.Typeface.BOLD,
+    val bodyTextSizeSp: Float = 16f,
+    val bodyTypefaceStyle: Int = android.graphics.Typeface.NORMAL,
+)
+
+/**
  * DialogFragment that displays the consent banner with configurable layers and elements
  */
 class BannerDialog : DialogFragment() {
@@ -30,6 +50,7 @@ class BannerDialog : DialogFragment() {
     private var currentLayerKey: String? = null
     private var onDismissListener: ((ConsentPreferences?) -> Unit)? = null
     private var displayStyle: BannerDisplayStyle = BannerDisplayStyle.MODAL
+    private var textStyleConfig: BannerTextStyleConfig = BannerTextStyleConfig()
 
     private lateinit var scrollView: ScrollView
     private lateinit var contentLayout: LinearLayout
@@ -359,11 +380,26 @@ class BannerDialog : DialogFragment() {
         }
     }
 
+    /**
+     * Maps a config style string to (textSizeSp, typefaceStyle) using the current textStyleConfig.
+     * Supported values: "dg-title", "dg-header", "dg-main-content-explanation".
+     * Unknown or null values fall back to body style.
+     */
+    internal fun textSizeAndStyleFor(style: String?): Pair<Float, Int> {
+        return when (style) {
+            "dg-title" -> Pair(textStyleConfig.titleTextSizeSp, textStyleConfig.titleTypefaceStyle)
+            "dg-header" -> Pair(textStyleConfig.headerTextSizeSp, textStyleConfig.headerTypefaceStyle)
+            else -> Pair(textStyleConfig.bodyTextSizeSp, textStyleConfig.bodyTypefaceStyle)
+        }
+    }
+
     private fun createTextView(element: ConsentLayerElement): TextView {
         val textContent = getTranslationText(element)
+        val (sizeSp, typefaceStyle) = textSizeAndStyleFor(element.style)
         return TextView(requireContext()).apply {
             renderRichText(textContent, this)
-            textSize = 14f
+            textSize = sizeSp
+            setTypeface(typeface, typefaceStyle)
             setTextColor(getColor(com.datagrail.consent.R.color.consent_text_primary))
             layoutParams =
                 LinearLayout.LayoutParams(
@@ -813,6 +849,7 @@ class BannerDialog : DialogFragment() {
             config: ConsentConfig,
             preferences: ConsentPreferences?,
             displayStyle: BannerDisplayStyle = BannerDisplayStyle.MODAL,
+            textStyleConfig: BannerTextStyleConfig = BannerTextStyleConfig(),
             onDismiss: (ConsentPreferences?) -> Unit,
         ): BannerDialog {
             return BannerDialog().apply {
@@ -821,6 +858,7 @@ class BannerDialog : DialogFragment() {
                 this.currentLayerKey = config.layout.firstLayerId
                 this.onDismissListener = onDismiss
                 this.displayStyle = displayStyle
+                this.textStyleConfig = textStyleConfig
             }
         }
     }
