@@ -119,7 +119,7 @@ internal class ConsentService(
         val policyUuidParam = config.consentPolicy.uuid?.let { "&policy_uuid=${encodeParam(it)}" } ?: ""
         val url =
             "https://$privacyDomain/save_open" +
-                "?customerId=${encodeParam(config.dgCustomerId)}" +
+                "?customer=${encodeParam(config.dgCustomerId)}" +
                 "&sessionId=${encodeParam(sessionId)}" +
                 "&uniqueId=${encodeParam(uniqueId)}" +
                 "&policy_name=${encodeParam(config.consentPolicy.name)}" +

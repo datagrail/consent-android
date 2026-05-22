@@ -36,7 +36,7 @@ class ConsentServiceSecurityTest {
     // MARK: - URL Encoding Tests
 
     @Test
-    fun `saveOpen URL-encodes customerId parameter`() =
+    fun `saveOpen URL-encodes customer parameter`() =
         runTest {
             val configWithSpecialChars =
                 testConfig.copy(dgCustomerId = "customer&id=with spaces")
@@ -50,8 +50,8 @@ class ConsentServiceSecurityTest {
 
             // Should be URL-encoded: & -> %26, = -> %3D, space -> +
             assertTrue(
-                "URL should contain encoded customerId, got: $capturedUrl",
-                capturedUrl.contains("customerId=customer%26id%3Dwith+spaces"),
+                "URL should contain encoded customer, got: $capturedUrl",
+                capturedUrl.contains("customer=customer%26id%3Dwith+spaces"),
             )
         }
 
@@ -69,7 +69,7 @@ class ConsentServiceSecurityTest {
             // Verify URL structure
             assertTrue("Should start with https", capturedUrl.startsWith("https://"))
             assertTrue("Should contain save_open endpoint", capturedUrl.contains("/save_open"))
-            assertTrue("Should contain customerId param", capturedUrl.contains("customerId="))
+            assertTrue("Should contain customer param", capturedUrl.contains("customer="))
             assertTrue("Should contain sessionId param", capturedUrl.contains("sessionId="))
             assertTrue("Should contain uniqueId param", capturedUrl.contains("uniqueId="))
             assertTrue("Should contain policy_name param", capturedUrl.contains("policy_name="))
@@ -180,6 +180,14 @@ class ConsentServiceSecurityTest {
             verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
             val capturedUrl = urlCaptor.firstValue
 
+            assertTrue(
+                "URL should contain customer param (not customerId)",
+                capturedUrl.contains("customer=test-customer-id"),
+            )
+            assertFalse(
+                "URL should not contain old customerId param",
+                capturedUrl.contains("customerId="),
+            )
             assertTrue(
                 "URL should contain real policy name",
                 capturedUrl.contains("policy_name=GDPR"),
