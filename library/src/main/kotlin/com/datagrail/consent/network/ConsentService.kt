@@ -27,6 +27,7 @@ internal class ConsentService(
         val cookieOptions: Map<String, Boolean>,
         val sessionId: String,
         val uniqueId: String,
+        val consentContainerVersionId: String,
     )
 
     companion object {
@@ -63,6 +64,7 @@ internal class ConsentService(
                 cookieOptions = cookieOptionsMap,
                 sessionId = sessionId,
                 uniqueId = uniqueId,
+                consentContainerVersionId = config.consentContainerVersionId,
             )
 
         val url = "https://$privacyDomain/save_preferences"
@@ -121,6 +123,7 @@ internal class ConsentService(
                 "&sessionId=${encodeParam(sessionId)}" +
                 "&uniqueId=${encodeParam(uniqueId)}" +
                 "&policy_name=${encodeParam(config.consentPolicy.name)}" +
+                "&consent_container_version_id=${encodeParam(config.consentContainerVersionId)}" +
                 policyUuidParam
 
         try {
