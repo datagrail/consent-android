@@ -73,6 +73,24 @@ class ConsentServiceSecurityTest {
             assertTrue("Should contain sessionId param", capturedUrl.contains("sessionId="))
             assertTrue("Should contain uniqueId param", capturedUrl.contains("uniqueId="))
             assertTrue("Should contain policy_name param", capturedUrl.contains("policy_name="))
+            assertTrue("Should contain consent_container_version_id param", capturedUrl.contains("consent_container_version_id="))
+        }
+
+    @Test
+    fun `saveOpen includes consent_container_version_id parameter`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            service.saveOpen(testConfig)
+
+            val urlCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+            val capturedUrl = urlCaptor.firstValue
+
+            assertTrue(
+                "URL should contain consent_container_version_id param, got: $capturedUrl",
+                capturedUrl.contains("consent_container_version_id=container1"),
+            )
         }
 
     @Test
