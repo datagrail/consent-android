@@ -521,30 +521,60 @@ class DataGrailConsent private constructor() {
         // Use getCategories() to get effective preferences (saved or default from initialCategories)
         val prefs = mgr.getCategories()
 
-        // Create and show dialog
-        val dialog =
-            com.datagrail.consent.ui.BannerDialog.newInstance(
-                config = cfg,
-                preferences = prefs,
-                displayStyle = style,
-            ) { updatedPreferences ->
-                if (updatedPreferences != null) {
-                    // Save preferences if user made changes
-                    savePreferences(updatedPreferences) { result ->
-                        result.fold(
-                            onSuccess = { callback?.invoke(updatedPreferences) },
-                            onFailure = {
-                                // Still report success even if network call fails,
-                                // since preferences are saved locally
-                                callback?.invoke(updatedPreferences)
-                            },
-                        )
-                    }
-                } else {
-                    callback?.invoke(null)
-                }
-            }
+        // Detect if this is a TV device and route accordingly
+        val isTvDevice = com.datagrail.consent.utils.DeviceCapabilities.isTv(activity)
 
-        dialog.show(activity.supportFragmentManager, "ConsentBannerDialog")
+        if (isTvDevice) {
+            // Show TV-optimized banner (always full-screen, D-pad navigation)
+            val tvDialog =
+                com.datagrail.consent.ui.BannerDialogTV.newInstance(
+                    config = cfg,
+                    preferences = prefs,
+                ) { updatedPreferences ->
+                    if (updatedPreferences != null) {
+                        // Save preferences if user made changes
+                        savePreferences(updatedPreferences) { result ->
+                            result.fold(
+                                onSuccess = { callback?.invoke(updatedPreferences) },
+                                onFailure = {
+                                    // Still report success even if network call fails,
+                                    // since preferences are saved locally
+                                    callback?.invoke(updatedPreferences)
+                                },
+                            )
+                        }
+                    } else {
+                        callback?.invoke(null)
+                    }
+                }
+
+            tvDialog.show(activity.supportFragmentManager, "ConsentBannerDialogTV")
+        } else {
+            // Show standard mobile banner
+            val dialog =
+                com.datagrail.consent.ui.BannerDialog.newInstance(
+                    config = cfg,
+                    preferences = prefs,
+                    displayStyle = style,
+                ) { updatedPreferences ->
+                    if (updatedPreferences != null) {
+                        // Save preferences if user made changes
+                        savePreferences(updatedPreferences) { result ->
+                            result.fold(
+                                onSuccess = { callback?.invoke(updatedPreferences) },
+                                onFailure = {
+                                    // Still report success even if network call fails,
+                                    // since preferences are saved locally
+                                    callback?.invoke(updatedPreferences)
+                                },
+                            )
+                        }
+                    } else {
+                        callback?.invoke(null)
+                    }
+                }
+
+            dialog.show(activity.supportFragmentManager, "ConsentBannerDialog")
+        }
     }
 }
