@@ -1,23 +1,17 @@
 package com.datagrail.consent.network
 
-import com.datagrail.consent.models.ConsentPreferences
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
 import org.mockito.kotlin.any
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28])
+// Pure-JVM test: PairingService no longer touches android.net.Uri, so no Robolectric.
 class PairingServiceTest {
     private lateinit var mockNetworkClient: NetworkClient
     private lateinit var pairingService: PairingService
@@ -96,9 +90,9 @@ class PairingServiceTest {
                         "dg-category-marketing": false,
                         "dg-category-analytics": true,
                         "dg-category-essential": true
-                    },
-                    "updated_at": "2026-06-02T12:34:56Z"
-                }
+                    }
+                },
+                "updated_at": "2026-06-02T12:34:56Z"
             }
                 """.trimIndent()
 

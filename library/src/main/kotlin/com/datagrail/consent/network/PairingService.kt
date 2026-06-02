@@ -1,6 +1,5 @@
 package com.datagrail.consent.network
 
-import android.net.Uri
 import com.datagrail.consent.models.CategoryConsent
 import com.datagrail.consent.models.ConsentPreferences
 import kotlinx.serialization.SerialName
@@ -37,16 +36,18 @@ class PairingService(
         userHash: String,
         configUrl: String,
     ): String {
-        val encodedConfigUrl = URLEncoder.encode(configUrl, "UTF-8")
-        return Uri
-            .parse(publicBaseUrl.trimEnd('/'))
-            .buildUpon()
-            .appendPath("tv")
-            .appendQueryParameter("customer_id", customerId)
-            .appendQueryParameter("user_hash", userHash)
-            .appendQueryParameter("config_url", encodedConfigUrl)
-            .build()
-            .toString()
+        // Pure-JVM string assembly (no android.net.Uri) so this is unit-testable
+        // off-device. Each value is form-encoded exactly once.
+        val base = publicBaseUrl.trimEnd('/')
+        val query =
+            listOf(
+                "customer_id" to customerId,
+                "user_hash" to userHash,
+                "config_url" to configUrl,
+            ).joinToString("&") { (k, v) ->
+                "$k=${URLEncoder.encode(v, "UTF-8")}"
+            }
+        return "$base/tv?$query"
     }
 
     /**
@@ -60,15 +61,15 @@ class PairingService(
         customerId: String,
         userHash: String,
     ): PairingRead {
-        val url =
-            Uri
-                .parse(apiBaseUrl.trimEnd('/'))
-                .buildUpon()
-                .appendPath("universal_consent")
-                .appendQueryParameter("customer_id", customerId)
-                .appendQueryParameter("user_hash", userHash)
-                .build()
-                .toString()
+        val base = apiBaseUrl.trimEnd('/')
+        val query =
+            listOf(
+                "customer_id" to customerId,
+                "user_hash" to userHash,
+            ).joinToString("&") { (k, v) ->
+                "$k=${URLEncoder.encode(v, "UTF-8")}"
+            }
+        val url = "$base/universal_consent?$query"
 
         val headers = mutableMapOf("Cache-Control" to "no-cache")
         apiKey?.let { headers["X-DG-Api-Key"] = it }
@@ -95,7 +96,7 @@ class PairingService(
 
                 PairingRead.Found(
                     preferences = preferences,
-                    updatedAt = response.consentPreferences?.updatedAt,
+                    updatedAt = response.updatedAt,
                 )
             }
             else -> PairingRead.NotFound
@@ -113,6 +114,12 @@ class PairingService(
         val status: String,
         @SerialName("consent_preferences")
         val consentPreferences: ServerConsentPreferences? = null,
+        // The server returns updated_at as a TOP-LEVEL sibling of consent_preferences
+        // (see test-server models.py to_get_response), NOT nested inside it. The
+        // baseline-new-write detection in PairingCoordinator depends on this being
+        // populated, so it must be decoded at this level.
+        @SerialName("updated_at")
+        val updatedAt: String? = null,
     )
 
     @Serializable
@@ -121,8 +128,6 @@ class PairingService(
         val isCustomised: Boolean,
         @SerialName("cookieOptions")
         val cookieOptions: Map<String, Boolean>,
-        @SerialName("updated_at")
-        val updatedAt: String? = null,
     )
 }
 

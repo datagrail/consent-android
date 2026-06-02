@@ -27,3 +27,5 @@ google-services.json
 
 # Node version files (project-specific)
 .node-version
+.verify-out/
+.verify-pairing.log
