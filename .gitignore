@@ -29,3 +29,9 @@ google-services.json
 .node-version
 .verify-out/
 .verify-pairing.log
+
+# Local agent/harness context (not part of the SDK)
+CLAUDE.local.md
+
+# Local-only developer CA for the TV demo (never commit)
+demo/src/*/res/raw/dev_ca.crt

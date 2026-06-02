@@ -39,23 +39,22 @@ class TvDemoActivity : AppCompatActivity() {
 
     private var isInitialized = false
 
-    // Defaults point at the local test server exposed over HTTPS at bradleyy.dg-dev.com
-    // (same host used for the iOS test). Two distinct configs, mirroring the iOS demo:
+    // Endpoints come from BuildConfig (set via the dgTvHost / dgTvPublicHost / dgTvApiKey
+    // gradle properties — see demo/build.gradle.kts). Defaults are generic placeholders;
+    // override them locally rather than committing your host. Two distinct configs,
+    // mirroring the iOS demo:
     //  - SDK config (demo-config.json): full SDK schema incl. privacyDomain + layout —
     //    this is what initialize() consumes.
     //  - phone QR config (sample-config.json): just category toggles for the phone page.
-    // The QR encodes a scannable https://bradleyy.dg-dev.com/tv?... URL for your phone.
-    // apiBaseUrl is where the TV itself polls for consent reads.
-    // Emulator wiring: `adb reverse tcp:9443 tcp:8443` bridges the emulator's
-    // localhost:9443 to the host's :8443 (which serves bradleyy.dg-dev.com). The domain
-    // resolves to 127.0.0.1 on the emulator, so :9443 lands on the reverse with valid TLS.
-    // The SDK config + TV polling use :9443; the QR/publicBaseUrl stays on :443 so a real
-    // phone on your LAN can scan it. (On a physical TV, set all of these to plain :443.)
-    private val defaultConfigUrl = "https://bradleyy.dg-dev.com:9443/tv/demo-config.json"
-    private val defaultPhoneConfigUrl = "https://bradleyy.dg-dev.com/tv/sample-config.json"
-    private val defaultPublicBaseUrl = "https://bradleyy.dg-dev.com"
-    private val defaultApiBaseUrl = "https://bradleyy.dg-dev.com:9443"
-    private val defaultApiKey = "dg_test_readkey"
+    // TV_HOST is what the TV uses for config + polling (on an emulator, include the
+    // adb-reverse port); TV_PUBLIC_HOST is what the QR encodes for the phone (usually :443).
+    private val host = BuildConfig.TV_HOST.trimEnd('/')
+    private val publicHost = BuildConfig.TV_PUBLIC_HOST.trimEnd('/')
+    private val defaultConfigUrl = "$host/tv/demo-config.json"
+    private val defaultPhoneConfigUrl = "$publicHost/tv/sample-config.json"
+    private val defaultPublicBaseUrl = publicHost
+    private val defaultApiBaseUrl = host
+    private val defaultApiKey = BuildConfig.TV_API_KEY
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

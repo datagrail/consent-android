@@ -263,22 +263,36 @@ Universal Consent test server. Two configs are used, mirroring real usage:
 `demo-config.json` (full SDK schema, has `privacyDomain`) for `initialize(...)`,
 and `sample-config.json` (category toggles only) for the phone QR page.
 
+**Configure your endpoints (no host is committed).** Set gradle properties — in
+`~/.gradle/gradle.properties`, the project `local.properties`, or on the command
+line — so nothing machine-specific lands in the repo:
+
+```properties
+# base the SDK uses for config + TV polling (on an emulator, include the
+# adb-reverse port from step 2 below, e.g. https://your-host:9443)
+dgTvHost=https://your-host:9443
+# base encoded in the QR for the phone to open (usually :443 on your LAN)
+dgTvPublicHost=https://your-host
+# optional; defaults to dg_test_readkey
+dgTvApiKey=dg_test_readkey
+```
+
 1. Run the test server and expose it over HTTPS (the SDK requires HTTPS). On a
    LAN, a real phone resolves your dev host and scans the QR directly.
 2. **Emulator networking.** A stock Android TV emulator image is a locked
    production build (`adb root` is refused), and its `127.0.0.1` is the emulator,
-   not your Mac. Bridge the TV→host leg with a non-privileged reverse and point
-   the SDK config + `apiBaseUrl` at that port:
+   not your host. Bridge the TV→host leg with a non-privileged reverse and point
+   `dgTvHost` at that port (the QR/`dgTvPublicHost` stays on :443 for the phone):
    ```bash
    adb reverse tcp:9443 tcp:8443    # emulator localhost:9443 -> host:8443 (your HTTPS server)
-   # demo SDK config + apiBaseUrl -> https://<your-host>:9443 ; QR publicBaseUrl stays :443 for the phone
    ```
-3. **Dev TLS trust.** If the server uses a local CA (e.g. mkcert), the emulator
-   won't trust it. The demo bundles the CA and trusts it for the dev host via a
-   `network_security_config` (`res/xml/network_security_config.xml` +
-   `res/raw/mkcert_ca.crt`) — **demo-only; never ship this in a real app.** On a
-   physical TV with a publicly-trusted cert, none of this is needed: set all URLs
-   to plain `https://<host>` (`:443`).
+3. **Dev TLS trust.** If the server uses a local CA (e.g. mkcert), install that
+   CA on the device/emulator (`adb push rootCA.pem /sdcard/Download/` then
+   Settings → Security → Install certificate → CA certificate). The **debug**
+   build trusts user-installed CAs via `src/debug/res/xml/network_security_config.xml`;
+   the release build trusts system CAs only. No certificate is bundled in the
+   repo. On a physical TV with a publicly-trusted cert none of this is needed —
+   set both hosts to plain `https://<host>` (`:443`).
 
 ## License
 

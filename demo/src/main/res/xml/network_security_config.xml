@@ -1,22 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  DEMO-ONLY network security config.
+  Default (release) network security config: system CAs only, no cleartext.
 
-  Trusts user-installed CAs (e.g. the mkcert root CA) so the demo can talk to a
-  local HTTPS test server with a locally-trusted dev certificate. This is for the
-  Android TV demo against bradleyy.dg-dev.com; it does NOT ship in the SDK library
-  and must NOT be used in production apps.
+  The DEBUG build overrides this with src/debug/res/xml/network_security_config.xml,
+  which additionally trusts user-installed CAs so the TV demo can reach a local
+  HTTPS test server using a developer cert (e.g. mkcert). Install your dev CA on
+  the device/emulator (Settings > Security > Install certificate, or
+  `adb push` + the CA-install flow) — nothing machine-specific is bundled here.
 -->
 <network-security-config>
-    <!-- Trust the bundled mkcert dev CA for the local test host, plus the normal
-         system CAs everywhere else. No device-side cert install needed. -->
-    <domain-config>
-        <domain includeSubdomains="true">bradleyy.dg-dev.com</domain>
-        <trust-anchors>
-            <certificates src="system" />
-            <certificates src="@raw/mkcert_ca" />
-        </trust-anchors>
-    </domain-config>
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
