@@ -15,7 +15,7 @@ wrapper. **You are expected to actually build and test your work**:
 ```bash
 cd /workspace
 ./gradlew :library:ktlintCheck      # lint (autofix: :library:ktlintFormat)
-./gradlew :library:test             # unit tests (Robolectric runs headless on the JVM — no emulator)
+./gradlew :library:test             # unit tests (plain JUnit/Mockito only — see Robolectric note)
 ./gradlew :library:assembleRelease  # library compiles
 ./gradlew :demo:assembleDebug       # demo compiles (feat-014)
 ```
@@ -24,6 +24,18 @@ A feature is `passes:true` ONLY if its `verification` Gradle commands actually
 succeed in this VM. Do not mark a feature passing on inspection alone — run it.
 On-device / emulator D-pad QA is the human's job on the host; everything else is
 yours to verify here.
+
+**CRITICAL — Robolectric does NOT work in this aarch64 VM.** It has no aarch64
+native libs; any `@RunWith(RobolectricTestRunner)` test fails instantly with
+`UnsatisfiedLinkError`. Write **pure-JVM** tests (plain JUnit + mockito-kotlin)
+and keep the classes under test free of `android.*` (the pairing classes are
+already pure-JVM — assemble URLs with strings/URLEncoder not `android.net.Uri`,
+use an injected coroutine dispatcher not `android.os.Handler`). For any code
+that genuinely needs Android framework classes, an Android `@Test` can still be
+exercised via Mockito mocks — just never via the Robolectric runner. Also: for
+coroutine poll loops, drive **bounded** virtual time in tests (`advanceTimeBy`
+then `stop()`), NEVER `advanceUntilIdle()` on an infinite loop (it OOMs).
+Existing pairing tests (feat-012) already follow this — match their style.
 
 The toolchain is pre-warmed: JDK 17, Android SDK (compileSdk 34), the Gradle 8.9
 wrapper, and a populated `~/.gradle` cache are baked into the VM image, so builds
