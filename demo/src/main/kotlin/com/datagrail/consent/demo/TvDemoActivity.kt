@@ -35,6 +35,7 @@ class TvDemoActivity : AppCompatActivity() {
     private lateinit var showBannerButton: Button
     private lateinit var resetButton: Button
     private lateinit var statusText: TextView
+    private lateinit var categoryStatusText: TextView
 
     private var isInitialized = false
 
@@ -61,14 +62,22 @@ class TvDemoActivity : AppCompatActivity() {
         DataGrailConsent.setLogLevel(LogLevel.DEBUG)
         setContentView(buildUi())
 
-        DataGrailConsent.getInstance().onConsentChanged { prefs ->
+        DataGrailConsent.getInstance().onConsentChanged { _ ->
             runOnUiThread {
-                renderStatus("Consent changed (adopted from phone):\n" + prefsToText())
                 logLine("onConsentChanged fired — TV adopted remote write")
+                refreshCategoryStatus()
+                renderStatus("Consent changed (adopted from phone).")
             }
         }
 
         initButton.requestFocus()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Keep the category panel live whenever we return to this screen (e.g. after
+        // the banner dismisses on a successful pairing), mirroring the tvOS demo.
+        refreshCategoryStatus()
     }
 
     private fun buildUi(): View {
@@ -88,11 +97,30 @@ class TvDemoActivity : AppCompatActivity() {
             },
         )
 
-        configUrlInput = field(root, "SDK config URL (https, full schema)", defaultConfigUrl)
-        publicBaseUrlInput = field(root, "Public base URL (phone-reachable, for QR)", defaultPublicBaseUrl)
-        apiBaseUrlInput = field(root, "API base URL (where the TV polls)", defaultApiBaseUrl)
-        apiKeyInput = field(root, "API key (reads)", defaultApiKey)
+        // Always-visible category status panel (mirrors the tvOS demo). Shows the
+        // current consent state and updates after init / pairing / reset.
+        root.addView(
+            TextView(this).apply {
+                text = "Current Consent"
+                textSize = 18f
+                setTextColor(0xFFFFFFFF.toInt())
+                setPadding(0, pad, 0, 8)
+            },
+        )
+        categoryStatusText =
+            TextView(this).apply {
+                textSize = 16f
+                setTextColor(0xFFB0BEC5.toInt())
+                setPadding(24, 16, 24, 16)
+                setBackgroundColor(0xFF1A2128.toInt())
+                text = "Not initialized."
+            }
+        root.addView(categoryStatusText)
 
+        // Action buttons FIRST so D-pad navigation flows cleanly through them on a
+        // TV remote (the config fields below are pre-filled and rarely edited on TV;
+        // putting EditTexts between the buttons makes the remote land on a text field
+        // and pop the soft keyboard).
         initButton =
             tvButton(root, "1) Initialize") {
                 doInitialize()
@@ -104,8 +132,14 @@ class TvDemoActivity : AppCompatActivity() {
         resetButton =
             tvButton(root, "Reset consent") {
                 DataGrailConsent.getInstance().reset()
+                refreshCategoryStatus()
                 renderStatus("Consent reset.")
             }
+
+        configUrlInput = field(root, "SDK config URL (https, full schema)", defaultConfigUrl)
+        publicBaseUrlInput = field(root, "Public base URL (phone-reachable, for QR)", defaultPublicBaseUrl)
+        apiBaseUrlInput = field(root, "API base URL (where the TV polls)", defaultApiBaseUrl)
+        apiKeyInput = field(root, "API key (reads)", defaultApiKey)
 
         statusText =
             TextView(this).apply {
@@ -186,7 +220,8 @@ class TvDemoActivity : AppCompatActivity() {
                 result.fold(
                     onSuccess = {
                         isInitialized = true
-                        renderStatus("Initialized.\n" + prefsToText())
+                        refreshCategoryStatus()
+                        renderStatus("Initialized.")
                         showBannerButton.requestFocus()
                     },
                     onFailure = { e ->
@@ -228,20 +263,31 @@ class TvDemoActivity : AppCompatActivity() {
             apiBaseUrl = apiBaseUrl,
         ) { prefs ->
             runOnUiThread {
+                refreshCategoryStatus()
                 if (prefs != null) {
-                    renderStatus("Pairing complete — consent adopted:\n" + prefsToText())
+                    renderStatus("Pairing complete — consent adopted.")
                 } else {
-                    renderStatus("Banner dismissed / pairing timed out.\n" + prefsToText())
+                    renderStatus("Banner dismissed / pairing timed out.")
                 }
             }
         }
     }
 
-    private fun prefsToText(): String {
-        val prefs = DataGrailConsent.getInstance().getCategories() ?: return "(no categories yet)"
-        return prefs.cookieOptions.joinToString("\n") { c ->
-            "  ${c.gtmKey}: ${if (c.isEnabled) "ON" else "OFF"}"
+    /** Refresh the always-visible category panel from current SDK state. */
+    private fun refreshCategoryStatus() {
+        if (!isInitialized) {
+            categoryStatusText.text = "Not initialized."
+            return
         }
+        val prefs = DataGrailConsent.getInstance().getCategories()
+        if (prefs == null || prefs.cookieOptions.isEmpty()) {
+            categoryStatusText.text = "(no categories)"
+            return
+        }
+        categoryStatusText.text =
+            prefs.cookieOptions.joinToString("\n") { c ->
+                "${if (c.isEnabled) "✅" else "❌"}  ${c.gtmKey}"
+            }
     }
 
     private val logLines = StringBuilder()
