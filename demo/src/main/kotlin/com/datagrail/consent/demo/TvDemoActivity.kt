@@ -1,0 +1,256 @@
+package com.datagrail.consent.demo
+
+import android.os.Bundle
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import com.datagrail.consent.DataGrailConsent
+import com.datagrail.consent.utils.LogLevel
+
+/**
+ * Android TV demo: initializes the SDK against the local Universal Consent test
+ * server, shows the D-pad banner with QR pairing, and renders a live consent
+ * status panel that updates when the phone writes consent (TV adopts via polling).
+ *
+ * This talks to the LOCAL test server. Both URLs must be reachable:
+ *  - configUrl   : the consent config JSON (SDK requires HTTPS) — use an https tunnel
+ *  - publicBaseUrl: the base the PHONE will open from the QR (LAN IP or tunnel)
+ * See the README "Android TV" section for the LAN / cloudflared run book.
+ *
+ * Built as a fully programmatic, D-pad-navigable screen (no XML) so it runs on a
+ * bare Android TV image without extra resources.
+ */
+class TvDemoActivity : AppCompatActivity() {
+    private lateinit var configUrlInput: EditText
+    private lateinit var apiKeyInput: EditText
+    private lateinit var publicBaseUrlInput: EditText
+    private lateinit var apiBaseUrlInput: EditText
+    private lateinit var initButton: Button
+    private lateinit var showBannerButton: Button
+    private lateinit var resetButton: Button
+    private lateinit var statusText: TextView
+
+    private var isInitialized = false
+
+    // Defaults point at the local test server exposed over HTTPS at bradleyy.dg-dev.com
+    // (same host used for the iOS test). Two distinct configs, mirroring the iOS demo:
+    //  - SDK config (demo-config.json): full SDK schema incl. privacyDomain + layout —
+    //    this is what initialize() consumes.
+    //  - phone QR config (sample-config.json): just category toggles for the phone page.
+    // The QR encodes a scannable https://bradleyy.dg-dev.com/tv?... URL for your phone.
+    // apiBaseUrl is where the TV itself polls for consent reads.
+    // Emulator wiring: `adb reverse tcp:9443 tcp:8443` bridges the emulator's
+    // localhost:9443 to the host's :8443 (which serves bradleyy.dg-dev.com). The domain
+    // resolves to 127.0.0.1 on the emulator, so :9443 lands on the reverse with valid TLS.
+    // The SDK config + TV polling use :9443; the QR/publicBaseUrl stays on :443 so a real
+    // phone on your LAN can scan it. (On a physical TV, set all of these to plain :443.)
+    private val defaultConfigUrl = "https://bradleyy.dg-dev.com:9443/tv/demo-config.json"
+    private val defaultPhoneConfigUrl = "https://bradleyy.dg-dev.com/tv/sample-config.json"
+    private val defaultPublicBaseUrl = "https://bradleyy.dg-dev.com"
+    private val defaultApiBaseUrl = "https://bradleyy.dg-dev.com:9443"
+    private val defaultApiKey = "dg_test_readkey"
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        DataGrailConsent.setLogLevel(LogLevel.DEBUG)
+        setContentView(buildUi())
+
+        DataGrailConsent.getInstance().onConsentChanged { prefs ->
+            runOnUiThread {
+                renderStatus("Consent changed (adopted from phone):\n" + prefsToText())
+                logLine("onConsentChanged fired — TV adopted remote write")
+            }
+        }
+
+        initButton.requestFocus()
+    }
+
+    private fun buildUi(): View {
+        val pad = (24 * resources.displayMetrics.density).toInt()
+        val root =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(pad, pad, pad, pad)
+                setBackgroundColor(0xFF101418.toInt())
+            }
+
+        root.addView(
+            TextView(this).apply {
+                text = "DataGrail Consent — Android TV Demo"
+                textSize = 26f
+                setTextColor(0xFFFFFFFF.toInt())
+            },
+        )
+
+        configUrlInput = field(root, "SDK config URL (https, full schema)", defaultConfigUrl)
+        publicBaseUrlInput = field(root, "Public base URL (phone-reachable, for QR)", defaultPublicBaseUrl)
+        apiBaseUrlInput = field(root, "API base URL (where the TV polls)", defaultApiBaseUrl)
+        apiKeyInput = field(root, "API key (reads)", defaultApiKey)
+
+        initButton =
+            tvButton(root, "1) Initialize") {
+                doInitialize()
+            }
+        showBannerButton =
+            tvButton(root, "2) Show TV Banner + QR") {
+                doShowBanner()
+            }
+        resetButton =
+            tvButton(root, "Reset consent") {
+                DataGrailConsent.getInstance().reset()
+                renderStatus("Consent reset.")
+            }
+
+        statusText =
+            TextView(this).apply {
+                textSize = 16f
+                setTextColor(0xFFB0BEC5.toInt())
+                setPadding(0, pad, 0, 0)
+                text = "Not initialized."
+            }
+        val scroll =
+            ScrollView(this).apply {
+                layoutParams =
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        0,
+                        1f,
+                    )
+                addView(statusText)
+            }
+        root.addView(scroll)
+        return root
+    }
+
+    private fun field(
+        parent: LinearLayout,
+        label: String,
+        default: String,
+    ): EditText {
+        parent.addView(
+            TextView(this).apply {
+                text = label
+                textSize = 13f
+                setTextColor(0xFF78909C.toInt())
+                setPadding(0, 16, 0, 0)
+            },
+        )
+        val input =
+            EditText(this).apply {
+                setText(default)
+                textSize = 15f
+                setTextColor(0xFFFFFFFF.toInt())
+                isFocusable = true
+                isFocusableInTouchMode = true
+            }
+        parent.addView(input)
+        return input
+    }
+
+    private fun tvButton(
+        parent: LinearLayout,
+        label: String,
+        onClick: () -> Unit,
+    ): Button {
+        val button =
+            Button(this).apply {
+                text = label
+                textSize = 18f
+                isFocusable = true
+                isFocusableInTouchMode = true
+                minHeight = (56 * resources.displayMetrics.density).toInt()
+                gravity = Gravity.CENTER
+                layoutParams =
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = 16 }
+                setOnClickListener { onClick() }
+            }
+        parent.addView(button)
+        return button
+    }
+
+    private fun doInitialize() {
+        val configUrl = configUrlInput.text.toString().trim()
+        val apiKey = apiKeyInput.text.toString().trim().ifEmpty { null }
+        renderStatus("Initializing against:\n$configUrl")
+        DataGrailConsent.getInstance().initialize(this, configUrl, apiKey) { result ->
+            runOnUiThread {
+                result.fold(
+                    onSuccess = {
+                        isInitialized = true
+                        renderStatus("Initialized.\n" + prefsToText())
+                        showBannerButton.requestFocus()
+                    },
+                    onFailure = { e ->
+                        renderStatus("Initialize FAILED:\n${e.message}")
+                    },
+                )
+            }
+        }
+    }
+
+    private fun doShowBanner() {
+        if (!isInitialized) {
+            renderStatus("Initialize first.")
+            return
+        }
+        val publicBaseUrl = publicBaseUrlInput.text.toString().trim()
+        val apiBaseUrl = apiBaseUrlInput.text.toString().trim().ifEmpty { null }
+        // The phone QR points at the lightweight category-toggle config, not the SDK config.
+        val phoneConfigUrl = defaultPhoneConfigUrl
+        // Log the exact user_hash this TV will poll (demo aid; matches the QR + server key).
+        val cfg = DataGrailConsent.getInstance().getConfig()
+        if (cfg != null) {
+            val deviceId = com.datagrail.consent.utils.UserHashGenerator.getDefaultDeviceId(this)
+            val uh =
+                com.datagrail.consent.utils.UserHashGenerator.generateUserHash(
+                    customerId = cfg.dgCustomerId,
+                    consentProjectId = cfg.privacyDomain,
+                    deviceId = deviceId,
+                )
+            android.util.Log.i("TvDemo", "user_hash=$uh deviceId=$deviceId customerId=${cfg.dgCustomerId} project=${cfg.privacyDomain}")
+            logLine("user_hash=${uh.take(12)}…")
+        }
+        logLine("Showing TV banner with QR pairing; phone opens $publicBaseUrl/tv ...")
+        DataGrailConsent.getInstance().showBannerWithQRPairing(
+            activity = this,
+            publicBaseUrl = publicBaseUrl,
+            configUrl = phoneConfigUrl,
+            userIdentifier = null,
+            apiBaseUrl = apiBaseUrl,
+        ) { prefs ->
+            runOnUiThread {
+                if (prefs != null) {
+                    renderStatus("Pairing complete — consent adopted:\n" + prefsToText())
+                } else {
+                    renderStatus("Banner dismissed / pairing timed out.\n" + prefsToText())
+                }
+            }
+        }
+    }
+
+    private fun prefsToText(): String {
+        val prefs = DataGrailConsent.getInstance().getCategories() ?: return "(no categories yet)"
+        return prefs.cookieOptions.joinToString("\n") { c ->
+            "  ${c.gtmKey}: ${if (c.isEnabled) "ON" else "OFF"}"
+        }
+    }
+
+    private val logLines = StringBuilder()
+
+    private fun logLine(line: String) {
+        logLines.append("• ").append(line).append('\n')
+    }
+
+    private fun renderStatus(header: String) {
+        statusText.text = header + "\n\n" + logLines.toString()
+    }
+}

@@ -657,6 +657,7 @@ class DataGrailConsent private constructor() {
         publicBaseUrl: String,
         configUrl: String,
         userIdentifier: String? = null,
+        apiBaseUrl: String? = null,
         callback: ((ConsentPreferences?) -> Unit)? = null,
     ) {
         val mgr = manager
@@ -688,6 +689,7 @@ class DataGrailConsent private constructor() {
                 configUrl = configUrl,
                 userIdentifier = userIdentifier,
                 apiKey = apiKey,
+                apiBaseUrl = apiBaseUrl,
             ) { updatedPreferences ->
                 if (updatedPreferences != null) {
                     // Adopt remote preferences without re-POSTing

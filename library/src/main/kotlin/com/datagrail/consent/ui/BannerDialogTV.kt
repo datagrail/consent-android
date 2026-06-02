@@ -43,6 +43,9 @@ class BannerDialogTV : DialogFragment() {
     private var qrPairingEnabled: Boolean = false
     private var publicBaseUrl: String? = null
     private var configUrl: String? = null
+    // Optional full base URL (scheme+host[:port]) the TV polls for consent reads.
+    // Defaults to https://<config.privacyDomain>. Override for local/test servers.
+    private var apiBaseUrlOverride: String? = null
     private var userIdentifier: String? = null
     private var apiKey: String? = null
     private var pairingCoordinator: com.datagrail.consent.network.PairingCoordinator? = null
@@ -301,7 +304,7 @@ class BannerDialogTV : DialogFragment() {
         val textContent = getTranslationText(element)
         return TextView(requireContext()).apply {
             renderRichText(textContent, this)
-            textSize = 18f
+            textSize = TV_BODY_SP
             setTextColor(getColor(com.datagrail.consent.R.color.consent_text_primary))
             layoutParams =
                 LinearLayout.LayoutParams(
@@ -315,10 +318,10 @@ class BannerDialogTV : DialogFragment() {
         return Button(requireContext()).apply {
             val buttonText = getTranslationText(element).ifEmpty { "Button" }
             text = buttonText
-            textSize = 18f
+            textSize = TV_BODY_SP
             isFocusable = true
             isFocusableInTouchMode = true
-            minHeight = (56 * resources.displayMetrics.density).toInt()
+            minHeight = (TV_BUTTON_MIN_HEIGHT_DP * resources.displayMetrics.density).toInt()
             setTextColor(getColor(com.datagrail.consent.R.color.consent_button_text))
             layoutParams =
                 LinearLayout.LayoutParams(
@@ -552,7 +555,7 @@ class BannerDialogTV : DialogFragment() {
         val title =
             TextView(requireContext()).apply {
                 text = getTranslationText(element).ifEmpty { "Tracking Technologies" }
-                textSize = 20f
+                textSize = TV_HEADING_SP
                 setTextColor(getColor(com.datagrail.consent.R.color.consent_text_primary))
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
                 layoutParams =
@@ -779,8 +782,9 @@ class BannerDialogTV : DialogFragment() {
                 deviceId = deviceId,
             )
 
-        // Extract API base URL from config's privacyDomain
-        val apiBaseUrl = "https://${cfg.privacyDomain}"
+        // The TV polls apiBaseUrl (full scheme+host[:port]). Prefer an explicit
+        // override (local/test servers); otherwise default to https://<privacyDomain>.
+        val apiBaseUrl = apiBaseUrlOverride?.takeIf { it.isNotBlank() } ?: "https://${cfg.privacyDomain}"
 
         // Create PairingService
         val networkClient = com.datagrail.consent.network.NetworkClient()
@@ -875,6 +879,11 @@ class BannerDialogTV : DialogFragment() {
     }
 
     companion object {
+        // 10-foot-viewing minimums (sp). Headings >= 24, body >= 18; buttons >= 56dp tall.
+        const val TV_HEADING_SP = 24f
+        const val TV_BODY_SP = 18f
+        const val TV_BUTTON_MIN_HEIGHT_DP = 56
+
         fun newInstance(
             config: ConsentConfig,
             preferences: ConsentPreferences?,
@@ -896,6 +905,7 @@ class BannerDialogTV : DialogFragment() {
             configUrl: String,
             userIdentifier: String?,
             apiKey: String?,
+            apiBaseUrl: String? = null,
             onDismiss: (ConsentPreferences?) -> Unit,
         ): BannerDialogTV {
             return BannerDialogTV().apply {
@@ -908,6 +918,7 @@ class BannerDialogTV : DialogFragment() {
                 this.configUrl = configUrl
                 this.userIdentifier = userIdentifier
                 this.apiKey = apiKey
+                this.apiBaseUrlOverride = apiBaseUrl
             }
         }
     }

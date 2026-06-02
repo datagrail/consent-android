@@ -85,17 +85,29 @@ class BannerDialogTVTest {
     }
 
     @Test
-    fun `text minimum font size requirement documented`() {
-        // This test documents the requirement that TV banners use minimum 18sp text
-        val minTextSize = 18f
-        assertTrue("Text elements should use minimum 18sp for 10-foot viewing", minTextSize >= 18f)
+    fun `tv font sizes meet 10-foot minimums`() {
+        // Assert against the SAME constants the view code uses, not literals, so the
+        // test fails if someone lowers them. Headings >= 24sp, body >= 18sp.
+        assertTrue(
+            "TV body text must be >= 18sp for 10-foot viewing",
+            BannerDialogTV.TV_BODY_SP >= 18f,
+        )
+        assertTrue(
+            "TV headings must be >= 24sp for 10-foot viewing",
+            BannerDialogTV.TV_HEADING_SP >= 24f,
+        )
+        assertTrue(
+            "Headings must be larger than body",
+            BannerDialogTV.TV_HEADING_SP > BannerDialogTV.TV_BODY_SP,
+        )
     }
 
     @Test
-    fun `button minimum height requirement documented`() {
-        // This test documents the requirement that TV buttons use minimum 56dp height
-        val minButtonHeightDp = 56
-        assertTrue("Button elements should use minimum 56dp height for TV D-pad", minButtonHeightDp >= 56)
+    fun `tv button minimum height meets dpad target`() {
+        assertTrue(
+            "TV buttons must be >= 56dp tall for D-pad focus",
+            BannerDialogTV.TV_BUTTON_MIN_HEIGHT_DP >= 56,
+        )
     }
 
     @Test

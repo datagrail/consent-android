@@ -206,6 +206,80 @@ A complete demo app is included in [`demo/`](demo/) showcasing SDK initializatio
 ./gradlew :library:assembleRelease
 ```
 
+## Android TV / Fire TV
+
+The SDK runs on Android TV and Fire TV. TV support is automatic: the same
+artifact and the same `showBanner(...)` entry point are used — when the SDK
+detects a TV device (`PackageManager.FEATURE_LEANBACK`) it presents a
+full-screen, D-pad-navigable banner (`BannerDialogTV`) instead of the phone
+banner. No separate dependency or API is required for the basic banner.
+
+### Cross-device QR pairing (CTV)
+
+Typing on a TV remote is painful, so the SDK can show a **QR code** the viewer
+scans with their phone to manage granular consent. The phone writes consent to
+the Universal Consent API; the TV polls and adopts the change automatically.
+
+```kotlin
+// TV-only. Shows the D-pad banner with a QR code and starts polling.
+DataGrailConsent.getInstance().showBannerWithQRPairing(
+    activity = this,
+    publicBaseUrl = "https://consent.example.com", // base the PHONE opens from the QR
+    configUrl = "https://consent.example.com/tv/phone-config.json", // phone page config
+    userIdentifier = null,        // defaults to ANDROID_ID
+    apiBaseUrl = null,            // where the TV polls; defaults to https://<config.privacyDomain>
+) { preferences ->
+    // preferences != null  -> adopted from the phone (also fires onConsentChanged)
+    // preferences == null  -> dismissed or timed out (falls back to the D-pad banner)
+}
+```
+
+How it works (no pairing-session subsystem): the QR encodes
+`{publicBaseUrl}/tv?customer_id=…&user_hash=…&config_url=…`. The `user_hash` is
+`SHA-256("{customerId}:{consentProjectId}:{deviceId}")` and is byte-identical
+across web/iOS/Android. The TV captures a baseline `updated_at` on its first
+poll and only completes when a **new** write arrives, so a pre-existing record
+never auto-dismisses the banner.
+
+> **QR generation** uses `com.google.zxing:core` (pure-Java). This is the one
+> external dependency the TV path adds; Android has no built-in QR encoder.
+
+### Manifest
+
+Declare TV support as optional so the app stays installable on phones:
+
+```xml
+<uses-feature android:name="android.software.leanback" android:required="false" />
+<uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+```
+
+Add a `LEANBACK_LAUNCHER` intent-filter to whichever activity should appear on
+the TV home screen (see the `:demo` module's `TvDemoActivity`).
+
+### Running the TV demo against a local test server (emulator)
+
+The `:demo` module ships a `TvDemoActivity` that pairs against the local
+Universal Consent test server. Two configs are used, mirroring real usage:
+`demo-config.json` (full SDK schema, has `privacyDomain`) for `initialize(...)`,
+and `sample-config.json` (category toggles only) for the phone QR page.
+
+1. Run the test server and expose it over HTTPS (the SDK requires HTTPS). On a
+   LAN, a real phone resolves your dev host and scans the QR directly.
+2. **Emulator networking.** A stock Android TV emulator image is a locked
+   production build (`adb root` is refused), and its `127.0.0.1` is the emulator,
+   not your Mac. Bridge the TV→host leg with a non-privileged reverse and point
+   the SDK config + `apiBaseUrl` at that port:
+   ```bash
+   adb reverse tcp:9443 tcp:8443    # emulator localhost:9443 -> host:8443 (your HTTPS server)
+   # demo SDK config + apiBaseUrl -> https://<your-host>:9443 ; QR publicBaseUrl stays :443 for the phone
+   ```
+3. **Dev TLS trust.** If the server uses a local CA (e.g. mkcert), the emulator
+   won't trust it. The demo bundles the CA and trusts it for the dev host via a
+   `network_security_config` (`res/xml/network_security_config.xml` +
+   `res/raw/mkcert_ca.crt`) — **demo-only; never ship this in a real app.** On a
+   physical TV with a publicly-trusted cert, none of this is needed: set all URLs
+   to plain `https://<host>` (`:443`).
+
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
