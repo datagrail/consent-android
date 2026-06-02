@@ -35,6 +35,7 @@ import java.net.URL
 class DataGrailConsent private constructor() {
     private var manager: ConsentManager? = null
     private var configUrl: String? = null
+    private var apiKey: String? = null
     private var onConsentChangedCallback: ((ConsentPreferences) -> Unit)? = null
     private val scope = CoroutineScope(Dispatchers.Main)
 
@@ -93,7 +94,7 @@ class DataGrailConsent private constructor() {
         configUrl: String,
         callback: ConsentCallback,
     ) {
-        initialize(context, configUrl) { result -> adaptResult(result, callback) }
+        initialize(context, configUrl, null) { result -> adaptResult(result, callback) }
     }
 
     /**
@@ -107,6 +108,39 @@ class DataGrailConsent private constructor() {
         configUrl: String,
         callback: (Result<Unit>) -> Unit,
     ) {
+        initialize(context, configUrl, null, callback)
+    }
+
+    /**
+     * Initialize the DataGrail Consent SDK with optional API key for CTV pairing (Java-friendly)
+     * @param context Android application context
+     * @param configUrl URL to fetch consent configuration from
+     * @param apiKey Optional API key for reading consent via Universal Consent API (CTV pairing)
+     * @param callback Callback interface for success/failure
+     */
+    fun initialize(
+        context: Context,
+        configUrl: String,
+        apiKey: String?,
+        callback: ConsentCallback,
+    ) {
+        initialize(context, configUrl, apiKey) { result -> adaptResult(result, callback) }
+    }
+
+    /**
+     * Initialize the DataGrail Consent SDK with optional API key for CTV pairing (Kotlin-friendly)
+     * @param context Android application context
+     * @param configUrl URL to fetch consent configuration from
+     * @param apiKey Optional API key for reading consent via Universal Consent API (CTV pairing)
+     * @param callback Callback with result
+     */
+    fun initialize(
+        context: Context,
+        configUrl: String,
+        apiKey: String?,
+        callback: (Result<Unit>) -> Unit,
+    ) {
+        this.apiKey = apiKey
         // Validate URL format and scheme
         val url =
             try {
@@ -576,5 +610,95 @@ class DataGrailConsent private constructor() {
 
             dialog.show(activity.supportFragmentManager, "ConsentBannerDialog")
         }
+    }
+
+    // MARK: - CTV QR Pairing
+
+    /**
+     * Show the Android TV consent banner with QR code pairing (Java-friendly)
+     * Only available on Android TV devices. Displays a QR code that users scan with their phone
+     * to manage granular consent preferences. Polls for remote consent updates.
+     *
+     * @param activity The activity to show the dialog on
+     * @param publicBaseUrl Base URL for the phone consent page (e.g., "https://example.com")
+     * @param configUrl The consent config URL (for QR querystring)
+     * @param userIdentifier Optional user identifier for the pairing hash (defaults to ANDROID_ID)
+     * @param callback Callback interface for banner result
+     */
+    fun showBannerWithQRPairing(
+        activity: androidx.fragment.app.FragmentActivity,
+        publicBaseUrl: String,
+        configUrl: String,
+        userIdentifier: String?,
+        callback: PreferencesCallback,
+    ) {
+        showBannerWithQRPairing(activity, publicBaseUrl, configUrl, userIdentifier) { preferences ->
+            if (preferences != null) {
+                callback.onPreferencesSaved(preferences)
+            } else {
+                callback.onDismissed()
+            }
+        }
+    }
+
+    /**
+     * Show the Android TV consent banner with QR code pairing (Kotlin-friendly)
+     * Only available on Android TV devices. Displays a QR code that users scan with their phone
+     * to manage granular consent preferences. Polls for remote consent updates.
+     *
+     * @param activity The activity to show the dialog on
+     * @param publicBaseUrl Base URL for the phone consent page (e.g., "https://example.com")
+     * @param configUrl The consent config URL (for QR querystring)
+     * @param userIdentifier Optional user identifier for the pairing hash (defaults to ANDROID_ID)
+     * @param callback Called when the dialog is dismissed with updated preferences (null if dismissed/timeout)
+     */
+    fun showBannerWithQRPairing(
+        activity: androidx.fragment.app.FragmentActivity,
+        publicBaseUrl: String,
+        configUrl: String,
+        userIdentifier: String? = null,
+        callback: ((ConsentPreferences?) -> Unit)? = null,
+    ) {
+        val mgr = manager
+        if (mgr == null) {
+            callback?.invoke(null)
+            return
+        }
+
+        val cfg = mgr.currentConfig
+        if (cfg == null) {
+            callback?.invoke(null)
+            return
+        }
+
+        // This API is only for TV devices
+        if (!com.datagrail.consent.utils.DeviceCapabilities.isTv(activity)) {
+            ConsentLogger.e("showBannerWithQRPairing is only available on Android TV devices")
+            callback?.invoke(null)
+            return
+        }
+
+        // Show the TV banner with QR pairing
+        val prefs = mgr.getCategories()
+        val tvDialog =
+            com.datagrail.consent.ui.BannerDialogTV.newInstanceWithQRPairing(
+                config = cfg,
+                preferences = prefs,
+                publicBaseUrl = publicBaseUrl,
+                configUrl = configUrl,
+                userIdentifier = userIdentifier,
+                apiKey = apiKey,
+            ) { updatedPreferences ->
+                if (updatedPreferences != null) {
+                    // Adopt remote preferences without re-POSTing
+                    mgr.adoptRemotePreferences(updatedPreferences)
+                    onConsentChangedCallback?.invoke(updatedPreferences)
+                    callback?.invoke(updatedPreferences)
+                } else {
+                    callback?.invoke(null)
+                }
+            }
+
+        tvDialog.show(activity.supportFragmentManager, "ConsentBannerDialogTVQR")
     }
 }

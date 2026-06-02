@@ -39,6 +39,14 @@ class BannerDialogTV : DialogFragment() {
     private var layerStack: MutableList<String> = mutableListOf()
     private var onDismissListener: ((ConsentPreferences?) -> Unit)? = null
 
+    // QR pairing fields
+    private var qrPairingEnabled: Boolean = false
+    private var publicBaseUrl: String? = null
+    private var configUrl: String? = null
+    private var userIdentifier: String? = null
+    private var apiKey: String? = null
+    private var pairingCoordinator: com.datagrail.consent.network.PairingCoordinator? = null
+
     private lateinit var scrollView: ScrollView
     private lateinit var contentLayout: LinearLayout
 
@@ -72,7 +80,20 @@ class BannerDialogTV : DialogFragment() {
             layerStack.add(layerKey)
             renderLayer(layerKey)
         }
+
+        // Start QR pairing if enabled
+        if (qrPairingEnabled) {
+            startQRPairing()
+        }
+
         return rootView
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        // Stop polling when dialog is destroyed
+        pairingCoordinator?.stop()
+        pairingCoordinator = null
     }
 
     private fun createRootView(): ViewGroup {
@@ -745,6 +766,103 @@ class BannerDialogTV : DialogFragment() {
         }
     }
 
+    private fun startQRPairing() {
+        val cfg = config ?: return
+        val context = requireContext()
+
+        // Generate user hash
+        val deviceId = userIdentifier ?: com.datagrail.consent.utils.UserHashGenerator.getDefaultDeviceId(context)
+        val userHash =
+            com.datagrail.consent.utils.UserHashGenerator.generateUserHash(
+                customerId = cfg.dgCustomerId,
+                consentProjectId = cfg.privacyDomain,
+                deviceId = deviceId,
+            )
+
+        // Extract API base URL from config's privacyDomain
+        val apiBaseUrl = "https://${cfg.privacyDomain}"
+
+        // Create PairingService
+        val networkClient = com.datagrail.consent.network.NetworkClient()
+        val pairingService =
+            com.datagrail.consent.network.PairingService(
+                networkClient = networkClient,
+                apiBaseUrl = apiBaseUrl,
+                apiKey = apiKey,
+            )
+
+        // Generate QR URL
+        val qrUrl =
+            pairingService.qrUrl(
+                publicBaseUrl = publicBaseUrl ?: "",
+                customerId = cfg.dgCustomerId,
+                userHash = userHash,
+                configUrl = configUrl ?: "",
+            )
+
+        // Render QR code at the top of the banner
+        renderQRCode(qrUrl)
+
+        // Start polling coordinator
+        pairingCoordinator =
+            com.datagrail.consent.network.PairingCoordinator(
+                pairingService = pairingService,
+                customerId = cfg.dgCustomerId,
+                userHash = userHash,
+                onPreferencesFound = { remotePreferences ->
+                    // Remote preferences found - adopt and dismiss
+                    dismissWithPreferences(remotePreferences)
+                },
+                onTimeout = {
+                    // Timeout - just dismiss (fallback would be to show D-pad banner)
+                    dismiss()
+                },
+            )
+
+        pairingCoordinator?.start()
+    }
+
+    private fun renderQRCode(url: String) {
+        try {
+            val qrBitmap = com.datagrail.consent.utils.QrCodeGenerator.generateQrCode(url, 512)
+
+            val qrImageView =
+                android.widget.ImageView(requireContext()).apply {
+                    setImageBitmap(qrBitmap)
+                    layoutParams =
+                        LinearLayout.LayoutParams(
+                            (256 * resources.displayMetrics.density).toInt(),
+                            (256 * resources.displayMetrics.density).toInt(),
+                        ).apply {
+                            gravity = android.view.Gravity.CENTER_HORIZONTAL
+                            bottomMargin = (32 * resources.displayMetrics.density).toInt()
+                        }
+                }
+
+            // Add instruction text
+            val instructionText =
+                TextView(requireContext()).apply {
+                    text = "Scan this QR code with your phone to manage consent preferences"
+                    textSize = 18f
+                    setTextColor(getColor(com.datagrail.consent.R.color.consent_text_primary))
+                    gravity = android.view.Gravity.CENTER
+                    layoutParams =
+                        LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        ).apply {
+                            bottomMargin = (24 * resources.displayMetrics.density).toInt()
+                        }
+                }
+
+            // Insert at the top of content layout
+            contentLayout.addView(instructionText, 0)
+            contentLayout.addView(qrImageView, 1)
+        } catch (e: Exception) {
+            com.datagrail.consent.utils.ConsentLogger.e("Failed to render QR code: ${e.message}")
+        }
+    }
+
     private fun dismissWithPreferences(prefs: ConsentPreferences) {
         onDismissListener?.invoke(prefs)
         onDismissListener = null
@@ -767,6 +885,29 @@ class BannerDialogTV : DialogFragment() {
                 this.preferences = preferences
                 this.currentLayerKey = config.layout.firstLayerId
                 this.onDismissListener = onDismiss
+                this.qrPairingEnabled = false
+            }
+        }
+
+        fun newInstanceWithQRPairing(
+            config: ConsentConfig,
+            preferences: ConsentPreferences?,
+            publicBaseUrl: String,
+            configUrl: String,
+            userIdentifier: String?,
+            apiKey: String?,
+            onDismiss: (ConsentPreferences?) -> Unit,
+        ): BannerDialogTV {
+            return BannerDialogTV().apply {
+                this.config = config
+                this.preferences = preferences
+                this.currentLayerKey = config.layout.firstLayerId
+                this.onDismissListener = onDismiss
+                this.qrPairingEnabled = true
+                this.publicBaseUrl = publicBaseUrl
+                this.configUrl = configUrl
+                this.userIdentifier = userIdentifier
+                this.apiKey = apiKey
             }
         }
     }
