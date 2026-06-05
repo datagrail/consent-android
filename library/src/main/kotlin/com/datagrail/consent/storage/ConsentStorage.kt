@@ -40,22 +40,36 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         fun create(context: Context): ConsentStorage {
             val appContext = context.applicationContext
             return try {
-                val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-                val encryptedPrefs =
-                    EncryptedSharedPreferences.create(
-                        PREFS_NAME,
-                        masterKeyAlias,
-                        appContext,
-                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-                    )
-                ConsentStorage(encryptedPrefs)
+                createEncryptedStorage(appContext)
             } catch (e: Exception) {
-                throw ConsentException.InvalidConfiguration(
-                    "Failed to initialize encrypted storage",
-                    e,
-                )
+                // The Tink keyset stored in SharedPreferences may be corrupted (e.g. from a
+                // partial write during a prior crash or OS update). Clear the prefs file and
+                // retry with a fresh keyset. Previously saved consent state is lost and the
+                // banner will re-appear, but the app will no longer crash.
+                try {
+                    appContext.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                        .edit().clear().apply()
+                    createEncryptedStorage(appContext)
+                } catch (retryException: Exception) {
+                    throw ConsentException.InvalidConfiguration(
+                        "Failed to initialize encrypted storage",
+                        retryException,
+                    )
+                }
             }
+        }
+
+        private fun createEncryptedStorage(appContext: android.content.Context): ConsentStorage {
+            val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+            val encryptedPrefs =
+                EncryptedSharedPreferences.create(
+                    PREFS_NAME,
+                    masterKeyAlias,
+                    appContext,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                )
+            return ConsentStorage(encryptedPrefs)
         }
     }
 

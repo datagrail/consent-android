@@ -149,4 +149,5 @@ class ConsentStorageTest {
         Mockito.verify(mockEditor).clear()
         Mockito.verify(mockEditor).apply()
     }
+
 }
