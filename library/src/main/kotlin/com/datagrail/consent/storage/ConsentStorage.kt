@@ -7,6 +7,7 @@ import androidx.security.crypto.MasterKeys
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
+import com.datagrail.consent.utils.ConsentLogger
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -39,18 +40,49 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
          */
         fun create(context: Context): ConsentStorage {
             val appContext = context.applicationContext
+            val rawPrefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return createWithRecovery(rawPrefs) { createEncryptedStorage(appContext) }
+        }
+
+        /**
+         * Initialize encrypted storage, recovering from a corrupted Tink keyset on failure.
+         *
+         * The Tink keyset stored in SharedPreferences may be corrupted (e.g. from a partial
+         * write during a prior crash or OS update), causing the initial attempt to throw
+         * (e.g. "Protocol message contained an invalid tag (zero)"). On any failure we clear
+         * the prefs file — removing the corrupted keyset — and retry with a fresh keyset.
+         * Previously saved consent state is lost and the banner will re-appear, but the app
+         * will no longer crash.
+         *
+         * Note: catching all exceptions (not just the corruption error) is intentional — any
+         * init failure here, including a transient Keystore error, will wipe consent state and
+         * retry. Crash-avoidance is the priority; re-showing the banner is the privacy-safe
+         * failure mode.
+         *
+         * Extracted (and given an injectable [createStorage] factory) so the recovery flow can
+         * be unit-tested without a real EncryptedSharedPreferences.
+         *
+         * @throws ConsentException.InvalidConfiguration if the retry also fails
+         */
+        internal fun createWithRecovery(
+            rawPrefs: SharedPreferences,
+            createStorage: () -> ConsentStorage,
+        ): ConsentStorage {
             return try {
-                createEncryptedStorage(appContext)
+                createStorage()
             } catch (e: Exception) {
-                // The Tink keyset stored in SharedPreferences may be corrupted (e.g. from a
-                // partial write during a prior crash or OS update). Clear the prefs file and
-                // retry with a fresh keyset. Previously saved consent state is lost and the
-                // banner will re-appear, but the app will no longer crash.
+                ConsentLogger.e(
+                    "Failed to initialize encrypted storage, recovering by clearing corrupted " +
+                        "prefs and retrying: ${e.javaClass.simpleName}: ${e.message}",
+                )
                 try {
-                    appContext.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
-                        .edit().clear().apply()
-                    createEncryptedStorage(appContext)
+                    rawPrefs.edit().clear().apply()
+                    createStorage()
                 } catch (retryException: Exception) {
+                    ConsentLogger.e(
+                        "Encrypted storage recovery failed after clearing prefs: " +
+                            "${retryException.javaClass.simpleName}: ${retryException.message}",
+                    )
                     throw ConsentException.InvalidConfiguration(
                         "Failed to initialize encrypted storage",
                         retryException,
@@ -59,7 +91,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
             }
         }
 
-        private fun createEncryptedStorage(appContext: android.content.Context): ConsentStorage {
+        private fun createEncryptedStorage(appContext: Context): ConsentStorage {
             val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
             val encryptedPrefs =
                 EncryptedSharedPreferences.create(
