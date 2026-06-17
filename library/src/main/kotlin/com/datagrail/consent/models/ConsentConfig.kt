@@ -128,7 +128,7 @@ data class ConsentLayerElement(
     val buttonAction: String? = null,
     @SerialName("target_consent_layer")
     val targetConsentLayer: String? = null,
-    val categories: List<String>? = null,
+    val categories: List<ConsentLayerCategory>? = null,
     // Link element fields
     val links: List<LinkItem>? = null,
     // Category element fields
