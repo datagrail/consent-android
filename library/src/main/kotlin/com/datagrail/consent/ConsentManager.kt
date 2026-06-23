@@ -136,6 +136,22 @@ internal class ConsentManager(
     }
 
     /**
+     * Adopt remote preferences from CTV pairing (no POST back to server)
+     * Stores locally and fires onConsentChanged, but does NOT re-POST to backend
+     * @param preferences The remote preferences to adopt
+     */
+    fun adoptRemotePreferences(preferences: ConsentPreferences) {
+        val config = currentConfig ?: return
+
+        // Save locally
+        storage.savePreferences(preferences)
+        storage.saveConfigVersion(config.version)
+
+        // Note: intentionally does NOT call consentService.savePreferences
+        // The preferences came FROM the server via the pairing flow
+    }
+
+    /**
      * Track banner open event
      * @param callback Callback with result
      */
