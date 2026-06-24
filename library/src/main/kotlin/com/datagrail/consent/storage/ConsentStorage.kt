@@ -2,12 +2,12 @@ package com.datagrail.consent.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
-import com.datagrail.consent.utils.ConsentLogger
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -24,6 +24,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         }
 
     companion object {
+        private const val TAG = "DataGrailConsent"
         internal const val PREFS_NAME = "com.datagrail.consent.prefs"
         private const val KEY_PREFERENCES = "datagrail_consent_preferences"
         private const val KEY_UNIQUE_ID = "datagrail_consent_id"
@@ -62,6 +63,10 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
          * Extracted (and given an injectable [createStorage] factory) so the recovery flow can
          * be unit-tested without a real EncryptedSharedPreferences.
          *
+         * Recovery events are logged via [Log.e] directly (not [ConsentLogger]) so they are
+         * always visible in logcat. This recovery destroys saved consent state and is rare and
+         * serious, so it must be observable regardless of the host app's configured log level.
+         *
          * @throws ConsentException.InvalidConfiguration if the retry also fails
          */
         internal fun createWithRecovery(
@@ -71,17 +76,20 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
             return try {
                 createStorage()
             } catch (e: Exception) {
-                ConsentLogger.e(
+                Log.e(
+                    TAG,
                     "Failed to initialize encrypted storage, recovering by clearing corrupted " +
-                        "prefs and retrying: ${e.javaClass.simpleName}: ${e.message}",
+                        "prefs and retrying",
+                    e,
                 )
                 try {
                     rawPrefs.edit().clear().apply()
                     createStorage()
                 } catch (retryException: Exception) {
-                    ConsentLogger.e(
-                        "Encrypted storage recovery failed after clearing prefs: " +
-                            "${retryException.javaClass.simpleName}: ${retryException.message}",
+                    Log.e(
+                        TAG,
+                        "Encrypted storage recovery failed after clearing prefs",
+                        retryException,
                     )
                     throw ConsentException.InvalidConfiguration(
                         "Failed to initialize encrypted storage",

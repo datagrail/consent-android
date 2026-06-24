@@ -218,5 +218,6 @@ class ConsentStorageTest {
 
         assertEquals(2, attempts)
         Mockito.verify(mockEditor).clear()
+        Mockito.verify(mockEditor).apply()
     }
 }
