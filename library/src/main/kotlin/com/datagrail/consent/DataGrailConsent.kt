@@ -10,6 +10,7 @@ import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.network.NetworkClient
 import com.datagrail.consent.storage.ConsentStorage
 import com.datagrail.consent.ui.BannerDisplayStyle
+import com.datagrail.consent.ui.BannerTextStyleConfig
 import com.datagrail.consent.utils.ConsentLogger
 import com.datagrail.consent.utils.LogLevel
 import kotlinx.coroutines.CoroutineScope
@@ -492,17 +493,18 @@ class DataGrailConsent private constructor() {
         }
     }
 
-
     /**
      * Show the consent banner dialog with specified display style (Kotlin-friendly)
      * @param activity The activity to show the dialog on
      * @param style The display style for the banner (MODAL or FULL_SCREEN)
+     * @param textStyleConfig Optional font size/style overrides for banner text elements
      * @param callback Called when the dialog is dismissed with updated preferences (null if dismissed without saving)
      */
     @JvmOverloads
     fun showBanner(
         activity: androidx.fragment.app.FragmentActivity,
         style: BannerDisplayStyle = BannerDisplayStyle.MODAL,
+        textStyleConfig: BannerTextStyleConfig = BannerTextStyleConfig(),
         callback: ((ConsentPreferences?) -> Unit)? = null,
     ) {
         val mgr = manager
@@ -527,6 +529,7 @@ class DataGrailConsent private constructor() {
                 config = cfg,
                 preferences = prefs,
                 displayStyle = style,
+                textStyleConfig = textStyleConfig,
             ) { updatedPreferences ->
                 if (updatedPreferences != null) {
                     // Save preferences if user made changes
