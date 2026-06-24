@@ -379,6 +379,7 @@ class BannerDialog : DialogFragment() {
             val buttonText = getTranslationText(element).ifEmpty { "Button" }
             val action = element.buttonAction ?: ""
             text = buttonText
+            isAllCaps = false
             textSize = 16f
             setBackgroundColor(getColor(com.datagrail.consent.R.color.consent_button_background))
             setTextColor(getColor(com.datagrail.consent.R.color.consent_button_text))
