@@ -395,6 +395,46 @@ class ConsentConfigParserTest {
         ConfigValidator.validate(config)
     }
 
+    @Test
+    fun `test button element with populated categories parses correctly`() {
+        val configFile = File(javaClass.classLoader?.getResource("test-config.json")?.file ?: "")
+        val config = json.decodeFromString<ConsentConfig>(configFile.readText())
+
+        val layer = config.layout.consentLayers["00a6e2c3-f1d5-4d3f-bd91-7d45cc0b75c5"]
+        assertNotNull("Layer should exist", layer)
+
+        val dnssButton = layer?.elements?.firstOrNull { element ->
+            element.type.contains("Button", ignoreCase = true) &&
+                element.categories?.isNotEmpty() == true
+        }
+        assertNotNull("Button with populated categories should exist", dnssButton)
+        assertEquals("Do Not Sell or Share My Info", dnssButton?.translations?.get("en")?.value)
+        assertEquals(1, dnssButton?.categories?.size)
+
+        val category = dnssButton?.categories?.first()
+        assertNotNull(category)
+        assertEquals("5be5f52d-bcdb-4937-957f-740cab4d302f", category?.id)
+        assertEquals("dg-category-essential", category?.gtmKey)
+        assertEquals("Essential", category?.translations?.get("en")?.name)
+    }
+
+    @Test
+    fun `test button element with empty categories parses correctly`() {
+        val configFile = File(javaClass.classLoader?.getResource("test-config.json")?.file ?: "")
+        val config = json.decodeFromString<ConsentConfig>(configFile.readText())
+
+        val layer = config.layout.consentLayers["00a6e2c3-f1d5-4d3f-bd91-7d45cc0b75c5"]
+        assertNotNull("Layer should exist", layer)
+
+        val emptyButton = layer?.elements?.firstOrNull { element ->
+            element.type.contains("Button", ignoreCase = true) &&
+                element.categories?.isEmpty() == true
+        }
+        assertNotNull("Button with empty categories should exist", emptyButton)
+        assertEquals("Button Element", emptyButton?.translations?.get("en")?.value)
+        assertEquals(0, emptyButton?.categories?.size)
+    }
+
     @Test(expected = Exception::class)
     fun `test parse invalid JSON`() {
         val invalidJSON = "{ invalid json }"
