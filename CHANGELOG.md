@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-06-26
+
+### Fixed
+
+- Fix categories parse failure for button (TRUST-2138)
+- Recover from corrupted Tink keyset in EncryptedSharedPreferences to prevent crash (TRUST-2075)
+- Fix blank banner when switching between light and dark mode after SDK initialization (TRUST-1963)
+
+### Changed
+
+- Reflect button text casing defined in the layout (TRUST-1916)
+- Respect the `style` parameter defined in the config JSON (TRUST-1900)
+
 ## [1.5.0] - 2026-05-22
 
 ### Added
