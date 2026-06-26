@@ -40,6 +40,15 @@ android {
     buildFeatures {
         viewBinding = true
     }
+
+    testOptions {
+        unitTests {
+            // Return default values (0/null/false) for unmocked Android framework calls
+            // (e.g. android.util.Log) instead of throwing, so JUnit unit tests can exercise
+            // code paths that touch the framework.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {

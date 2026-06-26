@@ -2,6 +2,7 @@ package com.datagrail.consent.storage
 
 import android.content.SharedPreferences
 import com.datagrail.consent.models.CategoryConsent
+import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -146,6 +147,76 @@ class ConsentStorageTest {
         storage.clearAll()
 
         // Verify clear was called
+        Mockito.verify(mockEditor).clear()
+        Mockito.verify(mockEditor).apply()
+    }
+
+    // MARK: - Corrupted keyset recovery
+
+    @Test
+    fun testCreateWithRecoverySucceedsOnFirstAttempt() {
+        whenever(mockEditor.clear()).thenReturn(mockEditor)
+
+        val expected = ConsentStorage(mockSharedPreferences)
+        var attempts = 0
+
+        val result =
+            ConsentStorage.createWithRecovery(mockSharedPreferences) {
+                attempts++
+                expected
+            }
+
+        assertEquals(expected, result)
+        assertEquals(1, attempts)
+        // No corruption, so the prefs file must not be cleared.
+        Mockito.verify(mockEditor, Mockito.never()).clear()
+    }
+
+    @Test
+    fun testCreateWithRecoveryClearsAndRetriesOnCorruptedKeyset() {
+        whenever(mockEditor.clear()).thenReturn(mockEditor)
+
+        val expected = ConsentStorage(mockSharedPreferences)
+        var attempts = 0
+
+        val result =
+            ConsentStorage.createWithRecovery(mockSharedPreferences) {
+                attempts++
+                if (attempts == 1) {
+                    // Simulate the corrupted Tink keyset failure on first init.
+                    throw IllegalStateException("Protocol message contained an invalid tag (zero)")
+                }
+                expected
+            }
+
+        assertEquals(expected, result)
+        assertEquals(2, attempts)
+        // The corrupted prefs file must be cleared before the retry.
+        Mockito.verify(mockEditor).clear()
+        Mockito.verify(mockEditor).apply()
+    }
+
+    @Test
+    fun testCreateWithRecoveryThrowsInvalidConfigurationWhenRetryFails() {
+        whenever(mockEditor.clear()).thenReturn(mockEditor)
+
+        val retryCause = IllegalStateException("still broken after clear")
+        var attempts = 0
+
+        try {
+            ConsentStorage.createWithRecovery(mockSharedPreferences) {
+                attempts++
+                if (attempts == 1) {
+                    throw IllegalStateException("Protocol message contained an invalid tag (zero)")
+                }
+                throw retryCause
+            }
+            fail("Expected ConsentException.InvalidConfiguration to be thrown")
+        } catch (e: ConsentException.InvalidConfiguration) {
+            assertEquals(retryCause, e.cause)
+        }
+
+        assertEquals(2, attempts)
         Mockito.verify(mockEditor).clear()
         Mockito.verify(mockEditor).apply()
     }

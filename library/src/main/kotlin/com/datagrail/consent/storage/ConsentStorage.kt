@@ -2,6 +2,7 @@ package com.datagrail.consent.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import com.datagrail.consent.models.ConsentConfig
@@ -23,6 +24,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         }
 
     companion object {
+        private const val TAG = "DataGrailConsent"
         internal const val PREFS_NAME = "com.datagrail.consent.prefs"
         private const val KEY_PREFERENCES = "datagrail_consent_preferences"
         private const val KEY_UNIQUE_ID = "datagrail_consent_id"
@@ -39,23 +41,75 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
          */
         fun create(context: Context): ConsentStorage {
             val appContext = context.applicationContext
+            val rawPrefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            return createWithRecovery(rawPrefs) { createEncryptedStorage(appContext) }
+        }
+
+        /**
+         * Initialize encrypted storage, recovering from a corrupted Tink keyset on failure.
+         *
+         * The Tink keyset stored in SharedPreferences may be corrupted (e.g. from a partial
+         * write during a prior crash or OS update), causing the initial attempt to throw
+         * (e.g. "Protocol message contained an invalid tag (zero)"). On any failure we clear
+         * the prefs file — removing the corrupted keyset — and retry with a fresh keyset.
+         * Previously saved consent state is lost and the banner will re-appear, but the app
+         * will no longer crash.
+         *
+         * Note: catching all exceptions (not just the corruption error) is intentional — any
+         * init failure here, including a transient Keystore error, will wipe consent state and
+         * retry. Crash-avoidance is the priority; re-showing the banner is the privacy-safe
+         * failure mode.
+         *
+         * Extracted (and given an injectable [createStorage] factory) so the recovery flow can
+         * be unit-tested without a real EncryptedSharedPreferences.
+         *
+         * Recovery events are logged via [Log.e] directly (not [ConsentLogger]) so they are
+         * always visible in logcat. This recovery destroys saved consent state and is rare and
+         * serious, so it must be observable regardless of the host app's configured log level.
+         *
+         * @throws ConsentException.InvalidConfiguration if the retry also fails
+         */
+        internal fun createWithRecovery(
+            rawPrefs: SharedPreferences,
+            createStorage: () -> ConsentStorage,
+        ): ConsentStorage {
             return try {
-                val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-                val encryptedPrefs =
-                    EncryptedSharedPreferences.create(
-                        PREFS_NAME,
-                        masterKeyAlias,
-                        appContext,
-                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-                    )
-                ConsentStorage(encryptedPrefs)
+                createStorage()
             } catch (e: Exception) {
-                throw ConsentException.InvalidConfiguration(
-                    "Failed to initialize encrypted storage",
+                Log.e(
+                    TAG,
+                    "Failed to initialize encrypted storage, recovering by clearing corrupted " +
+                        "prefs and retrying",
                     e,
                 )
+                try {
+                    rawPrefs.edit().clear().apply()
+                    createStorage()
+                } catch (retryException: Exception) {
+                    Log.e(
+                        TAG,
+                        "Encrypted storage recovery failed after clearing prefs",
+                        retryException,
+                    )
+                    throw ConsentException.InvalidConfiguration(
+                        "Failed to initialize encrypted storage",
+                        retryException,
+                    )
+                }
             }
+        }
+
+        private fun createEncryptedStorage(appContext: Context): ConsentStorage {
+            val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+            val encryptedPrefs =
+                EncryptedSharedPreferences.create(
+                    PREFS_NAME,
+                    masterKeyAlias,
+                    appContext,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                )
+            return ConsentStorage(encryptedPrefs)
         }
     }
 
