@@ -53,6 +53,7 @@ class BannerDialog : DialogFragment() {
     private var displayStyle: BannerDisplayStyle = BannerDisplayStyle.MODAL
     private var textStyleConfig: BannerTextStyleConfig = BannerTextStyleConfig()
 
+    private lateinit var cardFrame: FrameLayout
     private lateinit var scrollView: ScrollView
     private lateinit var contentLayout: LinearLayout
     private var closeButton: ImageButton? = null
@@ -97,7 +98,7 @@ class BannerDialog : DialogFragment() {
         // Always create close button (added last so it appears on top)
         // Visibility will be updated by renderLayer() based on the current layer's config
         closeButton = createCloseButton()
-        (rootView as FrameLayout).addView(closeButton)
+        cardFrame.addView(closeButton)
 
         currentLayerKey?.let { renderLayer(it) }
 
@@ -114,9 +115,11 @@ class BannerDialog : DialogFragment() {
                     )
             }
 
-        val contentContainer =
-            LinearLayout(requireContext()).apply {
-                orientation = LinearLayout.VERTICAL
+        // Card-sized frame so the close button can be positioned relative to the
+        // visible card (not the full screen) — this matters for MODAL, where the
+        // card is centered and inset rather than filling the screen.
+        cardFrame =
+            FrameLayout(requireContext()).apply {
                 when (displayStyle) {
                     BannerDisplayStyle.FULL_SCREEN -> {
                         layoutParams =
@@ -124,8 +127,6 @@ class BannerDialog : DialogFragment() {
                                 FrameLayout.LayoutParams.MATCH_PARENT,
                                 FrameLayout.LayoutParams.MATCH_PARENT,
                             )
-                        setBackgroundColor(getColor(com.datagrail.consent.R.color.consent_background))
-                        setPadding(32, 64, 32, 32)
                     }
                     BannerDisplayStyle.MODAL -> {
                         val displayMetrics = resources.displayMetrics
@@ -141,7 +142,28 @@ class BannerDialog : DialogFragment() {
                                 leftMargin = 32
                                 rightMargin = 32
                             }
+                    }
+                }
+            }
 
+        val contentContainer =
+            LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams =
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                    )
+                // Reserve room at the top so content never sits under the close button,
+                // which is positioned relative to cardFrame rather than this container.
+                val closeButtonReservedSpace =
+                    (CLOSE_BUTTON_SIZE_DP + CLOSE_BUTTON_MARGIN_DP) * resources.displayMetrics.density
+                when (displayStyle) {
+                    BannerDisplayStyle.FULL_SCREEN -> {
+                        setBackgroundColor(getColor(com.datagrail.consent.R.color.consent_background))
+                        setPadding(32, closeButtonReservedSpace.toInt(), 32, 32)
+                    }
+                    BannerDisplayStyle.MODAL -> {
                         // Rounded corners with shadow
                         val shape =
                             GradientDrawable().apply {
@@ -150,7 +172,7 @@ class BannerDialog : DialogFragment() {
                             }
                         background = shape
                         elevation = CONTENT_ELEVATION
-                        setPadding(32, 48, 32, 32)
+                        setPadding(32, closeButtonReservedSpace.toInt(), 32, 32)
                     }
                 }
             }
@@ -177,7 +199,8 @@ class BannerDialog : DialogFragment() {
 
         scrollView.addView(contentLayout)
         contentContainer.addView(scrollView)
-        outerFrame.addView(contentContainer)
+        cardFrame.addView(contentContainer)
+        outerFrame.addView(cardFrame)
 
         return outerFrame
     }
@@ -198,12 +221,16 @@ class BannerDialog : DialogFragment() {
             contentDescription = "Close"
             elevation = CLOSE_BUTTON_ELEVATION  // Ensure button appears above content
 
-            val size = (48 * resources.displayMetrics.density).toInt()
+            val size = (CLOSE_BUTTON_SIZE_DP * resources.displayMetrics.density).toInt()
+            // contentContainer reserves (size + margin) at its top for this button. Split that
+            // leftover margin evenly above and below the button so it sits centered in that
+            // space rather than flush against its bottom edge.
+            val verticalMargin = (CLOSE_BUTTON_MARGIN_DP / 2 * resources.displayMetrics.density).toInt()
             layoutParams =
                 FrameLayout.LayoutParams(size, size).apply {
                     gravity = Gravity.TOP or Gravity.END
-                    topMargin = (16 * resources.displayMetrics.density).toInt()
-                    rightMargin = (16 * resources.displayMetrics.density).toInt()
+                    topMargin = verticalMargin
+                    rightMargin = (CLOSE_BUTTON_MARGIN_DP * resources.displayMetrics.density).toInt()
                 }
 
             setOnClickListener { dismiss() }
@@ -597,42 +624,57 @@ class BannerDialog : DialogFragment() {
                     )
             }
 
-        val toggle =
-            androidx.appcompat.widget.SwitchCompat(requireContext()).apply {
-                val categoryName = categoryTranslation?.name ?: "Category"
-                val checked = preferences?.cookieOptions?.find { it.gtmKey == category.gtmKey }?.isEnabled ?: false
-                isChecked = checked
-                isEnabled = !category.alwaysOn
-                layoutParams =
-                    LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                    )
+        val categoryName = categoryTranslation?.name ?: "Category"
 
-                // Accessibility
-                val statusText = if (checked) "Enabled" else "Disabled"
-                contentDescription = "$categoryName consent - $statusText"
-                if (category.alwaysOn) {
-                    contentDescription = "$contentDescription - Always enabled, required for functionality"
+        val trailingView: View =
+            if (category.alwaysOn) {
+                TextView(requireContext()).apply {
+                    text = categoryTranslation?.essentialLabel ?: "Always On"
+                    textSize = 13f
+                    setTextColor(getColor(com.datagrail.consent.R.color.consent_text_secondary))
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    // Match SwitchCompat's default min height so the row doesn't shrink for always-on categories.
+                    minimumHeight = (48 * resources.displayMetrics.density).toInt()
+                    layoutParams =
+                        LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        )
+                    contentDescription = "$categoryName consent - Always enabled, required for functionality"
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                 }
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            } else {
+                androidx.appcompat.widget.SwitchCompat(requireContext()).apply {
+                    val checked = preferences?.cookieOptions?.find { it.gtmKey == category.gtmKey }?.isEnabled ?: false
+                    isChecked = checked
+                    layoutParams =
+                        LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                        )
 
-                setOnCheckedChangeListener { _, isChecked ->
-                    val prefs = preferences ?: return@setOnCheckedChangeListener
-                    val updatedOptions =
-                        prefs.cookieOptions.map { consent ->
-                            if (consent.gtmKey == category.gtmKey) {
-                                consent.copy(isEnabled = isChecked)
-                            } else {
-                                consent
+                    // Accessibility
+                    val statusText = if (checked) "Enabled" else "Disabled"
+                    contentDescription = "$categoryName consent - $statusText"
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+
+                    setOnCheckedChangeListener { _, isChecked ->
+                        val prefs = preferences ?: return@setOnCheckedChangeListener
+                        val updatedOptions =
+                            prefs.cookieOptions.map { consent ->
+                                if (consent.gtmKey == category.gtmKey) {
+                                    consent.copy(isEnabled = isChecked)
+                                } else {
+                                    consent
+                                }
                             }
-                        }
-                    preferences = prefs.copy(cookieOptions = updatedOptions)
+                        preferences = prefs.copy(cookieOptions = updatedOptions)
+                    }
                 }
             }
 
         container.addView(label)
-        container.addView(toggle)
+        container.addView(trailingView)
 
         return container
     }
@@ -895,6 +937,8 @@ class BannerDialog : DialogFragment() {
     companion object {
         private const val CONTENT_ELEVATION = 16f
         private const val CLOSE_BUTTON_ELEVATION = 24f
+        private const val CLOSE_BUTTON_SIZE_DP = 48f
+        private const val CLOSE_BUTTON_MARGIN_DP = 16f
 
         fun newInstance(
             config: ConsentConfig,
