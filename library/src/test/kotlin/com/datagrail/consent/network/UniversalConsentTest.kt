@@ -165,6 +165,39 @@ class UniversalConsentTest {
         }
 
     @Test
+    fun `signed POST carries X-DG-Api-Key alongside the signature headers`() =
+        runTest {
+            // The CloudFront Function needs the API key on EVERY request (reads AND writes) to
+            // resolve customer/tier/secret from KVS before it can verify the signature. Guard
+            // against a refactor that drops the key from the write path.
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            val config =
+                ConsentServiceSecurityTest.createTestConfig().copy(consentProjectId = "proj_abc123")
+
+            val provider: SignatureProvider = { _, _ ->
+                UniversalConsentSignature("sig", "key-1", 1L)
+            }
+
+            service.saveUniversalConsent(
+                config = config,
+                identifier = "user@example.com",
+                preferences = UniversalConsentPreferences(),
+                apiKey = "dg_live_key",
+                getSignature = provider,
+            )
+
+            val headersCaptor = argumentCaptor<Map<String, String>>()
+            verify(mockNetworkClient).request(any(), any(), anyOrNull(), headersCaptor.capture())
+            val headers = headersCaptor.firstValue
+
+            assertEquals("API key must be present on signed writes", "dg_live_key", headers["X-DG-Api-Key"])
+            // And it must coexist with the signature headers, not replace them.
+            assertNotNull("signature still present", headers["X-DG-Signature"])
+            assertNotNull("key id still present", headers["X-DG-Key-Id"])
+        }
+
+    @Test
     fun `saveUniversalConsent invokes the signature provider with customer id and user hash`() =
         runTest {
             whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
