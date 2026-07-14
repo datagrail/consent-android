@@ -2,6 +2,8 @@ package com.datagrail.consent
 
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
+import com.datagrail.consent.models.UniversalConsentRecord
+import com.datagrail.consent.models.UniversalConsentSignature
 
 /**
  * Java Interoperability Callback Interfaces
@@ -119,4 +121,74 @@ interface RetryCallback {
      * @param failureCount Number of failed retries
      */
     fun onRetryComplete(successCount: Int, failureCount: Int)
+}
+
+/**
+ * Java-friendly callback interface for fetching a universal consent record.
+ *
+ * The record may be null when no record exists for the user, so this needs its own interface
+ * (the value-returning analogue of [ConsentCallback]).
+ *
+ * Example (Java):
+ * ```java
+ * DataGrailConsent.getInstance().fetchUniversalConsent(identifier, apiKey, new UniversalConsentCallback() {
+ *     @Override
+ *     public void onSuccess(UniversalConsentRecord record) {
+ *         // record may be null if none exists
+ *     }
+ *
+ *     @Override
+ *     public void onFailure(ConsentException error) {
+ *         // Handle failure
+ *     }
+ * });
+ * ```
+ */
+interface UniversalConsentCallback {
+    /**
+     * Called when the record is fetched successfully.
+     * @param record The GPC-reconciled record, or null if none exists.
+     */
+    fun onSuccess(record: UniversalConsentRecord?)
+
+    /**
+     * Called when the operation fails
+     * @param error The error that occurred
+     */
+    fun onFailure(error: ConsentException)
+}
+
+/**
+ * Java-friendly signature provider. The universal-consent write requires a signature computed by
+ * the customer's backend. The Kotlin [com.datagrail.consent.models.SignatureProvider] is a
+ * `suspend` function type, which Java cannot implement without dealing with Kotlin coroutine
+ * `Continuation` internals. This interface exposes the same contract with a plain result callback
+ * so Java callers can invoke their backend asynchronously and hand the result back.
+ *
+ * Example (Java):
+ * ```java
+ * SignatureProviderCallback provider = (customerId, userHash, onResult) -> {
+ *     // call your backend, then:
+ *     onResult.onSignature(new UniversalConsentSignature(signature, keyId, timestamp));
+ * };
+ * ```
+ */
+fun interface SignatureProviderCallback {
+    /**
+     * Compute a signature for the given [customerId] and [userHash], then invoke [onResult] with
+     * the signature material. May be called from a background thread.
+     */
+    fun getSignature(
+        customerId: String,
+        userHash: String,
+        onResult: SignatureResult,
+    )
+}
+
+/**
+ * Result sink handed to [SignatureProviderCallback.getSignature]. Java callers invoke
+ * [onSignature] once their backend returns the signed material.
+ */
+fun interface SignatureResult {
+    fun onSignature(signature: UniversalConsentSignature)
 }

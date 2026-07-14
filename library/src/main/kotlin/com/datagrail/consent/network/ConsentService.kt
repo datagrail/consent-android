@@ -34,18 +34,14 @@ internal class ConsentService(
         val consentContainerVersionId: String,
     )
 
-    // Request/response DTOs for the Universal Consent API. cookieOptions is a MAP on the wire.
-    @Serializable
-    private data class UniversalConsentInner(
-        val isCustomised: Boolean,
-        val cookieOptions: Map<String, Boolean>,
-    )
-
+    // Request DTO for the Universal Consent API. cookieOptions is a MAP on the wire; the nested
+    // consent_preferences reuses the public UniversalConsentPreferences model (single source of
+    // truth for the wire shape, shared with the read path) so the two paths cannot drift.
     @Serializable
     private data class UniversalSaveRequest(
         val customer_id: String,
         val user_hash: String,
-        val consent_preferences: UniversalConsentInner,
+        val consent_preferences: UniversalConsentPreferences,
         val consent_mode: String,
         val ccpa_optout: Boolean,
         val platform: String,
@@ -161,11 +157,7 @@ internal class ConsentService(
             UniversalSaveRequest(
                 customer_id = config.dgCustomerId,
                 user_hash = userHash,
-                consent_preferences =
-                    UniversalConsentInner(
-                        isCustomised = preferences.isCustomised,
-                        cookieOptions = preferences.cookieOptions,
-                    ),
+                consent_preferences = preferences,
                 consent_mode = config.consentMode,
                 // The user's actual CCPA/US opt-out value, only synced when the
                 // universalConsent.syncOptout feature flag is enabled (otherwise false).

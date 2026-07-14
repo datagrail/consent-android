@@ -18,7 +18,9 @@ import com.datagrail.consent.utils.LogLevel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.net.URL
+import kotlin.coroutines.resume
 
 /**
  * Main entry point for DataGrail Consent SDK
@@ -416,6 +418,36 @@ class DataGrailConsent private constructor() {
 
     /**
      * Sync the current effective consent preferences to the DataGrail Universal Consent store
+     * for the given user identifier, for cross-device retrieval (Java-friendly).
+     *
+     * Thin adapter over the Kotlin lambda overload. The [getSignature] provider receives a
+     * [SignatureResult] sink to hand back the signature material computed by the customer backend.
+     *
+     * @param identifier The user identifier (e.g. email). Used verbatim in the hash.
+     * @param apiKey The customer's DataGrail API key.
+     * @param getSignature Java-friendly signature provider (calls the customer's backend).
+     * @param gpc Current effective GPC signal for this user.
+     * @param callback Callback interface for success/failure.
+     */
+    fun setUserIdentifier(
+        identifier: String,
+        apiKey: String,
+        getSignature: SignatureProviderCallback,
+        gpc: Boolean,
+        callback: ConsentCallback,
+    ) {
+        val provider: SignatureProvider = { customerId, userHash ->
+            suspendCancellableCoroutine { continuation ->
+                getSignature.getSignature(customerId, userHash) { signature ->
+                    continuation.resume(signature)
+                }
+            }
+        }
+        setUserIdentifier(identifier, apiKey, provider, gpc) { result -> adaptResult(result, callback) }
+    }
+
+    /**
+     * Sync the current effective consent preferences to the DataGrail Universal Consent store
      * for the given user identifier, for cross-device retrieval (Kotlin-friendly).
      *
      * This is a one-shot write. The SDK does NOT retain the identifier as state — later calls
@@ -497,6 +529,33 @@ class DataGrailConsent private constructor() {
                     ),
                 )
             }
+        }
+    }
+
+    /**
+     * Fetch the user's universal consent record for cross-device rehydration (Java-friendly).
+     *
+     * Thin adapter over the Kotlin lambda overload. The record passed to
+     * [UniversalConsentCallback.onSuccess] is null when no record exists.
+     *
+     * @param identifier The user identifier. Used verbatim in the hash.
+     * @param apiKey The customer's DataGrail API key.
+     * @param callback Callback interface for success (record, possibly null) / failure.
+     */
+    fun fetchUniversalConsent(
+        identifier: String,
+        apiKey: String,
+        callback: UniversalConsentCallback,
+    ) {
+        fetchUniversalConsent(identifier, apiKey) { result ->
+            result.fold(
+                onSuccess = { record -> callback.onSuccess(record) },
+                onFailure = { error ->
+                    callback.onFailure(
+                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
+                    )
+                },
+            )
         }
     }
 
