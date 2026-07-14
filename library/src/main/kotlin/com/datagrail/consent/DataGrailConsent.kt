@@ -5,6 +5,8 @@ import com.datagrail.consent.models.CategoryConsent
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
+import com.datagrail.consent.models.SignatureProvider
+import com.datagrail.consent.models.UniversalConsentRecord
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.network.NetworkClient
@@ -407,6 +409,91 @@ class DataGrailConsent private constructor() {
 
         scope.launch {
             mgr.trackBannerOpen(callback)
+        }
+    }
+
+    // MARK: - Universal Consent
+
+    /**
+     * Set the user identifier and sync the current effective consent preferences to the
+     * DataGrail Universal Consent store for cross-device retrieval (Kotlin-friendly).
+     *
+     * The SDK does NOT hold or compute the HMAC secret. It invokes the customer-provided
+     * [getSignature] provider — which calls the customer's own backend — and attaches the
+     * returned signature/timestamp/keyId as request headers. GPC reconciliation is applied
+     * to the outgoing preferences on-device: when [gpc] is true, non-essential categories
+     * are suppressed before the write.
+     *
+     * @param identifier The user identifier (e.g. email). Used verbatim in the hash.
+     * @param apiKey The customer's DataGrail API key.
+     * @param getSignature Suspend provider that returns { signature, keyId, timestamp }.
+     * @param gpc Current effective GPC signal for this user (default false).
+     * @param callback Callback with the result.
+     */
+    @JvmOverloads
+    fun setUserIdentifier(
+        identifier: String,
+        apiKey: String,
+        getSignature: SignatureProvider,
+        gpc: Boolean = false,
+        callback: (Result<Unit>) -> Unit,
+    ) {
+        val mgr = manager
+        if (mgr == null) {
+            callback(Result.failure(ConsentException.NotInitialized()))
+            return
+        }
+
+        scope.launch {
+            try {
+                mgr.setUserIdentifier(
+                    identifier = identifier,
+                    apiKey = apiKey,
+                    gpc = gpc,
+                    getSignature = getSignature,
+                )
+                callback(Result.success(Unit))
+            } catch (e: Exception) {
+                callback(
+                    Result.failure(
+                        if (e is ConsentException) e else ConsentException.NetworkError(e.message ?: "Unknown error", e),
+                    ),
+                )
+            }
+        }
+    }
+
+    /**
+     * Fetch the user's universal consent record for cross-device rehydration (Kotlin-friendly).
+     *
+     * The returned record has GPC reconciliation already applied on-device: when the stored
+     * record's `gpc` signal is true, non-essential categories are reported as suppressed.
+     *
+     * @param identifier The user identifier. Used verbatim in the hash.
+     * @param apiKey The customer's DataGrail API key.
+     * @param callback Callback with the record (null if no record exists) or a failure.
+     */
+    fun fetchUniversalConsent(
+        identifier: String,
+        apiKey: String,
+        callback: (Result<UniversalConsentRecord?>) -> Unit,
+    ) {
+        val mgr = manager
+        if (mgr == null) {
+            callback(Result.failure(ConsentException.NotInitialized()))
+            return
+        }
+
+        scope.launch {
+            try {
+                callback(Result.success(mgr.fetchUniversalConsent(identifier, apiKey)))
+            } catch (e: Exception) {
+                callback(
+                    Result.failure(
+                        if (e is ConsentException) e else ConsentException.NetworkError(e.message ?: "Unknown error", e),
+                    ),
+                )
+            }
         }
     }
 

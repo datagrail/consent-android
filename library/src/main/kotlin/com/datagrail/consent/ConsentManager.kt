@@ -4,6 +4,10 @@ import com.datagrail.consent.models.CategoryConsent
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
+import com.datagrail.consent.models.GpcReconciliation
+import com.datagrail.consent.models.SignatureProvider
+import com.datagrail.consent.models.UniversalConsentPreferences
+import com.datagrail.consent.models.UniversalConsentRecord
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
@@ -192,6 +196,83 @@ internal class ConsentManager(
         }
 
         return essentialKeys
+    }
+
+    // MARK: - Universal Consent
+
+    /**
+     * Whether universal (cross-device) consent is enabled for the loaded config.
+     */
+    fun isUniversalConsentEnabled(): Boolean {
+        return currentConfig?.universalConsent?.enabled == true
+    }
+
+    /**
+     * Fetch the user's universal consent record and reconcile GPC on-device.
+     *
+     * The server returns raw, unreconciled data. This method applies mandatory client-side GPC
+     * reconciliation before returning: when the record's `gpc` signal is true, every
+     * non-essential category in the cookieOptions map is forced to `false` regardless of the
+     * stored value. Essential/always-on categories are preserved.
+     *
+     * @return the record with GPC-reconciled cookieOptions, or null if none exists.
+     */
+    suspend fun fetchUniversalConsent(
+        identifier: String,
+        apiKey: String,
+    ): UniversalConsentRecord? {
+        val config = currentConfig ?: throw ConsentException.NotInitialized()
+        val record = consentService.getUniversalConsent(config, identifier, apiKey) ?: return null
+
+        val prefs = record.consentPreferences ?: return record
+        val essentialKeys = getEssentialCategories().toSet()
+        val reconciled =
+            GpcReconciliation.reconcile(
+                cookieOptions = prefs.cookieOptions,
+                gpc = record.gpc,
+                essentialKeys = essentialKeys,
+            )
+        return record.copy(consentPreferences = prefs.copy(cookieOptions = reconciled))
+    }
+
+    /**
+     * Set the user identifier and write the current effective preferences to the universal
+     * consent store. GPC reconciliation is applied to the outgoing map so a GPC opt-out is
+     * never persisted as consent for non-essential categories.
+     *
+     * @param identifier The user identifier (used VERBATIM in the hash — not normalized).
+     * @param apiKey The customer's DataGrail API key.
+     * @param gpc The current effective GPC signal for this user/session.
+     * @param getSignature Customer-provided signature provider (calls their backend).
+     */
+    suspend fun setUserIdentifier(
+        identifier: String,
+        apiKey: String,
+        gpc: Boolean,
+        getSignature: SignatureProvider,
+    ) {
+        val config = currentConfig ?: throw ConsentException.NotInitialized()
+
+        val current = getCategories() ?: getDefaultPreferences()
+        val rawMap =
+            current?.cookieOptions?.associate { it.gtmKey to it.isEnabled } ?: emptyMap()
+
+        val essentialKeys = getEssentialCategories().toSet()
+        val reconciled = GpcReconciliation.reconcile(rawMap, gpc, essentialKeys)
+
+        val universalPrefs =
+            UniversalConsentPreferences(
+                isCustomised = current?.isCustomised ?: false,
+                cookieOptions = reconciled,
+            )
+
+        consentService.saveUniversalConsent(
+            config = config,
+            identifier = identifier,
+            preferences = universalPrefs,
+            apiKey = apiKey,
+            getSignature = getSignature,
+        )
     }
 
     // MARK: - Retry

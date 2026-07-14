@@ -37,6 +37,23 @@ data class ConsentConfig(
     val gppUsNat: Boolean,
     val initialCategories: InitialCategories,
     val layout: Layout,
+    // Universal Consent (TRUST-1843). Both fields are optional and default to null so
+    // configs published before universal consent existed keep parsing (ignoreUnknownKeys
+    // is enabled, and these are nullable-with-default for backwards compatibility).
+    val consentProjectId: String? = null,
+    val universalConsent: UniversalConsentConfig? = null,
+)
+
+/**
+ * Universal Consent feature flags, published under the `universalConsent` config key.
+ * @property enabled Whether cross-device universal consent is turned on for this container.
+ * @property syncOptout Whether CCPA/US opt-out state should be synced to the universal record.
+ */
+@Serializable
+data class UniversalConsentConfig(
+    val enabled: Boolean = false,
+    @SerialName("sync_optout")
+    val syncOptout: Boolean = false,
 )
 
 /**
