@@ -215,6 +215,9 @@ internal class ConsentManager(
      * non-essential category in the cookieOptions map is forced to `false` regardless of the
      * stored value. Essential/always-on categories are preserved.
      *
+     * Requires universal consent to be enabled in the loaded config; throws
+     * [ConsentException.ValidationError] otherwise.
+     *
      * @return the record with GPC-reconciled cookieOptions, or null if none exists.
      */
     suspend fun fetchUniversalConsent(
@@ -222,6 +225,9 @@ internal class ConsentManager(
         apiKey: String,
     ): UniversalConsentRecord? {
         val config = currentConfig ?: throw ConsentException.NotInitialized()
+        if (!isUniversalConsentEnabled()) {
+            throw ConsentException.ValidationError("Universal consent is not enabled for this configuration")
+        }
         val record = consentService.getUniversalConsent(config, identifier, apiKey) ?: return null
 
         val prefs = record.consentPreferences ?: return record
@@ -236,9 +242,16 @@ internal class ConsentManager(
     }
 
     /**
-     * Set the user identifier and write the current effective preferences to the universal
-     * consent store. GPC reconciliation is applied to the outgoing map so a GPC opt-out is
-     * never persisted as consent for non-essential categories.
+     * Write the current effective consent preferences to the universal consent store for the
+     * given user identifier. This performs an immediate one-shot write; the identifier is NOT
+     * retained as manager state, so subsequent operations (e.g. [fetchUniversalConsent]) must
+     * pass the identifier again.
+     *
+     * GPC reconciliation is applied to the outgoing map so a GPC opt-out is never persisted as
+     * consent for non-essential categories.
+     *
+     * Requires universal consent to be enabled in the loaded config; throws
+     * [ConsentException.ValidationError] otherwise.
      *
      * @param identifier The user identifier (used VERBATIM in the hash — not normalized).
      * @param apiKey The customer's DataGrail API key.
@@ -252,6 +265,9 @@ internal class ConsentManager(
         getSignature: SignatureProvider,
     ) {
         val config = currentConfig ?: throw ConsentException.NotInitialized()
+        if (!isUniversalConsentEnabled()) {
+            throw ConsentException.ValidationError("Universal consent is not enabled for this configuration")
+        }
 
         val current = getCategories() ?: getDefaultPreferences()
         val rawMap =
@@ -271,6 +287,9 @@ internal class ConsentManager(
             identifier = identifier,
             preferences = universalPrefs,
             apiKey = apiKey,
+            // The effective GPC signal is this SDK's per-user opt-out signal; ConsentService
+            // only writes it to ccpa_optout when the syncOptout feature flag is enabled.
+            ccpaOptout = gpc,
             getSignature = getSignature,
         )
     }

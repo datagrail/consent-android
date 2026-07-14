@@ -130,6 +130,7 @@ class UniversalConsentTest {
                         cookieOptions = mapOf("dg-category-marketing" to false),
                     ),
                 apiKey = "dg_live_key",
+                ccpaOptout = false,
                 getSignature = provider,
             )
 
@@ -184,6 +185,7 @@ class UniversalConsentTest {
                 identifier = "user@example.com",
                 preferences = UniversalConsentPreferences(),
                 apiKey = "dg_live_key",
+                ccpaOptout = false,
                 getSignature = provider,
             )
 
@@ -221,6 +223,7 @@ class UniversalConsentTest {
                 identifier = "user@example.com",
                 preferences = UniversalConsentPreferences(),
                 apiKey = "key",
+                ccpaOptout = false,
                 getSignature = provider,
             )
 

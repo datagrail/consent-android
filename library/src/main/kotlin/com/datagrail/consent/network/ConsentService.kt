@@ -123,7 +123,7 @@ internal class ConsentService(
         } catch (e: ConsentException) {
             throw e
         } catch (e: Exception) {
-            throw ConsentException.NetworkError("Failed to read universal consent: ${e.message}")
+            throw ConsentException.NetworkError("Failed to read universal consent: ${e.message}", e)
         }
     }
 
@@ -135,6 +135,8 @@ internal class ConsentService(
      * as X-DG-Signature / X-DG-Timestamp (unix seconds) / X-DG-Key-Id headers, plus X-DG-Nonce.
      * The shared secret never touches the device.
      *
+     * @param ccpaOptout the user's effective CCPA/US opt-out value. It is only written to the
+     *   record when the `universalConsent.syncOptout` feature flag is enabled; otherwise `false`.
      * @throws ConsentException.NetworkError on failure (also queues nothing — universal writes
      *   are user-identity-scoped and not part of the anonymous pending-events retry queue).
      */
@@ -143,6 +145,7 @@ internal class ConsentService(
         identifier: String,
         preferences: UniversalConsentPreferences,
         apiKey: String,
+        ccpaOptout: Boolean,
         getSignature: SignatureProvider,
     ) {
         val projectId =
@@ -164,7 +167,10 @@ internal class ConsentService(
                         cookieOptions = preferences.cookieOptions,
                     ),
                 consent_mode = config.consentMode,
-                ccpa_optout = config.universalConsent?.syncOptout ?: false,
+                // The user's actual CCPA/US opt-out value, only synced when the
+                // universalConsent.syncOptout feature flag is enabled (otherwise false).
+                // syncOptout is a feature gate, NOT the opt-out value itself.
+                ccpa_optout = (config.universalConsent?.syncOptout == true) && ccpaOptout,
                 platform = PLATFORM,
                 policy_name = config.consentPolicy.name,
                 config_version = config.version,
@@ -189,7 +195,7 @@ internal class ConsentService(
         } catch (e: ConsentException) {
             throw e
         } catch (e: Exception) {
-            throw ConsentException.NetworkError("Failed to save universal consent: ${e.message}")
+            throw ConsentException.NetworkError("Failed to save universal consent: ${e.message}", e)
         }
     }
 

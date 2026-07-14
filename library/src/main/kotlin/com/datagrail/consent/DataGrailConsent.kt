@@ -415,8 +415,11 @@ class DataGrailConsent private constructor() {
     // MARK: - Universal Consent
 
     /**
-     * Set the user identifier and sync the current effective consent preferences to the
-     * DataGrail Universal Consent store for cross-device retrieval (Kotlin-friendly).
+     * Sync the current effective consent preferences to the DataGrail Universal Consent store
+     * for the given user identifier, for cross-device retrieval (Kotlin-friendly).
+     *
+     * This is a one-shot write. The SDK does NOT retain the identifier as state — later calls
+     * such as [fetchUniversalConsent] require the identifier to be passed again.
      *
      * The SDK does NOT hold or compute the HMAC secret. It invokes the customer-provided
      * [getSignature] provider — which calls the customer's own backend — and attaches the
