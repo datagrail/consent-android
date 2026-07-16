@@ -156,12 +156,16 @@ class BannerDialog : DialogFragment() {
                     )
                 // Reserve room at the top so content never sits under the close button,
                 // which is positioned relative to cardFrame rather than this container.
+                val density = resources.displayMetrics.density
                 val closeButtonReservedSpace =
-                    (CLOSE_BUTTON_SIZE_DP + CLOSE_BUTTON_MARGIN_DP) * resources.displayMetrics.density
+                    ((CLOSE_BUTTON_SIZE_DP + CLOSE_BUTTON_MARGIN_DP) * density).toInt()
+                // Density-scale the side/bottom padding too, so every argument to setPadding is
+                // in consistent dp units rather than mixing scaled values with raw px literals.
+                val sidePadding = (CONTENT_PADDING_DP * density).toInt()
                 when (displayStyle) {
                     BannerDisplayStyle.FULL_SCREEN -> {
                         setBackgroundColor(getColor(com.datagrail.consent.R.color.consent_background))
-                        setPadding(32, closeButtonReservedSpace.toInt(), 32, 32)
+                        setPadding(sidePadding, closeButtonReservedSpace, sidePadding, sidePadding)
                     }
                     BannerDisplayStyle.MODAL -> {
                         // Rounded corners with shadow
@@ -172,7 +176,7 @@ class BannerDialog : DialogFragment() {
                             }
                         background = shape
                         elevation = CONTENT_ELEVATION
-                        setPadding(32, closeButtonReservedSpace.toInt(), 32, 32)
+                        setPadding(sidePadding, closeButtonReservedSpace, sidePadding, sidePadding)
                     }
                 }
             }
@@ -939,6 +943,7 @@ class BannerDialog : DialogFragment() {
         private const val CLOSE_BUTTON_ELEVATION = 24f
         private const val CLOSE_BUTTON_SIZE_DP = 48f
         private const val CLOSE_BUTTON_MARGIN_DP = 16f
+        private const val CONTENT_PADDING_DP = 16f
 
         fun newInstance(
             config: ConsentConfig,
