@@ -16,6 +16,7 @@ import com.datagrail.consent.utils.LogLevel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.net.URL
 
 /**
@@ -34,6 +35,10 @@ import java.net.URL
  * over the lambda-based implementations. See [JAVA_INTEGRATION.md] for Java usage examples.
  */
 class DataGrailConsent private constructor() {
+    // Assigned from a background coroutine during initialize() and read from public API
+    // methods on arbitrary threads; @Volatile guarantees the assignment is visible across
+    // threads once initialization completes.
+    @Volatile
     private var manager: ConsentManager? = null
     private var configUrl: String? = null
     private var onConsentChangedCallback: ((ConsentPreferences) -> Unit)? = null
@@ -143,20 +148,49 @@ class DataGrailConsent private constructor() {
 
         this.configUrl = configUrl
 
-        val storage = ConsentStorage.create(context)
-        val networkClient = NetworkClient()
-        val configService = ConfigService(networkClient, storage)
-
         // Extract privacy domain from config URL (already validated non-empty above)
         val privacyDomain = url.host
 
-        val consentService = ConsentService(networkClient, storage, privacyDomain)
-
-        val manager = ConsentManager(storage, configService, consentService)
-        this.manager = manager
-
-        // Load configuration
+        // Build storage + services and load configuration off the calling thread.
+        //
+        // ConsentStorage.create() creates EncryptedSharedPreferences, which on first launch
+        // triggers Tink/Android Keystore keyset generation — a synchronous, potentially slow
+        // operation (~hundreds of ms). Doing it on the caller's thread (typically the main
+        // thread during app cold start) blocks UI and can contribute to ANRs. We move it onto
+        // Dispatchers.IO so initialize() never blocks the caller; the public API is already
+        // fully async via the callback, so callers see no behavior change beyond this.
         scope.launch {
+            val manager =
+                try {
+                    withContext(Dispatchers.IO) {
+                        val storage = ConsentStorage.create(context)
+                        val networkClient = NetworkClient()
+                        val configService = ConfigService(networkClient, storage)
+                        val consentService = ConsentService(networkClient, storage, privacyDomain)
+                        ConsentManager(storage, configService, consentService)
+                    }
+                } catch (e: Exception) {
+                    // Storage initialization failed (e.g. encrypted storage could not be set up
+                    // even after keyset recovery). Report through the callback rather than
+                    // throwing synchronously, consistent with the async contract.
+                    callback(
+                        Result.failure(
+                            if (e is ConsentException) {
+                                e
+                            } else {
+                                ConsentException.InvalidConfiguration(
+                                    "Failed to initialize consent storage: ${e.message}",
+                                    e,
+                                )
+                            },
+                        ),
+                    )
+                    return@launch
+                }
+
+            this@DataGrailConsent.manager = manager
+
+            // Load configuration
             manager.loadConfig(configUrl) { result ->
                 when {
                     result.isSuccess -> {
