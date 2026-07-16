@@ -13,11 +13,13 @@ import com.datagrail.consent.ui.BannerDisplayStyle
 import com.datagrail.consent.ui.BannerTextStyleConfig
 import com.datagrail.consent.utils.ConsentLogger
 import com.datagrail.consent.utils.LogLevel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Main entry point for DataGrail Consent SDK
@@ -40,9 +42,17 @@ class DataGrailConsent private constructor() {
     // threads once initialization completes.
     @Volatile
     private var manager: ConsentManager? = null
+
+    @Volatile
     private var configUrl: String? = null
     private var onConsentChangedCallback: ((ConsentPreferences) -> Unit)? = null
     private val scope = CoroutineScope(Dispatchers.Main)
+
+    // Monotonic token bumped on each initialize() call. A background init coroutine only
+    // commits its manager/configUrl if its token is still current, so overlapping/re-entrant
+    // initialize() calls resolve deterministically to the last caller ("last wins") instead of
+    // whichever coroutine happens to finish last.
+    private val initGeneration = AtomicInteger(0)
 
     companion object {
         @Volatile
@@ -146,10 +156,12 @@ class DataGrailConsent private constructor() {
             return
         }
 
-        this.configUrl = configUrl
-
         // Extract privacy domain from config URL (already validated non-empty above)
         val privacyDomain = url.host
+
+        // Token for this init call. Any earlier in-flight init is now superseded and must not
+        // commit its manager/configUrl (see the generation check after storage setup below).
+        val generation = initGeneration.incrementAndGet()
 
         // Build storage + services and load configuration off the calling thread.
         //
@@ -169,10 +181,15 @@ class DataGrailConsent private constructor() {
                         val consentService = ConsentService(networkClient, storage, privacyDomain)
                         ConsentManager(storage, configService, consentService)
                     }
+                } catch (e: CancellationException) {
+                    // Never swallow cancellation — let it propagate so the coroutine unwinds
+                    // normally rather than being reported as a storage-init failure.
+                    throw e
                 } catch (e: Exception) {
                     // Storage initialization failed (e.g. encrypted storage could not be set up
                     // even after keyset recovery). Report through the callback rather than
-                    // throwing synchronously, consistent with the async contract.
+                    // throwing synchronously, consistent with the async contract. configUrl is
+                    // intentionally left unset here since init did not complete.
                     callback(
                         Result.failure(
                             if (e is ConsentException) {
@@ -188,7 +205,17 @@ class DataGrailConsent private constructor() {
                     return@launch
                 }
 
+            // If a newer initialize() call has started, don't clobber its state with ours.
+            // Still fire this caller's callback so it isn't left hanging.
+            if (initGeneration.get() != generation) {
+                callback(Result.success(Unit))
+                return@launch
+            }
+
+            // Commit shared state only after successful storage setup and once we've confirmed
+            // this is still the current init — so a failed init never leaves a stale configUrl.
             this@DataGrailConsent.manager = manager
+            this@DataGrailConsent.configUrl = configUrl
 
             // Load configuration
             manager.loadConfig(configUrl) { result ->

@@ -208,6 +208,25 @@ class DataGrailConsentTests {
         assertTrue(resultError is ConsentException)
     }
 
+    @Test
+    fun `overlapping initialize calls each fire their own callback`() {
+        // Two rapid initialize() calls race on the shared manager/configUrl assignment. The
+        // generation guard makes the commit "last wins"; here we assert the re-entrancy is at
+        // least safe — both callers get a callback and neither is left hanging. (The commit
+        // path itself needs a real EncryptedSharedPreferences, so it isn't exercised here;
+        // against the mock Context both calls fail storage init and report through the callback.)
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+
+        val url = "https://consent.datagrail.io/config.json"
+        val latch = java.util.concurrent.CountDownLatch(2)
+
+        sut.initialize(mockContext, url) { latch.countDown() }
+        sut.initialize(mockContext, url) { latch.countDown() }
+
+        val completed = latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+        assertTrue("Both initialize() callbacks should fire within timeout", completed)
+    }
+
     // MARK: - Thread Safety Tests
 
     @Test
