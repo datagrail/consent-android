@@ -1,3 +1,4 @@
+
 package com.datagrail.consent
 
 import com.datagrail.consent.models.ConsentException
@@ -7,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -171,6 +173,59 @@ class DataGrailConsentTests {
                 resultError is ConsentException.InvalidConfiguration || resultError is ConsentException.InvalidConfigUrl,
             )
         }
+
+    // MARK: - Storage Initialization Tests
+
+    @Test
+    fun `initialize returns before storage setup completes`() {
+        // Storage creation runs inside a launched coroutine on Dispatchers.IO — a real thread
+        // pool, not the virtual StandardTestDispatcher installed in setUp(). A latch with a
+        // real timeout (rather than testScheduler.advanceUntilIdle(), which only drives
+        // virtual time on the Main dispatcher and can't wait for real IO-pool work) confirms
+        // the callback still fires once that background work completes. Swap Main to an
+        // UnconfinedTestDispatcher for just this test so the post-IO resumption dispatches
+        // immediately instead of queuing on the paused StandardTestDispatcher.
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+
+        val validUrl = "https://consent.datagrail.io/config.json"
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var resultError: Throwable? = null
+
+        // Given an unconfigured mock Context — storage creation will fail against it (no real
+        // Keystore/EncryptedSharedPreferences available in this test)
+        sut.initialize(mockContext, validUrl) { result ->
+            result.fold(
+                onSuccess = { },
+                onFailure = { error -> resultError = error },
+            )
+            latch.countDown()
+        }
+
+        // Then - the background storage init failure arrives asynchronously via the callback
+        val completed = latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+        assertTrue("Callback should fire within timeout", completed)
+        assertNotNull("Should have received an error from storage initialization", resultError)
+        assertTrue(resultError is ConsentException)
+    }
+
+    @Test
+    fun `overlapping initialize calls each fire their own callback`() {
+        // Two rapid initialize() calls race on the shared manager/configUrl assignment. The
+        // generation guard makes the commit "last wins"; here we assert the re-entrancy is at
+        // least safe — both callers get a callback and neither is left hanging. (The commit
+        // path itself needs a real EncryptedSharedPreferences, so it isn't exercised here;
+        // against the mock Context both calls fail storage init and report through the callback.)
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+
+        val url = "https://consent.datagrail.io/config.json"
+        val latch = java.util.concurrent.CountDownLatch(2)
+
+        sut.initialize(mockContext, url) { latch.countDown() }
+        sut.initialize(mockContext, url) { latch.countDown() }
+
+        val completed = latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+        assertTrue("Both initialize() callbacks should fire within timeout", completed)
+    }
 
     // MARK: - Thread Safety Tests
 
