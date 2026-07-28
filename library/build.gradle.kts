@@ -6,6 +6,8 @@ plugins {
     id("org.jlleitschuh.gradle.ktlint") version "11.6.1"
 }
 
+val libraryVersion = "1.6.0"
+
 android {
     namespace = "com.datagrail.consent"
     compileSdk = 34
@@ -16,6 +18,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
+        buildConfigField("String", "LIBRARY_VERSION", "\"$libraryVersion\"")
     }
 
     buildTypes {
@@ -39,6 +42,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 
     testOptions {
@@ -79,7 +83,7 @@ mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
     signAllPublications()
 
-    coordinates("io.datagrail", "consent", "1.6.0")
+    coordinates("io.datagrail", "consent", libraryVersion)
 
     pom {
         name.set("DataGrail Consent SDK")

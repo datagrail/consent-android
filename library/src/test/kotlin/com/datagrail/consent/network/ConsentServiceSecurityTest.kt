@@ -223,6 +223,29 @@ class ConsentServiceSecurityTest {
             )
         }
 
+    // MARK: - Version Telemetry Tests
+
+    @Test
+    fun `saveOpen includes library_version and os_version parameters`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            service.saveOpen(testConfig)
+
+            val urlCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+            val capturedUrl = urlCaptor.firstValue
+
+            assertTrue(
+                "URL should contain library_version param, got: $capturedUrl",
+                capturedUrl.contains("library_version="),
+            )
+            assertTrue(
+                "URL should contain os_version param, got: $capturedUrl",
+                capturedUrl.contains("os_version="),
+            )
+        }
+
     // MARK: - Queue Cap Tests
 
     @Test

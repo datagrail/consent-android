@@ -1,5 +1,7 @@
 package com.datagrail.consent.network
 
+import android.os.Build
+import com.datagrail.consent.BuildConfig
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
@@ -124,6 +126,8 @@ internal class ConsentService(
                 "&uniqueId=${encodeParam(uniqueId)}" +
                 "&policy_name=${encodeParam(config.consentPolicy.name)}" +
                 "&consent_container_version_id=${encodeParam(config.consentContainerVersionId)}" +
+                "&library_version=${encodeParam(BuildConfig.LIBRARY_VERSION)}" +
+                "&os_version=${encodeParam(Build.VERSION.RELEASE ?: "")}" +
                 policyUuidParam
 
         try {
