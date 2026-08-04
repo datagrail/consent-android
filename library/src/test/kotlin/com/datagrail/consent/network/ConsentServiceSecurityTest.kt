@@ -1,5 +1,6 @@
 package com.datagrail.consent.network
 
+import com.datagrail.consent.BuildConfig
 import com.datagrail.consent.models.*
 import com.datagrail.consent.storage.ConsentStorage
 import kotlinx.coroutines.test.runTest
@@ -237,12 +238,16 @@ class ConsentServiceSecurityTest {
             val capturedUrl = urlCaptor.firstValue
 
             assertTrue(
-                "URL should contain library_version param, got: $capturedUrl",
-                capturedUrl.contains("library_version="),
+                "URL should contain library_version param with the BuildConfig value, got: $capturedUrl",
+                capturedUrl.contains("library_version=${BuildConfig.LIBRARY_VERSION}"),
             )
+            // Build.VERSION.RELEASE resolves to null under this module's returnDefaultValues unit
+            // test config, so ConsentService's `?: ""` fallback makes the expected value empty here.
+            // Asserting the param is immediately followed by the next param (rather than just
+            // `.contains("os_version=")`) ensures the value is truly empty, not e.g. "null".
             assertTrue(
-                "URL should contain os_version param, got: $capturedUrl",
-                capturedUrl.contains("os_version="),
+                "URL should contain os_version param with an empty (test-env) value, got: $capturedUrl",
+                capturedUrl.contains("os_version=&policy_uuid="),
             )
         }
 
