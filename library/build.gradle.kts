@@ -79,7 +79,7 @@ mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
     signAllPublications()
 
-    coordinates("io.datagrail", "consent", "1.6.0")
+    coordinates("io.datagrail", "consent", "1.7.0")
 
     pom {
         name.set("DataGrail Consent SDK")
