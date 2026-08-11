@@ -9,6 +9,7 @@ import org.junit.Test
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.*
+import java.util.Locale
 
 /**
  * Tests for Universal Consent support (TRUST-1843):
@@ -50,12 +51,64 @@ class UniversalConsentTest {
         assertEquals("hash must be 64 hex chars", 64, hash.length)
     }
 
+    // The golden identifier above is ALREADY normalized, so it reproduces the vector whether
+    // or not normalization runs. These are the cases that fail when a normalization step is
+    // missing — keep them in lockstep with the web and iOS SDKs.
     @Test
-    fun `computeUserHash does not normalize the identifier`() {
-        // Verbatim identifier — the hash depends on the exact bytes, no lowercasing/trimming.
-        val lower = ConsentService.computeUserHash("cid", "pid", "User@Example.com")
-        val upper = ConsentService.computeUserHash("cid", "pid", "user@example.com")
-        assertNotEquals(lower, upper)
+    fun `computeUserHash normalizes messy identifiers to the golden vector`() {
+        val messy =
+            listOf(
+                "  User@Example.com  ",
+                "User@Example.COM",
+                "\tuser@example.com\n",
+            )
+
+        messy.forEach { identifier ->
+            assertEquals(
+                "normalization must map <$identifier> onto the golden hash",
+                "1fee132c298d615098190e3e75f9c7e05db20d6cff6398f686fcebc67d1d87a4",
+                ConsentService.computeUserHash(
+                    dgCustomerId = "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
+                    consentProjectId = "proj_abc123",
+                    identifier = identifier,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `normalizeUserIdentifier applies NFC then trim then lowercase`() {
+        assertEquals(
+            "user@example.com",
+            ConsentService.normalizeUserIdentifier("  User@Example.com  "),
+        )
+    }
+
+    @Test
+    fun `normalizeUserIdentifier composes decomposed unicode`() {
+        // "e" + combining acute (U+0301) vs the precomposed "é" (U+00E9): distinct byte
+        // sequences for the same name, which NFC must reconcile.
+        val decomposed = "jos\u0065\u0301@example.com"
+        val precomposed = "jos\u00e9@example.com"
+
+        assertNotEquals(decomposed, precomposed)
+        assertEquals(
+            ConsentService.normalizeUserIdentifier(decomposed),
+            ConsentService.normalizeUserIdentifier(precomposed),
+        )
+    }
+
+    @Test
+    fun `normalizeUserIdentifier lowercases independently of the device locale`() {
+        // Turkish locale maps "I" to the dotless "ı"; pinning to Locale.ROOT keeps the hash
+        // identical regardless of the user's phone settings.
+        val default = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+            assertEquals("id@example.com", ConsentService.normalizeUserIdentifier("ID@example.com"))
+        } finally {
+            Locale.setDefault(default)
+        }
     }
 
     // MARK: - GPC reconciliation

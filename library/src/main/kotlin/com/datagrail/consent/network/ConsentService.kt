@@ -12,6 +12,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.net.URLEncoder
 import java.security.MessageDigest
+import java.text.Normalizer
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -54,18 +56,37 @@ internal class ConsentService(
         private const val PLATFORM = "android"
 
         /**
-         * Compute the universal-consent user hash: SHA-256 of
-         * "{dgCustomerId}:{consentProjectId}:{identifier}" as lowercase hex (64 chars).
+         * Normalize a user identifier before hashing: Unicode NFC → trim → lowercase.
          *
-         * The identifier is used VERBATIM — do not trim, lowercase, or normalize it; the hash
-         * must match what the customer's backend and other SDKs compute.
+         * CANONICAL CONTRACT (TRUST-1843 — identical across all repos, do not deviate):
+         * every site that computes a user_hash MUST apply these three steps in this order, so
+         * the same person yields the same hash from web, iOS, Android, and the customer's own
+         * backend helper. Skipping this silently splits one user into multiple records and
+         * their consent stops following them across devices.
+         *
+         * See decisions/universal/hash-algorithm-selection.md and
+         * concepts/universal/lambda-edge-handler.md ("SHA-256 over the normalized user
+         * identifier").
+         *
+         * Lowercasing is pinned to [Locale.ROOT]: the default-locale overload would map
+         * "I" to the dotless "ı" on a Turkish device, so the same identifier would hash
+         * differently depending on the user's phone settings.
+         */
+        fun normalizeUserIdentifier(identifier: String): String =
+            Normalizer.normalize(identifier, Normalizer.Form.NFC).trim().lowercase(Locale.ROOT)
+
+        /**
+         * Compute the universal-consent user hash: SHA-256 of
+         * "{dgCustomerId}:{consentProjectId}:{normalizedIdentifier}" as lowercase hex
+         * (64 chars). The identifier is normalized first via [normalizeUserIdentifier] —
+         * see the contract note there.
          */
         fun computeUserHash(
             dgCustomerId: String,
             consentProjectId: String,
             identifier: String,
         ): String {
-            val input = "$dgCustomerId:$consentProjectId:$identifier"
+            val input = "$dgCustomerId:$consentProjectId:${normalizeUserIdentifier(identifier)}"
             val digest = MessageDigest.getInstance("SHA-256")
             val hashBytes = digest.digest(input.toByteArray(Charsets.UTF_8))
             return hashBytes.joinToString("") { "%02x".format(it) }
