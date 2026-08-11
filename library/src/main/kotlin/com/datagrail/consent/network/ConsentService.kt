@@ -171,8 +171,10 @@ internal class ConsentService(
      * as X-DG-Signature / X-DG-Timestamp (unix seconds) / X-DG-Key-Id headers, plus X-DG-Nonce.
      * The shared secret never touches the device.
      *
-     * @param ccpaOptout the user's effective CCPA/US opt-out value. It is only written to the
-     *   record when the `universalConsent.syncOptout` feature flag is enabled; otherwise `false`.
+     * @param ccpaOptout the user's CCPA/US do-not-sell choice. Only written to the record when
+     *   the `universalConsent.syncOptout` feature flag is enabled; otherwise `false`. This is
+     *   NOT derived from the device's ad-tracking signal — that signal is narrower than a
+     *   do-not-sell choice, so Android currently has no source for this value and passes `false`.
      * @throws ConsentException.NetworkError on failure (also queues nothing — universal writes
      *   are user-identity-scoped and not part of the anonymous pending-events retry queue).
      */

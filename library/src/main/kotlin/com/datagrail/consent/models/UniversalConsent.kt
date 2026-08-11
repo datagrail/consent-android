@@ -79,33 +79,38 @@ data class UniversalConsentRecord(
 }
 
 /**
- * Mandatory client-side GPC reconciliation.
+ * Mandatory client-side signal reconciliation.
  *
- * The Universal Consent API returns raw, unreconciled data. When a record (or a live OS/browser
- * signal) has `gpc == true`, every SDK MUST suppress non-essential categories locally,
- * regardless of what the stored map says — the stored map may still show `marketing: true`.
- * A client that naively trusts the stored booleans would fire marketing tags for a GPC opt-out
- * user, which is a compliance failure.
+ * The Universal Consent API returns raw, unreconciled data. When an opt-out signal applies —
+ * either the record's stored `gpc` (recorded on the web, where GPC exists) or this device's live
+ * ad-tracking signal — every SDK MUST suppress non-essential categories locally, regardless of
+ * what the stored map says. The stored map may still show `marketing: true`, and a client that
+ * naively trusts those booleans would fire marketing tags for an opted-out user.
  *
- * Effective state = stored preferences ∘ GPC reconciliation, computed on-device.
+ * Suppression is one-directional. A signal may only turn categories OFF; it never turns one on.
+ * Ad-tracking permission is not consent to marketing categories, and an unreadable signal is not
+ * a choice at all, so neither state modifies the stored map.
+ *
+ * Effective state = stored preferences ∘ suppression, computed on-device and never persisted in
+ * place of the raw stored choice.
  */
-object GpcReconciliation {
+object SignalReconciliation {
     /**
-     * Apply GPC reconciliation to a cookie-options map.
+     * Apply signal reconciliation to a cookie-options map.
      *
      * @param cookieOptions The raw stored `{ categoryKey: Boolean }` map.
-     * @param gpc The effective GPC signal (true = user has opted out via GPC).
+     * @param suppress Whether an opt-out signal applies (device signal, stored GPC, or both).
      * @param essentialKeys The set of category keys that are essential / always-on and therefore
-     *   never suppressed by GPC.
-     * @return A new map where, when [gpc] is true, every non-essential category is forced to
-     *   `false`. When [gpc] is false the input map is returned unchanged.
+     *   never suppressed.
+     * @return A new map where, when [suppress] is true, every non-essential category is forced to
+     *   `false`. When [suppress] is false the input map is returned unchanged.
      */
     fun reconcile(
         cookieOptions: Map<String, Boolean>,
-        gpc: Boolean,
+        suppress: Boolean,
         essentialKeys: Set<String>,
     ): Map<String, Boolean> {
-        if (!gpc) return cookieOptions
+        if (!suppress) return cookieOptions
         return cookieOptions.mapValues { (key, enabled) ->
             if (essentialKeys.contains(key)) enabled else false
         }

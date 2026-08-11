@@ -6,6 +6,8 @@ import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
 import com.datagrail.consent.models.SignatureProvider
+import com.datagrail.consent.models.TrackingSignal
+import com.datagrail.consent.models.TrackingSignalReader
 import com.datagrail.consent.models.UniversalConsentRecord
 import com.datagrail.consent.models.UniversalConsentSignature
 import com.datagrail.consent.network.ConfigService
@@ -51,6 +53,12 @@ class DataGrailConsent private constructor() {
 
     @Volatile
     private var configUrl: String? = null
+
+    // Application context, retained from initialize() so the SDK can read the device's live
+    // ad-tracking signal on the caller's behalf. Application context only — never an Activity,
+    // which would leak.
+    @Volatile
+    private var appContext: Context? = null
     private var onConsentChangedCallback: ((ConsentPreferences) -> Unit)? = null
     private val scope = CoroutineScope(Dispatchers.Main)
 
@@ -251,6 +259,9 @@ class DataGrailConsent private constructor() {
             // this is still the current init — so a failed init never leaves a stale configUrl.
             this@DataGrailConsent.manager = manager
             this@DataGrailConsent.configUrl = configUrl
+            // applicationContext, not the caller's context: an Activity held here would leak for
+            // the process lifetime, and the ad-id lookup only needs an application context.
+            this@DataGrailConsent.appContext = context.applicationContext
 
             // Load configuration
             manager.loadConfig(configUrl) { result ->
@@ -519,17 +530,15 @@ class DataGrailConsent private constructor() {
      *   lowercase) before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
      * @param getSignature Java-friendly signature provider (calls the customer's backend).
-     * @param gpc Current effective GPC signal for this user.
      * @param callback Callback interface for success/failure.
      */
     fun setUserIdentifier(
         identifier: String,
         apiKey: String,
         getSignature: SignatureProviderCallback,
-        gpc: Boolean,
         callback: ConsentCallback,
     ) {
-        setUserIdentifier(identifier, apiKey, asSignatureProvider(getSignature), gpc) { result ->
+        setUserIdentifier(identifier, apiKey, asSignatureProvider(getSignature)) { result ->
             adaptResult(result, callback)
         }
     }
@@ -543,23 +552,23 @@ class DataGrailConsent private constructor() {
      *
      * The SDK does NOT hold or compute the HMAC secret. It invokes the customer-provided
      * [getSignature] provider — which calls the customer's own backend — and attaches the
-     * returned signature/timestamp/keyId as request headers. GPC reconciliation is applied
-     * to the outgoing preferences on-device: when [gpc] is true, non-essential categories
-     * are suppressed before the write.
+     * returned signature/timestamp/keyId as request headers.
+     *
+     * Signal reconciliation is applied to the outgoing preferences on-device. The SDK reads this
+     * device's ad-tracking signal itself — you do not pass it in. When the user has opted out of
+     * ad personalization (or the advertising ID has been deleted), non-essential categories are
+     * suppressed before the write. A signal never enables a category.
      *
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
      * @param getSignature Suspend provider that returns { signature, keyId, timestamp }.
-     * @param gpc Current effective GPC signal for this user (default false).
      * @param callback Callback with the result.
      */
-    @JvmOverloads
     fun setUserIdentifier(
         identifier: String,
         apiKey: String,
         getSignature: SignatureProvider,
-        gpc: Boolean = false,
         callback: (Result<Unit>) -> Unit,
     ) {
         val mgr = manager
@@ -568,12 +577,17 @@ class DataGrailConsent private constructor() {
             return
         }
 
+        val context = appContext
+
         scope.launch {
             try {
+                // The ad-id lookup is a binder call, so it must not run on the main thread —
+                // and this coroutine is on Dispatchers.Main.
+                val trackingSignal = withContext(Dispatchers.IO) { TrackingSignalReader.read(context) }
                 mgr.setUserIdentifier(
                     identifier = identifier,
                     apiKey = apiKey,
-                    gpc = gpc,
+                    trackingSignal = trackingSignal,
                     getSignature = getSignature,
                 )
                 callback(Result.success(Unit))
@@ -590,8 +604,9 @@ class DataGrailConsent private constructor() {
     /**
      * Fetch the user's universal consent record for cross-device rehydration (Kotlin-friendly).
      *
-     * The returned record has GPC reconciliation already applied on-device: when the stored
-     * record's `gpc` signal is true, non-essential categories are reported as suppressed.
+     * The returned record has signal reconciliation already applied on-device: when the stored
+     * record's `gpc` signal is true, or this device's ad-tracking signal indicates an opt-out,
+     * non-essential categories are reported as suppressed. The SDK reads the device signal itself.
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
      *   before hashing, per the canonical cross-SDK contract.
@@ -609,9 +624,12 @@ class DataGrailConsent private constructor() {
             return
         }
 
+        val context = appContext
+
         scope.launch {
             try {
-                callback(Result.success(mgr.fetchUniversalConsent(identifier, apiKey)))
+                val trackingSignal = withContext(Dispatchers.IO) { TrackingSignalReader.read(context) }
+                callback(Result.success(mgr.fetchUniversalConsent(identifier, apiKey, trackingSignal)))
             } catch (e: Exception) {
                 callback(
                     Result.failure(

@@ -466,7 +466,9 @@ class ConsentManagerTests {
             sut.currentConfig = createBaseConfig()
 
             assertThrows(ConsentException.ValidationError::class.java) {
-                runBlocking { sut.setUserIdentifier("user@example.com", "dg_key", false, signatureProvider()) }
+                runBlocking {
+                    sut.setUserIdentifier("user@example.com", "dg_key", TrackingSignal.NOT_DETERMINED, signatureProvider())
+                }
             }
 
             verifyNoInteractions(mockConsentService)
@@ -488,14 +490,16 @@ class ConsentManagerTests {
     fun `setUserIdentifier throws when not initialized`() =
         runTest {
             assertThrows(ConsentException.NotInitialized::class.java) {
-                runBlocking { sut.setUserIdentifier("user@example.com", "dg_key", false, signatureProvider()) }
+                runBlocking {
+                    sut.setUserIdentifier("user@example.com", "dg_key", TrackingSignal.NOT_DETERMINED, signatureProvider())
+                }
             }
 
             verifyNoInteractions(mockConsentService)
         }
 
     @Test
-    fun `setUserIdentifier suppresses non-essential categories when gpc is set`() =
+    fun `setUserIdentifier suppresses non-essential categories when the device signal denies`() =
         runTest {
             sut.currentConfig =
                 universalConfig(
@@ -515,7 +519,12 @@ class ConsentManagerTests {
                 ),
             )
 
-            sut.setUserIdentifier("user@example.com", "dg_key", gpc = true, getSignature = signatureProvider())
+            sut.setUserIdentifier(
+                "user@example.com",
+                "dg_key",
+                trackingSignal = TrackingSignal.DENIED,
+                getSignature = signatureProvider(),
+            )
 
             val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
             val ccpaCaptor = argumentCaptor<Boolean>()
@@ -531,14 +540,15 @@ class ConsentManagerTests {
             val written = prefsCaptor.firstValue
             assertTrue("isCustomised carried through", written.isCustomised)
             assertEquals("essential preserved", true, written.cookieOptions["category_essential"])
-            assertEquals("marketing suppressed by GPC", false, written.cookieOptions["category_marketing"])
-            // The manager passes the effective GPC signal as the opt-out value; ConsentService
-            // decides whether it is actually written, based on the syncOptout gate.
-            assertTrue("gpc forwarded as the opt-out value", ccpaCaptor.firstValue)
+            assertEquals("marketing suppressed by the signal", false, written.cookieOptions["category_marketing"])
+            // ccpa_optout records a CCPA do-not-sell choice. The ad-tracking signal is narrower
+            // than that, so deriving one from the other would write a legal opt-out the user
+            // never made — the manager must never forward the signal here.
+            assertFalse("device signal must not become a CCPA opt-out", ccpaCaptor.firstValue)
         }
 
     @Test
-    fun `setUserIdentifier writes the stored map unchanged when gpc is clear`() =
+    fun `setUserIdentifier writes the stored map unchanged when the device signal allows`() =
         runTest {
             sut.currentConfig =
                 universalConfig(
@@ -558,7 +568,12 @@ class ConsentManagerTests {
                 ),
             )
 
-            sut.setUserIdentifier("user@example.com", "dg_key", gpc = false, getSignature = signatureProvider())
+            sut.setUserIdentifier(
+                "user@example.com",
+                "dg_key",
+                trackingSignal = TrackingSignal.AUTHORIZED,
+                getSignature = signatureProvider(),
+            )
 
             val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
             verify(mockConsentService).saveUniversalConsent(
@@ -574,7 +589,7 @@ class ConsentManagerTests {
         }
 
     @Test
-    fun `fetchUniversalConsent reconciles GPC on the returned record`() =
+    fun `fetchUniversalConsent reconciles the stored gpc on the returned record`() =
         runTest {
             // The server returns RAW data — a stored marketing:true alongside gpc:true is a
             // legitimate record shape, and the manager must not hand it back unreconciled.
@@ -605,7 +620,7 @@ class ConsentManagerTests {
 
             val options = record!!.consentPreferences!!.cookieOptions
             assertEquals("essential preserved", true, options["category_essential"])
-            assertEquals("marketing suppressed by GPC", false, options["category_marketing"])
+            assertEquals("marketing suppressed by stored gpc", false, options["category_marketing"])
         }
 
     @Test

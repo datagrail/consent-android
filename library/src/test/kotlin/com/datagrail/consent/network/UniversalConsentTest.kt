@@ -130,10 +130,10 @@ class UniversalConsentTest {
         }
     }
 
-    // MARK: - GPC reconciliation
+    // MARK: - Signal reconciliation
 
     @Test
-    fun `GPC true suppresses non-essential categories even when stored map says true`() {
+    fun `suppression forces non-essential categories off even when stored map says true`() {
         val stored =
             mapOf(
                 "dg-category-essential" to true,
@@ -142,19 +142,19 @@ class UniversalConsentTest {
             )
 
         val reconciled =
-            GpcReconciliation.reconcile(
+            SignalReconciliation.reconcile(
                 cookieOptions = stored,
-                gpc = true,
+                suppress = true,
                 essentialKeys = setOf("dg-category-essential"),
             )
 
         assertTrue("essential preserved", reconciled["dg-category-essential"]!!)
-        assertFalse("marketing suppressed by GPC", reconciled["dg-category-marketing"]!!)
-        assertFalse("performance suppressed by GPC", reconciled["dg-category-performance"]!!)
+        assertFalse("marketing suppressed", reconciled["dg-category-marketing"]!!)
+        assertFalse("performance suppressed", reconciled["dg-category-performance"]!!)
     }
 
     @Test
-    fun `GPC false leaves the stored map unchanged`() {
+    fun `no suppression leaves the stored map unchanged`() {
         val stored =
             mapOf(
                 "dg-category-essential" to true,
@@ -162,13 +162,35 @@ class UniversalConsentTest {
             )
 
         val reconciled =
-            GpcReconciliation.reconcile(
+            SignalReconciliation.reconcile(
                 cookieOptions = stored,
-                gpc = false,
+                suppress = false,
                 essentialKeys = setOf("dg-category-essential"),
             )
 
         assertEquals(stored, reconciled)
+    }
+
+    @Test
+    fun `suppression never enables a category the user turned off`() {
+        // A signal may only suppress. Ad-tracking permission is not consent to marketing, so no
+        // signal state may flip a stored false to true — that would silently opt a user back in.
+        val stored =
+            mapOf(
+                "dg-category-essential" to true,
+                "dg-category-marketing" to false,
+            )
+
+        for (suppress in listOf(true, false)) {
+            val reconciled =
+                SignalReconciliation.reconcile(
+                    cookieOptions = stored,
+                    suppress = suppress,
+                    essentialKeys = setOf("dg-category-essential"),
+                )
+
+            assertFalse("marketing stays off (suppress=$suppress)", reconciled["dg-category-marketing"]!!)
+        }
     }
 
     // MARK: - Signed POST

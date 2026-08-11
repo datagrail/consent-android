@@ -4,8 +4,9 @@ import com.datagrail.consent.models.CategoryConsent
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
-import com.datagrail.consent.models.GpcReconciliation
+import com.datagrail.consent.models.SignalReconciliation
 import com.datagrail.consent.models.SignatureProvider
+import com.datagrail.consent.models.TrackingSignal
 import com.datagrail.consent.models.UniversalConsentPreferences
 import com.datagrail.consent.models.UniversalConsentRecord
 import com.datagrail.consent.network.ConfigService
@@ -208,21 +209,28 @@ internal class ConsentManager(
     }
 
     /**
-     * Fetch the user's universal consent record and reconcile GPC on-device.
+     * Fetch the user's universal consent record and reconcile opt-out signals on-device.
      *
-     * The server returns raw, unreconciled data. This method applies mandatory client-side GPC
-     * reconciliation before returning: when the record's `gpc` signal is true, every
-     * non-essential category in the cookieOptions map is forced to `false` regardless of the
-     * stored value. Essential/always-on categories are preserved.
+     * The server returns raw, unreconciled data. This method applies mandatory client-side
+     * reconciliation before returning: when an opt-out signal applies, every non-essential
+     * category in the cookieOptions map is forced to `false` regardless of the stored value.
+     * Essential/always-on categories are preserved.
+     *
+     * Two signals are considered, and the more privacy-protective wins:
+     * - the record's stored `gpc`, recorded on the web where GPC exists; and
+     * - [trackingSignal], this device's live ad-tracking signal.
      *
      * Requires universal consent to be enabled in the loaded config; throws
      * [ConsentException.ValidationError] otherwise.
      *
-     * @return the record with GPC-reconciled cookieOptions, or null if none exists.
+     * @param trackingSignal This device's live signal. Read from the OS by the caller (the
+     *   public API does this for you) so this method never blocks on a binder call.
+     * @return the record with reconciled cookieOptions, or null if none exists.
      */
     suspend fun fetchUniversalConsent(
         identifier: String,
         apiKey: String,
+        trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
     ): UniversalConsentRecord? {
         val config = currentConfig ?: throw ConsentException.NotInitialized()
         if (!isUniversalConsentEnabled()) {
@@ -233,9 +241,12 @@ internal class ConsentManager(
         val prefs = record.consentPreferences ?: return record
         val essentialKeys = getEssentialCategories().toSet()
         val reconciled =
-            GpcReconciliation.reconcile(
+            SignalReconciliation.reconcile(
                 cookieOptions = prefs.cookieOptions,
-                gpc = record.gpc,
+                // Either signal suppresses. The stored `gpc` came from the web, the tracking
+                // signal from this device; the most privacy-protective of the two wins, and
+                // neither can re-enable what the other suppressed.
+                suppress = record.gpc || trackingSignal.suppressesNonEssential,
                 essentialKeys = essentialKeys,
             )
         return record.copy(consentPreferences = prefs.copy(cookieOptions = reconciled))
@@ -247,7 +258,7 @@ internal class ConsentManager(
      * retained as manager state, so subsequent operations (e.g. [fetchUniversalConsent]) must
      * pass the identifier again.
      *
-     * GPC reconciliation is applied to the outgoing map so a GPC opt-out is never persisted as
+     * Signal reconciliation is applied to the outgoing map so an opt-out is never persisted as
      * consent for non-essential categories.
      *
      * Requires universal consent to be enabled in the loaded config; throws
@@ -256,13 +267,16 @@ internal class ConsentManager(
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
      *   before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
-     * @param gpc The current effective GPC signal for this user/session.
+     * @param trackingSignal This device's live ad-tracking signal. Read from the OS by the
+     *   caller (the public API does this for you) so this method never blocks on a binder call.
+     *   [TrackingSignal.DENIED] and [TrackingSignal.RESTRICTED] suppress non-essential
+     *   categories; no state ever enables one.
      * @param getSignature Customer-provided signature provider (calls their backend).
      */
     suspend fun setUserIdentifier(
         identifier: String,
         apiKey: String,
-        gpc: Boolean,
+        trackingSignal: TrackingSignal,
         getSignature: SignatureProvider,
     ) {
         val config = currentConfig ?: throw ConsentException.NotInitialized()
@@ -275,7 +289,8 @@ internal class ConsentManager(
             current?.cookieOptions?.associate { it.gtmKey to it.isEnabled } ?: emptyMap()
 
         val essentialKeys = getEssentialCategories().toSet()
-        val reconciled = GpcReconciliation.reconcile(rawMap, gpc, essentialKeys)
+        val reconciled =
+            SignalReconciliation.reconcile(rawMap, trackingSignal.suppressesNonEssential, essentialKeys)
 
         val universalPrefs =
             UniversalConsentPreferences(
@@ -288,9 +303,12 @@ internal class ConsentManager(
             identifier = identifier,
             preferences = universalPrefs,
             apiKey = apiKey,
-            // The effective GPC signal is this SDK's per-user opt-out signal; ConsentService
-            // only writes it to ccpa_optout when the syncOptout feature flag is enabled.
-            ccpaOptout = gpc,
+            // NOT derived from the tracking signal. `ccpa_optout` records a CCPA/US do-not-sell
+            // choice; the device ad-tracking signal is a narrower ad-personalization signal, and
+            // treating one as the other would write a legal opt-out the user never made. Until
+            // the mobile signal-to-opt-out rule is ratified, Android has no source for this
+            // value, so it stays false and `syncOptout` writes nothing.
+            ccpaOptout = false,
             getSignature = getSignature,
         )
     }
