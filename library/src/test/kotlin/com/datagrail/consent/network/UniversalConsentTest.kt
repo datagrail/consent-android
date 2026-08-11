@@ -76,6 +76,25 @@ class UniversalConsentTest {
         }
     }
 
+    // Hashing an empty normalized identifier yields SHA-256 of the bare tenant prefix —
+    // a valid-looking hash shared by every such caller, which would collapse unrelated
+    // users onto one consent record.
+    @Test
+    fun `computeUserHash rejects identifiers that are empty after normalization`() {
+        listOf("", "   ", "\t\n").forEach { identifier ->
+            assertThrows(
+                "must reject <$identifier> rather than hashing the bare tenant prefix",
+                ConsentException.ValidationError::class.java,
+            ) {
+                ConsentService.computeUserHash(
+                    dgCustomerId = "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
+                    consentProjectId = "proj_abc123",
+                    identifier = identifier,
+                )
+            }
+        }
+    }
+
     @Test
     fun `normalizeUserIdentifier applies NFC then trim then lowercase`() {
         assertEquals(

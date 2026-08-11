@@ -86,7 +86,18 @@ internal class ConsentService(
             consentProjectId: String,
             identifier: String,
         ): String {
-            val input = "$dgCustomerId:$consentProjectId:${normalizeUserIdentifier(identifier)}"
+            val normalized = normalizeUserIdentifier(identifier)
+            // Reject an identifier that is empty AFTER normalizing. SHA-256 over a bare
+            // "{customerId}:{projectId}:" prefix is a valid-looking hash that every
+            // empty-or-whitespace caller in the tenant shares, collapsing unrelated users
+            // onto a single consent record. Checking the raw string is not enough — "   "
+            // trims away to nothing.
+            if (normalized.isEmpty()) {
+                throw ConsentException.ValidationError(
+                    "identifier must not be empty after normalization",
+                )
+            }
+            val input = "$dgCustomerId:$consentProjectId:$normalized"
             val digest = MessageDigest.getInstance("SHA-256")
             val hashBytes = digest.digest(input.toByteArray(Charsets.UTF_8))
             return hashBytes.joinToString("") { "%02x".format(it) }
