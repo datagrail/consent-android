@@ -253,7 +253,8 @@ internal class ConsentManager(
      * Requires universal consent to be enabled in the loaded config; throws
      * [ConsentException.ValidationError] otherwise.
      *
-     * @param identifier The user identifier (used VERBATIM in the hash — not normalized).
+     * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
+     *   before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
      * @param gpc The current effective GPC signal for this user/session.
      * @param getSignature Customer-provided signature provider (calls their backend).

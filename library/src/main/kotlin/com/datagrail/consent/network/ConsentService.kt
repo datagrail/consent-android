@@ -64,9 +64,8 @@ internal class ConsentService(
          * backend helper. Skipping this silently splits one user into multiple records and
          * their consent stops following them across devices.
          *
-         * See decisions/universal/hash-algorithm-selection.md and
-         * concepts/universal/lambda-edge-handler.md ("SHA-256 over the normalized user
-         * identifier").
+         * The edge handler that validates these hashes computes "SHA-256 over the normalized
+         * user identifier" the same way; see the TRUST-1843 design for the full derivation.
          *
          * Lowercasing is pinned to [Locale.ROOT]: the default-locale overload would map
          * "I" to the dotless "ı" on a Turkish device, so the same identifier would hash
@@ -104,7 +103,16 @@ internal class ConsentService(
         }
     }
 
-    private val json = Json { ignoreUnknownKeys = true }
+    // encodeDefaults is REQUIRED on the write path. kotlinx.serialization omits properties that
+    // still hold their declared default, so a default-constructed UniversalConsentPreferences
+    // would serialize as `"consent_preferences": {}` — dropping both `isCustomised` and the
+    // `cookieOptions` map the edge expects. That is not hypothetical: an unbannered user's
+    // preferences legitimately carry isCustomised=false and an empty map.
+    private val json =
+        Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        }
 
     private fun encodeParam(value: String): String = URLEncoder.encode(value, "UTF-8")
 

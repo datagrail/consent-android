@@ -2,6 +2,7 @@
 package com.datagrail.consent
 
 import com.datagrail.consent.models.ConsentException
+import com.datagrail.consent.models.UniversalConsentSignature
 import com.datagrail.consent.utils.ConsentLogger
 import com.datagrail.consent.utils.LogLevel
 import kotlinx.coroutines.Dispatchers
@@ -331,4 +332,70 @@ class DataGrailConsentTests {
             }
         assertNotNull(exception)
     }
+
+    // MARK: - Java Signature Provider Adapter
+
+    @Test
+    fun `java signature provider adapter surfaces the signature`() =
+        runBlocking {
+            val expected = UniversalConsentSignature("sig", "key-1", 1_700_000_000L)
+            val provider =
+                DataGrailConsent.asSignatureProvider { _, _, onResult -> onResult.onSignature(expected) }
+
+            val actual = provider("cust-1", "hash-1")
+
+            assertEquals(expected, actual)
+        }
+
+    @Test
+    fun `java signature provider adapter propagates a signing failure`() =
+        runBlocking {
+            // Without the onFailure arm, a signing request that fails has no way to report back:
+            // the suspended write never resumes and setUserIdentifier's callback never fires.
+            val provider =
+                DataGrailConsent.asSignatureProvider { _, _, onResult ->
+                    onResult.onFailure(ConsentException.NetworkError("signing endpoint 503"))
+                }
+
+            val error =
+                assertThrows(ConsentException.NetworkError::class.java) {
+                    runBlocking { provider("cust-1", "hash-1") }
+                }
+
+            assertTrue(error.message!!.contains("signing endpoint 503"))
+        }
+
+    @Test
+    fun `java signature provider adapter ignores a duplicate callback`() =
+        runBlocking {
+            // A customer provider that reports twice must not crash the app by resuming an
+            // already-settled continuation.
+            val expected = UniversalConsentSignature("sig", "key-1", 1_700_000_000L)
+            val provider =
+                DataGrailConsent.asSignatureProvider { _, _, onResult ->
+                    onResult.onSignature(expected)
+                    onResult.onFailure(ConsentException.NetworkError("late failure, ignored"))
+                    onResult.onSignature(expected)
+                }
+
+            assertEquals(expected, provider("cust-1", "hash-1"))
+        }
+
+    @Test
+    fun `java signature provider adapter passes customer id and user hash through`() =
+        runBlocking {
+            var seenCustomerId: String? = null
+            var seenUserHash: String? = null
+            val provider =
+                DataGrailConsent.asSignatureProvider { customerId, userHash, onResult ->
+                    seenCustomerId = customerId
+                    seenUserHash = userHash
+                    onResult.onSignature(UniversalConsentSignature("sig", "key-1", 1L))
+                }
+
+            provider("ac46d8ad-a67a-431f-a5d5-9e3eb922dae7", "1fee132c")
+
+            assertEquals("ac46d8ad-a67a-431f-a5d5-9e3eb922dae7", seenCustomerId)
+            assertEquals("1fee132c", seenUserHash)
+        }
 }

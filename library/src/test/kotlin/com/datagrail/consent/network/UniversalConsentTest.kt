@@ -238,6 +238,46 @@ class UniversalConsentTest {
         }
 
     @Test
+    fun `default preferences still serialize isCustomised and cookieOptions`() =
+        runTest {
+            // kotlinx.serialization omits properties holding their declared default unless
+            // encodeDefaults is on, so a default-constructed UniversalConsentPreferences would
+            // go out as `"consent_preferences":{}` — no isCustomised, no cookieOptions map. An
+            // unbannered user's preferences legitimately look exactly like that.
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            val config =
+                ConsentServiceSecurityTest.createTestConfig().copy(
+                    consentProjectId = "proj_abc123",
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = false),
+                )
+
+            service.saveUniversalConsent(
+                config = config,
+                identifier = "user@example.com",
+                preferences = UniversalConsentPreferences(),
+                apiKey = "dg_live_key",
+                ccpaOptout = false,
+                getSignature = { _, _ ->
+                    UniversalConsentSignature("sig", "key-1", 1_700_000_000L)
+                },
+            )
+
+            val bodyCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(any(), any(), bodyCaptor.capture(), anyOrNull())
+            val body = bodyCaptor.firstValue
+
+            assertTrue("isCustomised is present", body.contains("\"isCustomised\":false"))
+            assertTrue("cookieOptions map is present", body.contains("\"cookieOptions\":{"))
+            assertFalse(
+                "consent_preferences must not collapse to an empty object",
+                body.contains("\"consent_preferences\":{}"),
+            )
+            // The other defaulted scalars on the request must survive too.
+            assertTrue("ccpa_optout is present", body.contains("\"ccpa_optout\":false"))
+        }
+
+    @Test
     fun `signed POST carries X-DG-Api-Key alongside the signature headers`() =
         runTest {
             // The CloudFront Function needs the API key on EVERY request (reads AND writes) to

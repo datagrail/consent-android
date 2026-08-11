@@ -168,8 +168,9 @@ interface UniversalConsentCallback {
  * Example (Java):
  * ```java
  * SignatureProviderCallback provider = (customerId, userHash, onResult) -> {
- *     // call your backend, then:
+ *     // call your backend, then EXACTLY ONE of:
  *     onResult.onSignature(new UniversalConsentSignature(signature, keyId, timestamp));
+ *     onResult.onFailure(new ConsentException.NetworkError("signing endpoint unreachable", e));
  * };
  * ```
  */
@@ -186,9 +187,21 @@ fun interface SignatureProviderCallback {
 }
 
 /**
- * Result sink handed to [SignatureProviderCallback.getSignature]. Java callers invoke
- * [onSignature] once their backend returns the signed material.
+ * Result sink handed to [SignatureProviderCallback.getSignature]. Java callers invoke exactly one
+ * of [onSignature] or [onFailure] once their backend returns.
+ *
+ * The failure path is not optional: a universal-consent write suspends until the provider reports
+ * back, so a signing request that fails with no way to say so would leave the write hung forever
+ * and [DataGrailConsent.setUserIdentifier] would never invoke its callback. Calling [onFailure]
+ * surfaces the error through the normal `onFailure` path instead.
  */
-fun interface SignatureResult {
+interface SignatureResult {
+    /** Report the signature material returned by your backend. */
     fun onSignature(signature: UniversalConsentSignature)
+
+    /**
+     * Report that signing failed (network error, non-2xx from your signing endpoint, missing
+     * session, etc.). The universal-consent write fails with this error.
+     */
+    fun onFailure(error: ConsentException)
 }

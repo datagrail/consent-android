@@ -4,11 +4,18 @@ import com.datagrail.consent.models.*
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
+import org.mockito.kotlin.any
+import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.eq
+import org.mockito.kotlin.verify
+import org.mockito.kotlin.verifyNoInteractions
 import org.mockito.kotlin.whenever
 
 /**
@@ -429,7 +436,197 @@ class ConsentManagerTests {
         org.mockito.Mockito.verify(mockStorage).resetIdentifier()
     }
 
+    // MARK: - Universal Consent Tests
+
+    @Test
+    fun `isUniversalConsentEnabled reflects the config flag`() {
+        assertFalse("no config loaded", sut.isUniversalConsentEnabled())
+
+        sut.currentConfig = createBaseConfig()
+        assertFalse("universalConsent absent", sut.isUniversalConsentEnabled())
+
+        sut.currentConfig =
+            createBaseConfig().copy(
+                universalConsent = UniversalConsentConfig(enabled = false),
+            )
+        assertFalse("universalConsent disabled", sut.isUniversalConsentEnabled())
+
+        sut.currentConfig =
+            createBaseConfig().copy(
+                universalConsent = UniversalConsentConfig(enabled = true),
+            )
+        assertTrue("universalConsent enabled", sut.isUniversalConsentEnabled())
+    }
+
+    @Test
+    fun `setUserIdentifier rejects when universal consent is disabled`() =
+        runTest {
+            // The gate must stop the write BEFORE the service is touched — otherwise a customer
+            // with the feature off still emits identified traffic to the universal store.
+            sut.currentConfig = createBaseConfig()
+
+            assertThrows(ConsentException.ValidationError::class.java) {
+                runBlocking { sut.setUserIdentifier("user@example.com", "dg_key", false, signatureProvider()) }
+            }
+
+            verifyNoInteractions(mockConsentService)
+        }
+
+    @Test
+    fun `fetchUniversalConsent rejects when universal consent is disabled`() =
+        runTest {
+            sut.currentConfig = createBaseConfig()
+
+            assertThrows(ConsentException.ValidationError::class.java) {
+                runBlocking { sut.fetchUniversalConsent("user@example.com", "dg_key") }
+            }
+
+            verifyNoInteractions(mockConsentService)
+        }
+
+    @Test
+    fun `setUserIdentifier throws when not initialized`() =
+        runTest {
+            assertThrows(ConsentException.NotInitialized::class.java) {
+                runBlocking { sut.setUserIdentifier("user@example.com", "dg_key", false, signatureProvider()) }
+            }
+
+            verifyNoInteractions(mockConsentService)
+        }
+
+    @Test
+    fun `setUserIdentifier suppresses non-essential categories when gpc is set`() =
+        runTest {
+            sut.currentConfig =
+                universalConfig(
+                    listOf(
+                        MockCategory("category_essential", alwaysOn = true),
+                        MockCategory("category_marketing", alwaysOn = false),
+                    ),
+                )
+            whenever(mockStorage.loadPreferences()).thenReturn(
+                ConsentPreferences(
+                    isCustomised = true,
+                    cookieOptions =
+                        listOf(
+                            CategoryConsent(gtmKey = "category_essential", isEnabled = true),
+                            CategoryConsent(gtmKey = "category_marketing", isEnabled = true),
+                        ),
+                ),
+            )
+
+            sut.setUserIdentifier("user@example.com", "dg_key", gpc = true, getSignature = signatureProvider())
+
+            val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
+            val ccpaCaptor = argumentCaptor<Boolean>()
+            verify(mockConsentService).saveUniversalConsent(
+                any(),
+                eq("user@example.com"),
+                prefsCaptor.capture(),
+                eq("dg_key"),
+                ccpaCaptor.capture(),
+                any(),
+            )
+
+            val written = prefsCaptor.firstValue
+            assertTrue("isCustomised carried through", written.isCustomised)
+            assertEquals("essential preserved", true, written.cookieOptions["category_essential"])
+            assertEquals("marketing suppressed by GPC", false, written.cookieOptions["category_marketing"])
+            // The manager passes the effective GPC signal as the opt-out value; ConsentService
+            // decides whether it is actually written, based on the syncOptout gate.
+            assertTrue("gpc forwarded as the opt-out value", ccpaCaptor.firstValue)
+        }
+
+    @Test
+    fun `setUserIdentifier writes the stored map unchanged when gpc is clear`() =
+        runTest {
+            sut.currentConfig =
+                universalConfig(
+                    listOf(
+                        MockCategory("category_essential", alwaysOn = true),
+                        MockCategory("category_marketing", alwaysOn = false),
+                    ),
+                )
+            whenever(mockStorage.loadPreferences()).thenReturn(
+                ConsentPreferences(
+                    isCustomised = true,
+                    cookieOptions =
+                        listOf(
+                            CategoryConsent(gtmKey = "category_essential", isEnabled = true),
+                            CategoryConsent(gtmKey = "category_marketing", isEnabled = true),
+                        ),
+                ),
+            )
+
+            sut.setUserIdentifier("user@example.com", "dg_key", gpc = false, getSignature = signatureProvider())
+
+            val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
+            verify(mockConsentService).saveUniversalConsent(
+                any(),
+                any(),
+                prefsCaptor.capture(),
+                any(),
+                eq(false),
+                any(),
+            )
+
+            assertEquals(true, prefsCaptor.firstValue.cookieOptions["category_marketing"])
+        }
+
+    @Test
+    fun `fetchUniversalConsent reconciles GPC on the returned record`() =
+        runTest {
+            // The server returns RAW data — a stored marketing:true alongside gpc:true is a
+            // legitimate record shape, and the manager must not hand it back unreconciled.
+            sut.currentConfig =
+                universalConfig(
+                    listOf(
+                        MockCategory("category_essential", alwaysOn = true),
+                        MockCategory("category_marketing", alwaysOn = false),
+                    ),
+                )
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
+                UniversalConsentRecord(
+                    status = "found",
+                    consentPreferences =
+                        UniversalConsentPreferences(
+                            isCustomised = true,
+                            cookieOptions =
+                                mapOf(
+                                    "category_essential" to true,
+                                    "category_marketing" to true,
+                                ),
+                        ),
+                    gpc = true,
+                ),
+            )
+
+            val record = sut.fetchUniversalConsent("user@example.com", "dg_key")
+
+            val options = record!!.consentPreferences!!.cookieOptions
+            assertEquals("essential preserved", true, options["category_essential"])
+            assertEquals("marketing suppressed by GPC", false, options["category_marketing"])
+        }
+
+    @Test
+    fun `fetchUniversalConsent returns null when no record exists`() =
+        runTest {
+            sut.currentConfig = universalConfig(listOf(MockCategory("category_essential", alwaysOn = true)))
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(null)
+
+            assertNull(sut.fetchUniversalConsent("user@example.com", "dg_key"))
+        }
+
     // MARK: - Helper Methods
+
+    private fun signatureProvider(): SignatureProvider =
+        { _, _ -> UniversalConsentSignature("sig", "key-1", 1_700_000_000L) }
+
+    private fun universalConfig(categories: List<MockCategory>): ConsentConfig =
+        createMockConfig(categories).copy(
+            consentProjectId = "proj_abc123",
+            universalConsent = UniversalConsentConfig(enabled = true),
+        )
 
     private fun createMockConfigWithInitialCategories(initialCategories: List<String>): ConsentConfig {
         return createBaseConfig().copy(

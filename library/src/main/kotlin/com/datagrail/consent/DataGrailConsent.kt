@@ -7,6 +7,7 @@ import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
 import com.datagrail.consent.models.SignatureProvider
 import com.datagrail.consent.models.UniversalConsentRecord
+import com.datagrail.consent.models.UniversalConsentSignature
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.network.NetworkClient
@@ -24,6 +25,7 @@ import kotlinx.coroutines.withContext
 import java.net.URL
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * Main entry point for DataGrail Consent SDK
@@ -85,6 +87,35 @@ class DataGrailConsent private constructor() {
          * Convert a Result callback to a ConsentCallback invocation.
          * Maps non-ConsentException errors to ConsentException.NetworkError.
          */
+        /**
+         * Bridge the Java-friendly [SignatureProviderCallback] onto the `suspend`
+         * [SignatureProvider] the universal-consent write expects.
+         *
+         * Both arms of [SignatureResult] must resume the continuation. Without the failure arm a
+         * signing request that fails has no way to report back, the write stays suspended
+         * forever, and the caller's [ConsentCallback] never fires.
+         */
+        internal fun asSignatureProvider(callback: SignatureProviderCallback): SignatureProvider =
+            { customerId, userHash ->
+                suspendCancellableCoroutine { continuation ->
+                    callback.getSignature(
+                        customerId,
+                        userHash,
+                        object : SignatureResult {
+                            override fun onSignature(signature: UniversalConsentSignature) {
+                                // isActive guards a provider that calls back more than once, or
+                                // after cancellation — resuming a settled continuation throws.
+                                if (continuation.isActive) continuation.resume(signature)
+                            }
+
+                            override fun onFailure(error: ConsentException) {
+                                if (continuation.isActive) continuation.resumeWithException(error)
+                            }
+                        },
+                    )
+                }
+            }
+
         internal fun adaptResult(
             result: Result<Unit>,
             callback: ConsentCallback,
@@ -484,7 +515,8 @@ class DataGrailConsent private constructor() {
      * Thin adapter over the Kotlin lambda overload. The [getSignature] provider receives a
      * [SignatureResult] sink to hand back the signature material computed by the customer backend.
      *
-     * @param identifier The user identifier (e.g. email). Used verbatim in the hash.
+     * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
+     *   lowercase) before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
      * @param getSignature Java-friendly signature provider (calls the customer's backend).
      * @param gpc Current effective GPC signal for this user.
@@ -497,14 +529,9 @@ class DataGrailConsent private constructor() {
         gpc: Boolean,
         callback: ConsentCallback,
     ) {
-        val provider: SignatureProvider = { customerId, userHash ->
-            suspendCancellableCoroutine { continuation ->
-                getSignature.getSignature(customerId, userHash) { signature ->
-                    continuation.resume(signature)
-                }
-            }
+        setUserIdentifier(identifier, apiKey, asSignatureProvider(getSignature), gpc) { result ->
+            adaptResult(result, callback)
         }
-        setUserIdentifier(identifier, apiKey, provider, gpc) { result -> adaptResult(result, callback) }
     }
 
     /**
@@ -520,7 +547,8 @@ class DataGrailConsent private constructor() {
      * to the outgoing preferences on-device: when [gpc] is true, non-essential categories
      * are suppressed before the write.
      *
-     * @param identifier The user identifier (e.g. email). Used verbatim in the hash.
+     * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
+     *   lowercase) before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
      * @param getSignature Suspend provider that returns { signature, keyId, timestamp }.
      * @param gpc Current effective GPC signal for this user (default false).
@@ -565,7 +593,8 @@ class DataGrailConsent private constructor() {
      * The returned record has GPC reconciliation already applied on-device: when the stored
      * record's `gpc` signal is true, non-essential categories are reported as suppressed.
      *
-     * @param identifier The user identifier. Used verbatim in the hash.
+     * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
+     *   before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
      * @param callback Callback with the record (null if no record exists) or a failure.
      */
@@ -599,7 +628,8 @@ class DataGrailConsent private constructor() {
      * Thin adapter over the Kotlin lambda overload. The record passed to
      * [UniversalConsentCallback.onSuccess] is null when no record exists.
      *
-     * @param identifier The user identifier. Used verbatim in the hash.
+     * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
+     *   before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
      * @param callback Callback interface for success (record, possibly null) / failure.
      */
