@@ -253,6 +253,54 @@ internal class ConsentManager(
     }
 
     /**
+     * Rehydrate local consent state from the universal consent store.
+     *
+     * [fetchUniversalConsent] reconciles a record and hands it back, but returning it is not the
+     * same as applying it: nothing else in the SDK reads that return value, so on its own the
+     * stored consent stays invisible to [needsConsent], [getCategories] and [isCategoryEnabled].
+     * This method persists the effective state, which is what makes a web opt-in actually stop
+     * the banner from re-prompting a user who already answered on another device.
+     *
+     * A read MISS writes nothing. "No record" is the absence of a signal, not a denial, so
+     * persisting an empty record would both fabricate a choice the user never made and suppress
+     * the banner that should collect it.
+     *
+     * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase) before
+     *   hashing, per the canonical cross-SDK contract.
+     * @param apiKey The customer's DataGrail API key.
+     * @param trackingSignal This device's live signal. Read from the OS by the caller (the public
+     *   API does this for you) so this method never blocks on a binder call.
+     * @return true when local state was rehydrated from a stored record, false on a miss.
+     */
+    suspend fun rehydrateFromUniversalConsent(
+        identifier: String,
+        apiKey: String,
+        trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
+    ): Boolean {
+        val record = fetchUniversalConsent(identifier, apiKey, trackingSignal) ?: return false
+        val cookieOptions = record.consentPreferences?.cookieOptions
+        if (cookieOptions.isNullOrEmpty()) return false
+
+        val preferences =
+            ConsentPreferences(
+                // A record that came back at all represents an answered prompt, so the rehydrated
+                // state is customised even if the writer left the flag false. needsConsent() keys
+                // off stored preferences existing, and a non-customised record would re-prompt a
+                // user who already answered.
+                isCustomised = true,
+                cookieOptions = cookieOptions.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
+            )
+
+        storage.savePreferences(preferences)
+        // Stamp the CURRENT config version, not the record's. This marks the rehydrated consent
+        // as current for the config this app is running, which is what needsConsent() compares
+        // against; carrying over a stale version from the writing device would re-prompt
+        // immediately and undo the rehydration we just did.
+        currentConfig?.version?.let { storage.saveConfigVersion(it) }
+        return true
+    }
+
+    /**
      * Write the current effective consent preferences to the universal consent store for the
      * given user identifier. This performs an immediate one-shot write; the identifier is NOT
      * retained as manager state, so subsequent operations (e.g. [fetchUniversalConsent]) must

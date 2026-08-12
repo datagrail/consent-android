@@ -547,8 +547,13 @@ class DataGrailConsent private constructor() {
      * Sync the current effective consent preferences to the DataGrail Universal Consent store
      * for the given user identifier, for cross-device retrieval (Kotlin-friendly).
      *
-     * This is a one-shot write. The SDK does NOT retain the identifier as state — later calls
-     * such as [fetchUniversalConsent] require the identifier to be passed again.
+     * This READS before it WRITES. Any stored record for this identifier is rehydrated onto the
+     * device first, then the resulting state is persisted back — so a fresh install cannot post
+     * its empty preferences over a richer server-side record. A read failure does not block the
+     * write: a user who just answered the banner still needs their choice saved.
+     *
+     * The identifier is NOT retained as state — later calls such as [fetchUniversalConsent] and
+     * [rehydrateFromUniversalConsent] require it to be passed again.
      *
      * The SDK does NOT hold or compute the HMAC secret. It invokes the customer-provided
      * [getSignature] provider — which calls the customer's own backend — and attaches the
@@ -584,6 +589,23 @@ class DataGrailConsent private constructor() {
                 // The ad-id lookup is a binder call, so it must not run on the main thread —
                 // and this coroutine is on Dispatchers.Main.
                 val trackingSignal = withContext(Dispatchers.IO) { TrackingSignalReader.read(context) }
+
+                // READ then WRITE, matching the web SDK's setUserIdentifier flow. Rehydrating
+                // first means the write persists the user's actual cross-device state rather than
+                // clobbering a richer server-side record with whatever this fresh install holds.
+                try {
+                    if (mgr.rehydrateFromUniversalConsent(identifier, apiKey, trackingSignal)) {
+                        mgr.getCategories()?.let { onConsentChangedCallback?.invoke(it) }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // A read failure must not block the write — a user who just answered the
+                    // banner still needs their choice saved. Swallowed deliberately, and logged
+                    // so a persistently failing read is still diagnosable.
+                    ConsentLogger.w("universal consent rehydrate failed, continuing to write: ${e.message}")
+                }
+
                 mgr.setUserIdentifier(
                     identifier = identifier,
                     apiKey = apiKey,
@@ -659,6 +681,81 @@ class DataGrailConsent private constructor() {
         fetchUniversalConsent(identifier, apiKey) { result ->
             result.fold(
                 onSuccess = { record -> callback.onSuccess(record) },
+                onFailure = { error ->
+                    callback.onFailure(
+                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * Rehydrate local consent state from the DataGrail Universal Consent store (Kotlin-friendly).
+     *
+     * Call this after [initialize] and BEFORE [needsConsent] when you know who the user is. Where
+     * [fetchUniversalConsent] only hands the record back, this applies it: the effective state is
+     * persisted locally, so [needsConsent], [getCategories] and [isCategoryEnabled] all reflect
+     * the consent the user gave on another device and the banner does not re-prompt them.
+     *
+     * A read miss leaves local state untouched and writes nothing — "no record" is the absence of
+     * a signal, not a denial, so the banner still shows.
+     *
+     * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase) before
+     *   hashing, per the canonical cross-SDK contract.
+     * @param apiKey The customer's DataGrail API key.
+     * @param callback Callback with true when local state was rehydrated from a stored record.
+     */
+    fun rehydrateFromUniversalConsent(
+        identifier: String,
+        apiKey: String,
+        callback: (Result<Boolean>) -> Unit,
+    ) {
+        val mgr = manager
+        if (mgr == null) {
+            callback(Result.failure(ConsentException.NotInitialized()))
+            return
+        }
+
+        val context = appContext
+
+        scope.launch {
+            try {
+                val trackingSignal = withContext(Dispatchers.IO) { TrackingSignalReader.read(context) }
+                val rehydrated = mgr.rehydrateFromUniversalConsent(identifier, apiKey, trackingSignal)
+                if (rehydrated) {
+                    mgr.getCategories()?.let { onConsentChangedCallback?.invoke(it) }
+                }
+                callback(Result.success(rehydrated))
+            } catch (e: Exception) {
+                callback(
+                    Result.failure(
+                        if (e is ConsentException) e else ConsentException.NetworkError(e.message ?: "Unknown error", e),
+                    ),
+                )
+            }
+        }
+    }
+
+    /**
+     * Rehydrate local consent state from the DataGrail Universal Consent store (Java-friendly).
+     *
+     * Thin adapter over the Kotlin lambda overload. [RehydrateCallback.onSuccess] receives false
+     * when no record existed for the user, in which case local state is untouched.
+     *
+     * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase) before
+     *   hashing, per the canonical cross-SDK contract.
+     * @param apiKey The customer's DataGrail API key.
+     * @param callback Callback interface for success (rehydrated true/false) / failure.
+     */
+    fun rehydrateFromUniversalConsent(
+        identifier: String,
+        apiKey: String,
+        callback: RehydrateCallback,
+    ) {
+        rehydrateFromUniversalConsent(identifier, apiKey) { result ->
+            result.fold(
+                onSuccess = { rehydrated -> callback.onSuccess(rehydrated) },
                 onFailure = { error ->
                     callback.onFailure(
                         if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),

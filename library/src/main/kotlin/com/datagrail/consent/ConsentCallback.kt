@@ -159,6 +159,43 @@ interface UniversalConsentCallback {
 }
 
 /**
+ * Java-friendly callback interface for rehydrating local consent state from the universal consent
+ * store.
+ *
+ * Distinct from [ConsentCallback] because the outcome is not just success/failure: a successful
+ * read can still find no record, and "rehydrated" versus "no record stored" are different enough
+ * that the caller usually branches on them (the latter means the banner still needs to show).
+ *
+ * Example (Java):
+ * ```java
+ * DataGrailConsent.getInstance().rehydrateFromUniversalConsent(identifier, apiKey, new RehydrateCallback() {
+ *     @Override
+ *     public void onSuccess(boolean rehydrated) {
+ *         // false means no stored record — local state untouched, banner still applies
+ *     }
+ *
+ *     @Override
+ *     public void onFailure(ConsentException error) {
+ *         // Handle failure
+ *     }
+ * });
+ * ```
+ */
+interface RehydrateCallback {
+    /**
+     * Called when the read completes.
+     * @param rehydrated true when local state was rehydrated from a stored record, false on a miss.
+     */
+    fun onSuccess(rehydrated: Boolean)
+
+    /**
+     * Called when the operation fails
+     * @param error The error that occurred
+     */
+    fun onFailure(error: ConsentException)
+}
+
+/**
  * Java-friendly signature provider. The universal-consent write requires a signature computed by
  * the customer's backend. The Kotlin [com.datagrail.consent.models.SignatureProvider] is a
  * `suspend` function type, which Java cannot implement without dealing with Kotlin coroutine
