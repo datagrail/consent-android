@@ -467,7 +467,7 @@ class ConsentManagerTests {
 
             assertThrows(ConsentException.ValidationError::class.java) {
                 runBlocking {
-                    sut.setUserIdentifier("user@example.com", "dg_key", TrackingSignal.NOT_DETERMINED, signatureProvider())
+                    sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
                 }
             }
 
@@ -491,15 +491,25 @@ class ConsentManagerTests {
         runTest {
             assertThrows(ConsentException.NotInitialized::class.java) {
                 runBlocking {
-                    sut.setUserIdentifier("user@example.com", "dg_key", TrackingSignal.NOT_DETERMINED, signatureProvider())
+                    sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
                 }
             }
 
             verifyNoInteractions(mockConsentService)
         }
 
+    /**
+     * The write carries the RAW preferences it was given, never a signal-suppressed view.
+     *
+     * The universal store holds raw choices and the server never merges, so suppressing before a
+     * write would persist this device's transient signal as the user's choice — for every device on
+     * their identifier. Limit-ad-tracking is an ad-personalization answer, not a marketing opt-out.
+     * Suppression belongs to the read path, and the write path now takes no signal parameter at all:
+     * there is nothing to pass and nothing for the manager to read, so no signal state can reach the
+     * payload. That absence IS the fix.
+     */
     @Test
-    fun `setUserIdentifier suppresses non-essential categories when the device signal denies`() =
+    fun `setUserIdentifier writes the raw preferences with no signal applied`() =
         runTest {
             sut.currentConfig =
                 universalConfig(
@@ -522,7 +532,6 @@ class ConsentManagerTests {
             sut.setUserIdentifier(
                 "user@example.com",
                 "dg_key",
-                trackingSignal = TrackingSignal.DENIED,
                 getSignature = signatureProvider(),
             )
 
@@ -540,15 +549,70 @@ class ConsentManagerTests {
             val written = prefsCaptor.firstValue
             assertTrue("isCustomised carried through", written.isCustomised)
             assertEquals("essential preserved", true, written.cookieOptions["category_essential"])
-            assertEquals("marketing suppressed by the signal", false, written.cookieOptions["category_marketing"])
+            assertEquals("the user's real opt-in survives onto the wire", true, written.cookieOptions["category_marketing"])
             // ccpa_optout records a CCPA do-not-sell choice. The ad-tracking signal is narrower
             // than that, so deriving one from the other would write a legal opt-out the user
             // never made — the manager must never forward the signal here.
             assertFalse("device signal must not become a CCPA opt-out", ccpaCaptor.firstValue)
         }
 
+    /**
+     * An explicitly-passed raw record wins over local state. The read-then-write entry point relies
+     * on this: rehydration persists the SUPPRESSED view locally, so if the write fell back to
+     * `getCategories()` it would read that suppression back and store it as the user's choice.
+     */
     @Test
-    fun `setUserIdentifier writes the stored map unchanged when the device signal allows`() =
+    fun `setUserIdentifier writes explicitly-passed preferences over the suppressed local state`() =
+        runTest {
+            sut.currentConfig =
+                universalConfig(
+                    listOf(
+                        MockCategory("category_essential", alwaysOn = true),
+                        MockCategory("category_marketing", alwaysOn = false),
+                    ),
+                )
+            // Local state as rehydration would have left it under a DENIED signal: marketing off.
+            whenever(mockStorage.loadPreferences()).thenReturn(
+                ConsentPreferences(
+                    isCustomised = true,
+                    cookieOptions =
+                        listOf(
+                            CategoryConsent(gtmKey = "category_essential", isEnabled = true),
+                            CategoryConsent(gtmKey = "category_marketing", isEnabled = false),
+                        ),
+                ),
+            )
+
+            sut.setUserIdentifier(
+                "user@example.com",
+                "dg_key",
+                preferences =
+                    ConsentPreferences(
+                        isCustomised = true,
+                        cookieOptions =
+                            listOf(
+                                CategoryConsent(gtmKey = "category_essential", isEnabled = true),
+                                CategoryConsent(gtmKey = "category_marketing", isEnabled = true),
+                            ),
+                    ),
+                getSignature = signatureProvider(),
+            )
+
+            val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
+            verify(mockConsentService).saveUniversalConsent(
+                any(),
+                any(),
+                prefsCaptor.capture(),
+                any(),
+                eq(false),
+                any(),
+            )
+
+            assertEquals(true, prefsCaptor.firstValue.cookieOptions["category_marketing"])
+        }
+
+    @Test
+    fun `setUserIdentifier falls back to the stored map when no preferences are passed`() =
         runTest {
             sut.currentConfig =
                 universalConfig(
@@ -571,7 +635,6 @@ class ConsentManagerTests {
             sut.setUserIdentifier(
                 "user@example.com",
                 "dg_key",
-                trackingSignal = TrackingSignal.AUTHORIZED,
                 getSignature = signatureProvider(),
             )
 

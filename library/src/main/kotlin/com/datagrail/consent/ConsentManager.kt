@@ -276,28 +276,68 @@ internal class ConsentManager(
         identifier: String,
         apiKey: String,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
-    ): Boolean {
-        val record = fetchUniversalConsent(identifier, apiKey, trackingSignal) ?: return false
-        val cookieOptions = record.consentPreferences?.cookieOptions
-        if (cookieOptions.isNullOrEmpty()) return false
+    ): Boolean = rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal) != null
 
-        val preferences =
+    /**
+     * Rehydrate, and hand back the RAW preferences from the stored record.
+     *
+     * Same behaviour as [rehydrateFromUniversalConsent], except the return value carries the
+     * record's raw preferences (or null on a miss) rather than a Boolean. The read-then-write entry
+     * point needs this: rehydration deliberately persists the RECONCILED view locally, so a write
+     * that sourced its payload from [getCategories] afterwards would read that suppression back and
+     * store it in the universal record as though the user had chosen it. Returning the raw
+     * preferences lets the write carry what the user actually consented to.
+     *
+     * @return the record's raw preferences, or null on a miss.
+     */
+    suspend fun rehydrateReturningRawPreferences(
+        identifier: String,
+        apiKey: String,
+        trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
+    ): ConsentPreferences? {
+        val config = currentConfig ?: throw ConsentException.NotInitialized()
+        if (!isUniversalConsentEnabled()) {
+            throw ConsentException.ValidationError("Universal consent is not enabled for this configuration")
+        }
+
+        // Goes to the service directly rather than through fetchUniversalConsent, which returns an
+        // already-reconciled record. Both views are needed here: the reconciled one to persist
+        // locally, the raw one to hand back for the write.
+        val record = consentService.getUniversalConsent(config, identifier, apiKey) ?: return null
+        val rawCookieOptions = record.consentPreferences?.cookieOptions
+        if (rawCookieOptions.isNullOrEmpty()) return null
+
+        // A record that came back at all represents an answered prompt, so the rehydrated state is
+        // customised even if the writer left the flag false. needsConsent() keys off stored
+        // preferences existing, and a non-customised record would re-prompt a user who already
+        // answered.
+        val raw =
             ConsentPreferences(
-                // A record that came back at all represents an answered prompt, so the rehydrated
-                // state is customised even if the writer left the flag false. needsConsent() keys
-                // off stored preferences existing, and a non-customised record would re-prompt a
-                // user who already answered.
                 isCustomised = true,
-                cookieOptions = cookieOptions.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
+                cookieOptions = rawCookieOptions.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
             )
 
-        storage.savePreferences(preferences)
+        // Local state gets the RECONCILED view — either signal suppresses. The stored `gpc` came
+        // from the web, the tracking signal from this device; neither can re-enable what the other
+        // suppressed.
+        val reconciled =
+            SignalReconciliation.reconcile(
+                cookieOptions = rawCookieOptions,
+                suppress = record.gpc || trackingSignal.suppressesNonEssential,
+                essentialKeys = getEssentialCategories().toSet(),
+            )
+        storage.savePreferences(
+            ConsentPreferences(
+                isCustomised = true,
+                cookieOptions = reconciled.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
+            ),
+        )
         // Stamp the CURRENT config version, not the record's. This marks the rehydrated consent
         // as current for the config this app is running, which is what needsConsent() compares
         // against; carrying over a stale version from the writing device would re-prompt
         // immediately and undo the rehydration we just did.
         currentConfig?.version?.let { storage.saveConfigVersion(it) }
-        return true
+        return raw
     }
 
     /**
@@ -306,8 +346,13 @@ internal class ConsentManager(
      * retained as manager state, so subsequent operations (e.g. [fetchUniversalConsent]) must
      * pass the identifier again.
      *
-     * Signal reconciliation is applied to the outgoing map so an opt-out is never persisted as
-     * consent for non-essential categories.
+     * Writes the RAW preferences. The tracking signal is deliberately NOT applied here: the store
+     * holds raw choices and the server never merges, so suppressing before a write would persist
+     * this device's transient signal as the user's choice — permanently, for every device on this
+     * identifier. Limit-ad-tracking is an ad-personalization answer, not a marketing opt-out:
+     * someone who opted in on the web and then opens the app with ad tracking limited must not have
+     * that opt-in erased. Suppression is a read-time view (see [SignalReconciliation], applied by
+     * [fetchUniversalConsent] and [rehydrateReturningRawPreferences]).
      *
      * Requires universal consent to be enabled in the loaded config; throws
      * [ConsentException.ValidationError] otherwise.
@@ -315,16 +360,15 @@ internal class ConsentManager(
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
      *   before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
-     * @param trackingSignal This device's live ad-tracking signal. Read from the OS by the
-     *   caller (the public API does this for you) so this method never blocks on a binder call.
-     *   [TrackingSignal.DENIED] and [TrackingSignal.RESTRICTED] suppress non-essential
-     *   categories; no state ever enables one.
+     * @param preferences The preferences to write; defaults to the current stored preferences.
+     *   Callers that just rehydrated MUST pass the raw record explicitly, since rehydration
+     *   persists the reconciled view locally.
      * @param getSignature Customer-provided signature provider (calls their backend).
      */
     suspend fun setUserIdentifier(
         identifier: String,
         apiKey: String,
-        trackingSignal: TrackingSignal,
+        preferences: ConsentPreferences? = null,
         getSignature: SignatureProvider,
     ) {
         val config = currentConfig ?: throw ConsentException.NotInitialized()
@@ -332,18 +376,14 @@ internal class ConsentManager(
             throw ConsentException.ValidationError("Universal consent is not enabled for this configuration")
         }
 
-        val current = getCategories() ?: getDefaultPreferences()
+        val current = preferences ?: getCategories() ?: getDefaultPreferences()
         val rawMap =
             current?.cookieOptions?.associate { it.gtmKey to it.isEnabled } ?: emptyMap()
-
-        val essentialKeys = getEssentialCategories().toSet()
-        val reconciled =
-            SignalReconciliation.reconcile(rawMap, trackingSignal.suppressesNonEssential, essentialKeys)
 
         val universalPrefs =
             UniversalConsentPreferences(
                 isCustomised = current?.isCustomised ?: false,
-                cookieOptions = reconciled,
+                cookieOptions = rawMap,
             )
 
         consentService.saveUniversalConsent(
