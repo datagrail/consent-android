@@ -24,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URL
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
@@ -71,6 +72,13 @@ class DataGrailConsent private constructor() {
     companion object {
         @Volatile
         private var instance: DataGrailConsent? = null
+
+        /**
+         * How long to wait for the device ad-tracking signal before giving up on it. Generous
+         * enough for a cold Play Services binder connection, short enough that a wedged one does
+         * not hold a consent call open indefinitely.
+         */
+        private const val TRACKING_SIGNAL_TIMEOUT_MS = 3_000L
 
         /**
          * Set the SDK log level. Default is NONE (no logging).
@@ -520,6 +528,23 @@ class DataGrailConsent private constructor() {
     // MARK: - Universal Consent
 
     /**
+     * Read this device's ad-tracking signal, bounded.
+     *
+     * The lookup is a binder call into Play Services, so it runs on [Dispatchers.IO] rather than
+     * the main thread. It is also bounded: `getAdvertisingIdInfo` blocks on a service connection
+     * that can hang indefinitely when Play Services is wedged or being updated, and every universal
+     * consent call sits behind this read. A timeout falls back to [TrackingSignal.NOT_DETERMINED],
+     * which is the same fallback the reader itself uses for an unreadable signal — an unknown
+     * signal is not a refusal, so nothing is suppressed on its account.
+     */
+    private suspend fun readTrackingSignal(context: Context?): TrackingSignal =
+        withTimeoutOrNull(TRACKING_SIGNAL_TIMEOUT_MS) {
+            withContext(Dispatchers.IO) { TrackingSignalReader.read(context) }
+        } ?: TrackingSignal.NOT_DETERMINED.also {
+            ConsentLogger.w("Timed out reading the device ad-tracking signal; treating it as undetermined")
+        }
+
+    /**
      * Sync the current effective consent preferences to the DataGrail Universal Consent store
      * for the given user identifier, for cross-device retrieval (Java-friendly).
      *
@@ -559,10 +584,11 @@ class DataGrailConsent private constructor() {
      * [getSignature] provider — which calls the customer's own backend — and attaches the
      * returned signature/timestamp/keyId as request headers.
      *
-     * Signal reconciliation is applied to the outgoing preferences on-device. The SDK reads this
-     * device's ad-tracking signal itself — you do not pass it in. When the user has opted out of
-     * ad personalization (or the advertising ID has been deleted), non-essential categories are
-     * suppressed before the write. A signal never enables a category.
+     * The read applies this device's ad-tracking signal to LOCAL state; the write carries the
+     * user's RAW preferences. The SDK reads the signal itself — you do not pass it in. A device
+     * signal never changes what is stored cross-device: otherwise opening the app with ad tracking
+     * limited would erase a marketing opt-in the user made on the web, for every device on their
+     * identifier. A signal never enables a category either.
      *
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
@@ -586,15 +612,19 @@ class DataGrailConsent private constructor() {
 
         scope.launch {
             try {
-                // The ad-id lookup is a binder call, so it must not run on the main thread —
-                // and this coroutine is on Dispatchers.Main.
-                val trackingSignal = withContext(Dispatchers.IO) { TrackingSignalReader.read(context) }
+                val trackingSignal = readTrackingSignal(context)
 
                 // READ then WRITE, matching the web SDK's setUserIdentifier flow. Rehydrating
                 // first means the write persists the user's actual cross-device state rather than
                 // clobbering a richer server-side record with whatever this fresh install holds.
+                //
+                // The RAW preferences off the record, when one was found. Rehydration persists the
+                // reconciled view locally, so letting the write fall back to getCategories() would
+                // read that suppressed state back and store it as the user's choice.
+                var rawPreferences: ConsentPreferences? = null
                 try {
-                    if (mgr.rehydrateFromUniversalConsent(identifier, apiKey, trackingSignal)) {
+                    rawPreferences = mgr.rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal)
+                    if (rawPreferences != null) {
                         mgr.getCategories()?.let { onConsentChangedCallback?.invoke(it) }
                     }
                 } catch (e: CancellationException) {
@@ -609,7 +639,7 @@ class DataGrailConsent private constructor() {
                 mgr.setUserIdentifier(
                     identifier = identifier,
                     apiKey = apiKey,
-                    trackingSignal = trackingSignal,
+                    preferences = rawPreferences,
                     getSignature = getSignature,
                 )
                 callback(Result.success(Unit))
@@ -650,7 +680,7 @@ class DataGrailConsent private constructor() {
 
         scope.launch {
             try {
-                val trackingSignal = withContext(Dispatchers.IO) { TrackingSignalReader.read(context) }
+                val trackingSignal = readTrackingSignal(context)
                 callback(Result.success(mgr.fetchUniversalConsent(identifier, apiKey, trackingSignal)))
             } catch (e: Exception) {
                 callback(
@@ -721,7 +751,7 @@ class DataGrailConsent private constructor() {
 
         scope.launch {
             try {
-                val trackingSignal = withContext(Dispatchers.IO) { TrackingSignalReader.read(context) }
+                val trackingSignal = readTrackingSignal(context)
                 val rehydrated = mgr.rehydrateFromUniversalConsent(identifier, apiKey, trackingSignal)
                 if (rehydrated) {
                     mgr.getCategories()?.let { onConsentChangedCallback?.invoke(it) }
