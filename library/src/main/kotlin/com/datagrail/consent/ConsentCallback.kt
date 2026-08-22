@@ -202,6 +202,9 @@ interface RehydrateCallback {
  * `Continuation` internals. This interface exposes the same contract with a plain result callback
  * so Java callers can invoke their backend asynchronously and hand the result back.
  *
+ * See [com.datagrail.consent.models.UniversalConsentSignature] for the exact string-to-sign,
+ * the raw-bytes-secret rule, and the nonce-binding requirement your backend must follow.
+ *
  * Example (Java):
  * ```java
  * SignatureProviderCallback provider = (customerId, userHash, onResult) -> {

@@ -8,12 +8,23 @@ import kotlinx.serialization.Serializable
  *
  * The DataGrail SDK never computes the HMAC itself — the shared secret lives only on the
  * customer's backend and at the DataGrail edge. The customer's backend computes
- * `HMAC-SHA256(secret, "{customerId}:{userHash}:{timestamp}")` and returns the resulting
- * [signature] together with the [keyId] (identifies which secret was used, for rotation) and
- * the [timestamp] (unix seconds) that was signed over. The SDK attaches these as request
- * headers on the universal-consent write.
+ * `HMAC-SHA256(rawSecretBytes, "{customerId}:{userHash}:{timestamp}:{nonce}")` and returns the
+ * resulting [signature] together with the [keyId] (identifies which secret was used, for
+ * rotation) and the [timestamp] (unix seconds) that was signed over. The SDK attaches these as
+ * request headers on the universal-consent write.
  *
- * @property signature Hex-encoded HMAC-SHA256 signature computed by the customer backend.
+ * Two things the edge is strict about, so the backend MUST match them exactly:
+ *  - Secret as raw bytes: the shared secret is 64 hex characters. Decode it to its 32 raw bytes
+ *    and use THOSE as the HMAC key. Do NOT feed the 64-char hex string to the HMAC as ASCII /
+ *    UTF-8 text — that is the single most common signing bug, and every signature computed that
+ *    way fails to verify at the edge.
+ *  - Nonce binding: the 128-bit nonce (32 lowercase hex, fresh per write) is part of the
+ *    string-to-sign AND is sent in the `X-DG-Nonce` header. The value in the signed string and
+ *    the value in the header MUST be identical, or verification fails.
+ *
+ * [signature] is lowercase hex.
+ *
+ * @property signature Lowercase-hex HMAC-SHA256 signature computed by the customer backend.
  * @property keyId Identifier of the HMAC secret used (supports key rotation).
  * @property timestamp Unix timestamp in seconds that the signature was computed over.
  */
@@ -26,8 +37,14 @@ data class UniversalConsentSignature(
 /**
  * Customer-provided signature provider. Invoked by the SDK immediately before a universal
  * consent write. It is a suspend function so the customer can call their own backend on an IO
- * dispatcher. The SDK passes the [customerId] and computed [userHash] so the customer backend
- * can build the exact string-to-sign the edge will recompute.
+ * dispatcher. The SDK passes the [customerId] and computed [userHash]; the backend supplies the
+ * [UniversalConsentSignature.timestamp] it signed over.
+ *
+ * NOTE: the canonical string-to-sign also includes the per-write nonce
+ * (`{customerId}:{userHash}:{timestamp}:{nonce}` — see [UniversalConsentSignature]). This
+ * provider does not yet carry the nonce, so the backend and the SDK cannot currently agree on
+ * one nonce value; making writes verify at the edge requires plumbing the nonce through the
+ * provider (see TRUST-1843 report).
  */
 typealias SignatureProvider = suspend (customerId: String, userHash: String) -> UniversalConsentSignature
 

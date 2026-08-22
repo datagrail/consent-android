@@ -210,6 +210,13 @@ internal class ConsentService(
                 config_version = config.version,
             )
 
+        // TODO(TRUST-1843): the canonical write contract binds a per-write nonce into the
+        // signed string (HMAC over "{customerId}:{userHash}:{timestamp}:{nonce}") and requires
+        // a 128-bit / 32-lowercase-hex nonce. This generates the nonce here, AFTER signing, and
+        // never hands it to the signer, so the value below is not the one the backend signed
+        // over and the edge will reject the signature. The nonce must be generated as 32-hex,
+        // passed to `getSignature`, and the SAME value sent here. Also `UUID.randomUUID()` is
+        // a 36-char hyphenated string, not the required 32-hex form.
         val headers =
             mapOf(
                 "X-DG-Api-Key" to apiKey,
