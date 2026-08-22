@@ -207,11 +207,14 @@ class UniversalConsentTest {
                     universalConsent = UniversalConsentConfig(enabled = true, syncOptout = false),
                 )
 
-            val provider: SignatureProvider = { _, _ ->
+            // Capture the payload the SDK hands the callback so we can assert the SDK-owned
+            // nonce/timestamp are the exact values sent in the headers.
+            var seenPayload: UniversalConsentSigningPayload? = null
+            val provider: SignatureProvider = { payload ->
+                seenPayload = payload
                 UniversalConsentSignature(
                     signature = "deadbeefsig",
                     keyId = "key-1",
-                    timestamp = 1_700_000_000L,
                 )
             }
 
@@ -243,12 +246,37 @@ class UniversalConsentTest {
             assertEquals("https://consent.example.com/universal_consent", urlCaptor.firstValue)
             assertEquals(HTTPMethod.POST, methodCaptor.firstValue)
 
+            assertNotNull("provider was invoked with a payload", seenPayload)
+            val payload = seenPayload!!
             val headers = headersCaptor.firstValue
             assertEquals("dg_live_key", headers["X-DG-Api-Key"])
             assertEquals("deadbeefsig", headers["X-DG-Signature"])
-            assertEquals("1700000000", headers["X-DG-Timestamp"])
             assertEquals("key-1", headers["X-DG-Key-Id"])
-            assertNotNull("nonce present", headers["X-DG-Nonce"])
+
+            // Nonce: 128-bit as 32 lowercase hex, from the SDK (not UUID.randomUUID()).
+            val nonce = headers["X-DG-Nonce"]
+            assertNotNull("nonce present", nonce)
+            assertTrue(
+                "nonce must be 32 lowercase hex, was <$nonce>",
+                nonce!!.matches(Regex("^[0-9a-f]{32}\$")),
+            )
+
+            // The SDK owns the timestamp and nonce: the header values MUST be the same ones it
+            // put in the payload the callback signed over.
+            assertEquals(
+                "timestamp header == signed timestamp",
+                payload.timestamp.toString(),
+                headers["X-DG-Timestamp"],
+            )
+            assertEquals("nonce header == signed nonce", payload.nonce, nonce)
+
+            // The callback received the exact canonical string {cid}:{userHash}:{ts}:{nonce}.
+            assertEquals(
+                "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7:" +
+                    "1fee132c298d615098190e3e75f9c7e05db20d6cff6398f686fcebc67d1d87a4:" +
+                    "${payload.timestamp}:${payload.nonce}",
+                payload.stringToSign,
+            )
 
             // Body carries the golden user_hash and a MAP cookieOptions.
             val body = bodyCaptor.firstValue
@@ -280,8 +308,8 @@ class UniversalConsentTest {
                 preferences = UniversalConsentPreferences(),
                 apiKey = "dg_live_key",
                 ccpaOptout = false,
-                getSignature = { _, _ ->
-                    UniversalConsentSignature("sig", "key-1", 1_700_000_000L)
+                getSignature = { _ ->
+                    UniversalConsentSignature("sig", "key-1")
                 },
             )
 
@@ -310,8 +338,8 @@ class UniversalConsentTest {
             val config =
                 ConsentServiceSecurityTest.createTestConfig().copy(consentProjectId = "proj_abc123")
 
-            val provider: SignatureProvider = { _, _ ->
-                UniversalConsentSignature("sig", "key-1", 1L)
+            val provider: SignatureProvider = { _ ->
+                UniversalConsentSignature("sig", "key-1")
             }
 
             service.saveUniversalConsent(
@@ -346,10 +374,10 @@ class UniversalConsentTest {
 
             var seenCustomerId: String? = null
             var seenUserHash: String? = null
-            val provider: SignatureProvider = { customerId, userHash ->
-                seenCustomerId = customerId
-                seenUserHash = userHash
-                UniversalConsentSignature("sig", "k", 1L)
+            val provider: SignatureProvider = { payload ->
+                seenCustomerId = payload.customerId
+                seenUserHash = payload.userHash
+                UniversalConsentSignature("sig", "k")
             }
 
             service.saveUniversalConsent(
@@ -366,6 +394,39 @@ class UniversalConsentTest {
                 "1fee132c298d615098190e3e75f9c7e05db20d6cff6398f686fcebc67d1d87a4",
                 seenUserHash,
             )
+        }
+
+    @Test
+    fun `limited mode with no callback sends the api key only`() =
+        runTest {
+            // No signing callback configured -> API-key-only write. The signature/timestamp/nonce
+            // headers MUST be absent, not empty.
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            val config =
+                ConsentServiceSecurityTest.createTestConfig().copy(
+                    consentProjectId = "proj_abc123",
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = false),
+                )
+
+            service.saveUniversalConsent(
+                config = config,
+                identifier = "user@example.com",
+                preferences = UniversalConsentPreferences(),
+                apiKey = "dg_live_key",
+                ccpaOptout = false,
+                getSignature = null,
+            )
+
+            val headersCaptor = argumentCaptor<Map<String, String>>()
+            verify(mockNetworkClient).request(any(), any(), anyOrNull(), headersCaptor.capture())
+            val headers = headersCaptor.firstValue
+
+            assertEquals("dg_live_key", headers["X-DG-Api-Key"])
+            assertNull("no signature in limited mode", headers["X-DG-Signature"])
+            assertNull("no timestamp in limited mode", headers["X-DG-Timestamp"])
+            assertNull("no nonce in limited mode", headers["X-DG-Nonce"])
+            assertNull("no key id in limited mode", headers["X-DG-Key-Id"])
         }
 
     @Test

@@ -112,11 +112,10 @@ class DataGrailConsent private constructor() {
          * forever, and the caller's [ConsentCallback] never fires.
          */
         internal fun asSignatureProvider(callback: SignatureProviderCallback): SignatureProvider =
-            { customerId, userHash ->
+            { payload ->
                 suspendCancellableCoroutine { continuation ->
                     callback.getSignature(
-                        customerId,
-                        userHash,
+                        payload,
                         object : SignatureResult {
                             override fun onSignature(signature: UniversalConsentSignature) {
                                 // isActive guards a provider that calls back more than once, or
@@ -580,9 +579,10 @@ class DataGrailConsent private constructor() {
      * The identifier is NOT retained as state — later calls such as [fetchUniversalConsent] and
      * [rehydrateFromUniversalConsent] require it to be passed again.
      *
-     * The SDK does NOT hold or compute the HMAC secret. It invokes the customer-provided
-     * [getSignature] provider — which calls the customer's own backend — and attaches the
-     * returned signature/timestamp/keyId as request headers.
+     * The SDK does NOT hold or compute the HMAC secret. It builds the canonical string-to-sign
+     * (with its own per-write timestamp and nonce) and invokes the customer-provided
+     * [getSignature] provider — which calls the customer's own backend — attaching the returned
+     * signature/keyId plus the SDK's own timestamp and nonce as request headers.
      *
      * The read applies this device's ad-tracking signal to LOCAL state; the write carries the
      * user's RAW preferences. The SDK reads the signal itself — you do not pass it in. A device
@@ -593,7 +593,8 @@ class DataGrailConsent private constructor() {
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
-     * @param getSignature Suspend provider that returns { signature, keyId, timestamp }.
+     * @param getSignature Suspend provider that signs the SDK-built payload and returns
+     *   { signature, keyId }.
      * @param callback Callback with the result.
      */
     fun setUserIdentifier(

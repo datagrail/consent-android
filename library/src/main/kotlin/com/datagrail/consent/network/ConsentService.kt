@@ -6,12 +6,14 @@ import com.datagrail.consent.models.ConsentPreferences
 import com.datagrail.consent.models.SignatureProvider
 import com.datagrail.consent.models.UniversalConsentPreferences
 import com.datagrail.consent.models.UniversalConsentRecord
+import com.datagrail.consent.models.UniversalConsentSigningPayload
 import com.datagrail.consent.storage.ConsentStorage
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.net.URLEncoder
 import java.security.MessageDigest
+import java.security.SecureRandom
 import java.text.Normalizer
 import java.util.Locale
 import java.util.UUID
@@ -114,6 +116,21 @@ internal class ConsentService(
             encodeDefaults = true
         }
 
+    // CSPRNG for the per-write universal-consent nonce. SecureRandom is thread-safe, so a single
+    // shared instance is fine. Not UUID.randomUUID(): that yields a 36-char hyphenated string,
+    // while the canonical contract requires a 128-bit value as 32 lowercase hex.
+    private val secureRandom = SecureRandom()
+
+    /**
+     * Generate the 128-bit universal-consent nonce as 32 lowercase hex characters, per the
+     * canonical cross-SDK write contract (TRUST-1843). 16 CSPRNG bytes -> hex.
+     */
+    private fun generateNonce(): String {
+        val bytes = ByteArray(16)
+        secureRandom.nextBytes(bytes)
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
     private fun encodeParam(value: String): String = URLEncoder.encode(value, "UTF-8")
 
     /**
@@ -166,15 +183,24 @@ internal class ConsentService(
     /**
      * Write a user's universal consent preferences for cross-device retrieval.
      *
-     * POST /universal_consent. The SDK does NOT compute the HMAC — it invokes the customer's
-     * [getSignature] provider (which calls the customer's own backend) and attaches the result
-     * as X-DG-Signature / X-DG-Timestamp (unix seconds) / X-DG-Key-Id headers, plus X-DG-Nonce.
-     * The shared secret never touches the device.
+     * POST /universal_consent. The SDK does NOT compute the HMAC — it builds the canonical
+     * string-to-sign, generates the per-write timestamp (device unix seconds) and nonce (128-bit
+     * CSPRNG value as 32 lowercase hex) ITSELF, and hands them to the customer's [getSignature]
+     * provider inside a [UniversalConsentSigningPayload]. The provider (which calls the
+     * customer's own backend) returns just `{ signature, keyId }`; the SDK attaches those plus
+     * its own timestamp and nonce as the X-DG-Signature / X-DG-Timestamp / X-DG-Nonce /
+     * X-DG-Key-Id headers. The value the backend signs over is exactly the value the SDK sends,
+     * so the edge can verify it. The shared secret never touches the device.
+     *
+     * Limited mode: when [getSignature] is null no signing callback is configured, so the write
+     * goes out with X-DG-Api-Key ONLY — no signature, timestamp, or nonce headers.
      *
      * @param ccpaOptout the user's CCPA/US do-not-sell choice. Only written to the record when
      *   the `universalConsent.syncOptout` feature flag is enabled; otherwise `false`. This is
      *   NOT derived from the device's ad-tracking signal — that signal is narrower than a
      *   do-not-sell choice, so Android currently has no source for this value and passes `false`.
+     * @param getSignature the customer signing callback, or null for a limited-mode
+     *   (API-key-only) write.
      * @throws ConsentException.NetworkError on failure (also queues nothing — universal writes
      *   are user-identity-scoped and not part of the anonymous pending-events retry queue).
      */
@@ -184,16 +210,13 @@ internal class ConsentService(
         preferences: UniversalConsentPreferences,
         apiKey: String,
         ccpaOptout: Boolean,
-        getSignature: SignatureProvider,
+        getSignature: SignatureProvider?,
     ) {
         val projectId =
             config.consentProjectId
                 ?: throw ConsentException.ValidationError("consentProjectId is required for universal consent")
 
         val userHash = computeUserHash(config.dgCustomerId, projectId, identifier)
-
-        // Ask the customer's backend to sign. Secret never leaves their backend.
-        val sig = getSignature(config.dgCustomerId, userHash)
 
         val requestBody =
             UniversalSaveRequest(
@@ -210,21 +233,35 @@ internal class ConsentService(
                 config_version = config.version,
             )
 
-        // TODO(TRUST-1843): the canonical write contract binds a per-write nonce into the
-        // signed string (HMAC over "{customerId}:{userHash}:{timestamp}:{nonce}") and requires
-        // a 128-bit / 32-lowercase-hex nonce. This generates the nonce here, AFTER signing, and
-        // never hands it to the signer, so the value below is not the one the backend signed
-        // over and the edge will reject the signature. The nonce must be generated as 32-hex,
-        // passed to `getSignature`, and the SAME value sent here. Also `UUID.randomUUID()` is
-        // a 36-char hyphenated string, not the required 32-hex form.
         val headers =
-            mapOf(
-                "X-DG-Api-Key" to apiKey,
-                "X-DG-Signature" to sig.signature,
-                "X-DG-Timestamp" to sig.timestamp.toString(),
-                "X-DG-Key-Id" to sig.keyId,
-                "X-DG-Nonce" to UUID.randomUUID().toString(),
-            )
+            if (getSignature == null) {
+                // Limited mode: no signing callback configured -> API-key-only write.
+                mapOf("X-DG-Api-Key" to apiKey)
+            } else {
+                // The SDK owns the timestamp and nonce and binds them into the string the
+                // customer backend signs, so the value the edge verifies is byte-for-byte the
+                // value we send. The nonce is 128-bit / 32 lowercase hex from a CSPRNG.
+                val timestamp = System.currentTimeMillis() / 1000
+                val nonce = generateNonce()
+                val stringToSign = "${config.dgCustomerId}:$userHash:$timestamp:$nonce"
+                val payload =
+                    UniversalConsentSigningPayload(
+                        stringToSign = stringToSign,
+                        customerId = config.dgCustomerId,
+                        userHash = userHash,
+                        timestamp = timestamp,
+                        nonce = nonce,
+                    )
+                // Ask the customer's backend to sign. Secret never leaves their backend.
+                val sig = getSignature(payload)
+                mapOf(
+                    "X-DG-Api-Key" to apiKey,
+                    "X-DG-Signature" to sig.signature,
+                    "X-DG-Timestamp" to timestamp.toString(),
+                    "X-DG-Nonce" to nonce,
+                    "X-DG-Key-Id" to sig.keyId,
+                )
+            }
 
         try {
             networkClient.request(

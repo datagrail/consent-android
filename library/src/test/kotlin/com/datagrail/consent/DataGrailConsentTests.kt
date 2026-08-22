@@ -3,6 +3,7 @@ package com.datagrail.consent
 
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.UniversalConsentSignature
+import com.datagrail.consent.models.UniversalConsentSigningPayload
 import com.datagrail.consent.utils.ConsentLogger
 import com.datagrail.consent.utils.LogLevel
 import kotlinx.coroutines.Dispatchers
@@ -338,11 +339,11 @@ class DataGrailConsentTests {
     @Test
     fun `java signature provider adapter surfaces the signature`() =
         runBlocking {
-            val expected = UniversalConsentSignature("sig", "key-1", 1_700_000_000L)
+            val expected = UniversalConsentSignature("sig", "key-1")
             val provider =
-                DataGrailConsent.asSignatureProvider { _, _, onResult -> onResult.onSignature(expected) }
+                DataGrailConsent.asSignatureProvider { _, onResult -> onResult.onSignature(expected) }
 
-            val actual = provider("cust-1", "hash-1")
+            val actual = provider(samplePayload())
 
             assertEquals(expected, actual)
         }
@@ -353,13 +354,13 @@ class DataGrailConsentTests {
             // Without the onFailure arm, a signing request that fails has no way to report back:
             // the suspended write never resumes and setUserIdentifier's callback never fires.
             val provider =
-                DataGrailConsent.asSignatureProvider { _, _, onResult ->
+                DataGrailConsent.asSignatureProvider { _, onResult ->
                     onResult.onFailure(ConsentException.NetworkError("signing endpoint 503"))
                 }
 
             val error =
                 assertThrows(ConsentException.NetworkError::class.java) {
-                    runBlocking { provider("cust-1", "hash-1") }
+                    runBlocking { provider(samplePayload()) }
                 }
 
             assertTrue(error.message!!.contains("signing endpoint 503"))
@@ -370,32 +371,48 @@ class DataGrailConsentTests {
         runBlocking {
             // A customer provider that reports twice must not crash the app by resuming an
             // already-settled continuation.
-            val expected = UniversalConsentSignature("sig", "key-1", 1_700_000_000L)
+            val expected = UniversalConsentSignature("sig", "key-1")
             val provider =
-                DataGrailConsent.asSignatureProvider { _, _, onResult ->
+                DataGrailConsent.asSignatureProvider { _, onResult ->
                     onResult.onSignature(expected)
                     onResult.onFailure(ConsentException.NetworkError("late failure, ignored"))
                     onResult.onSignature(expected)
                 }
 
-            assertEquals(expected, provider("cust-1", "hash-1"))
+            assertEquals(expected, provider(samplePayload()))
         }
 
     @Test
-    fun `java signature provider adapter passes customer id and user hash through`() =
+    fun `java signature provider adapter passes the signing payload through`() =
         runBlocking {
-            var seenCustomerId: String? = null
-            var seenUserHash: String? = null
+            var seenPayload: UniversalConsentSigningPayload? = null
             val provider =
-                DataGrailConsent.asSignatureProvider { customerId, userHash, onResult ->
-                    seenCustomerId = customerId
-                    seenUserHash = userHash
-                    onResult.onSignature(UniversalConsentSignature("sig", "key-1", 1L))
+                DataGrailConsent.asSignatureProvider { payload, onResult ->
+                    seenPayload = payload
+                    onResult.onSignature(UniversalConsentSignature("sig", "key-1"))
                 }
 
-            provider("ac46d8ad-a67a-431f-a5d5-9e3eb922dae7", "1fee132c")
+            val payload =
+                samplePayload(
+                    customerId = "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
+                    userHash = "1fee132c",
+                )
+            provider(payload)
 
-            assertEquals("ac46d8ad-a67a-431f-a5d5-9e3eb922dae7", seenCustomerId)
-            assertEquals("1fee132c", seenUserHash)
+            assertEquals(payload, seenPayload)
         }
+
+    private fun samplePayload(
+        customerId: String = "cust-1",
+        userHash: String = "hash-1",
+        timestamp: Long = 1_700_000_000L,
+        nonce: String = "0123456789abcdef0123456789abcdef",
+    ): UniversalConsentSigningPayload =
+        UniversalConsentSigningPayload(
+            stringToSign = "$customerId:$userHash:$timestamp:$nonce",
+            customerId = customerId,
+            userHash = userHash,
+            timestamp = timestamp,
+            nonce = nonce,
+        )
 }

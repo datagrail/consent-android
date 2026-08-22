@@ -4,6 +4,7 @@ import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
 import com.datagrail.consent.models.UniversalConsentRecord
 import com.datagrail.consent.models.UniversalConsentSignature
+import com.datagrail.consent.models.UniversalConsentSigningPayload
 
 /**
  * Java Interoperability Callback Interfaces
@@ -202,26 +203,32 @@ interface RehydrateCallback {
  * `Continuation` internals. This interface exposes the same contract with a plain result callback
  * so Java callers can invoke their backend asynchronously and hand the result back.
  *
- * See [com.datagrail.consent.models.UniversalConsentSignature] for the exact string-to-sign,
- * the raw-bytes-secret rule, and the nonce-binding requirement your backend must follow.
+ * The SDK builds the canonical string-to-sign and owns the per-write timestamp and nonce; it
+ * hands them to you in a [UniversalConsentSigningPayload]. Your backend computes
+ * `HMAC-SHA256(rawBytes(secretHex), payload.stringToSign)` and reports back a
+ * [UniversalConsentSignature] carrying only the signature and keyId — do NOT return a timestamp
+ * or nonce, and sign [UniversalConsentSigningPayload.stringToSign] verbatim. See
+ * [com.datagrail.consent.models.UniversalConsentSignature] and
+ * [com.datagrail.consent.models.UniversalConsentSigningPayload] for the raw-bytes-secret rule
+ * and the sign-verbatim requirement your backend must follow.
  *
  * Example (Java):
  * ```java
- * SignatureProviderCallback provider = (customerId, userHash, onResult) -> {
- *     // call your backend, then EXACTLY ONE of:
- *     onResult.onSignature(new UniversalConsentSignature(signature, keyId, timestamp));
+ * SignatureProviderCallback provider = (payload, onResult) -> {
+ *     // HMAC-SHA256(rawBytes(secretHex), payload.getStringToSign()) on your backend, then
+ *     // EXACTLY ONE of:
+ *     onResult.onSignature(new UniversalConsentSignature(signature, keyId));
  *     onResult.onFailure(new ConsentException.NetworkError("signing endpoint unreachable", e));
  * };
  * ```
  */
 fun interface SignatureProviderCallback {
     /**
-     * Compute a signature for the given [customerId] and [userHash], then invoke [onResult] with
-     * the signature material. May be called from a background thread.
+     * Sign the SDK-built [UniversalConsentSigningPayload], then invoke [onResult] with the
+     * resulting signature material. May be called from a background thread.
      */
     fun getSignature(
-        customerId: String,
-        userHash: String,
+        payload: UniversalConsentSigningPayload,
         onResult: SignatureResult,
     )
 }

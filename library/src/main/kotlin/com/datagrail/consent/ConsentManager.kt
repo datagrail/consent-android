@@ -363,13 +363,14 @@ internal class ConsentManager(
      * @param preferences The preferences to write; defaults to the current stored preferences.
      *   Callers that just rehydrated MUST pass the raw record explicitly, since rehydration
      *   persists the reconciled view locally.
-     * @param getSignature Customer-provided signature provider (calls their backend).
+     * @param getSignature Customer-provided signature provider (calls their backend), or null for
+     *   a limited-mode (API-key-only) write with no signature/timestamp/nonce headers.
      */
     suspend fun setUserIdentifier(
         identifier: String,
         apiKey: String,
         preferences: ConsentPreferences? = null,
-        getSignature: SignatureProvider,
+        getSignature: SignatureProvider? = null,
     ) {
         val config = currentConfig ?: throw ConsentException.NotInitialized()
         if (!isUniversalConsentEnabled()) {

@@ -698,7 +698,7 @@ class ConsentManagerTests {
     // MARK: - Helper Methods
 
     private fun signatureProvider(): SignatureProvider =
-        { _, _ -> UniversalConsentSignature("sig", "key-1", 1_700_000_000L) }
+        { _ -> UniversalConsentSignature("sig", "key-1") }
 
     private fun universalConfig(categories: List<MockCategory>): ConsentConfig =
         createMockConfig(categories).copy(
