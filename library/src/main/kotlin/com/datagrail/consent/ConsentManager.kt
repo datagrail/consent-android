@@ -12,6 +12,8 @@ import com.datagrail.consent.models.UniversalConsentRecord
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
+import com.datagrail.consent.utils.ConsentLogger
+import kotlinx.coroutines.CancellationException
 
 /**
  * Manages consent state and coordinates between storage, network, and configuration
@@ -360,40 +362,70 @@ internal class ConsentManager(
     }
 
     /**
-     * Write the current effective consent preferences to the universal consent store for the
-     * given user identifier. This performs an immediate one-shot write; the identifier is NOT
-     * retained as manager state, so subsequent operations (e.g. [fetchUniversalConsent]) must
-     * pass the identifier again.
+     * Associate a user identifier with their cross-device consent, READING then WRITING the
+     * universal consent store in one coordinated operation. This is the headline invariant of the
+     * feature and it lives here, in the coordinator, not in the public singleton adapter.
      *
-     * Writes the RAW preferences. The tracking signal is deliberately NOT applied here: the store
-     * holds raw choices and the server never merges, so suppressing before a write would persist
-     * this device's transient signal as the user's choice — permanently, for every device on this
-     * identifier. Limit-ad-tracking is an ad-personalization answer, not a marketing opt-out:
-     * someone who opted in on the web and then opens the app with ad tracking limited must not have
-     * that opt-in erased. Suppression is a read-time view (see [SignalReconciliation], applied by
-     * [fetchUniversalConsent] and [rehydrateReturningRawPreferences]).
+     * READ first: [rehydrateReturningRawPreferences] pulls any existing record, applies it to local
+     * state, and hands back the record's RAW preferences. Rehydrating first means the subsequent
+     * write persists the user's actual cross-device state rather than clobbering a richer
+     * server-side record with whatever this (possibly fresh) install happens to hold.
      *
-     * Requires universal consent to be enabled in the loaded config; throws
-     * [ConsentException.ValidationError] otherwise.
+     * A read failure does NOT block the write: a user who just answered the banner still needs
+     * their choice saved, so a failed rehydrate is swallowed (and logged) and the write proceeds
+     * from local state. [CancellationException] is rethrown so structured concurrency is preserved.
+     *
+     * WRITE carries the RAW preferences. When a record was rehydrated its raw preferences are used
+     * — NOT [getCategories], which would read back the reconciled/suppressed view rehydration just
+     * persisted and store that as the user's choice. The tracking signal is never applied to the
+     * write: the store holds raw choices and the server never merges, so suppressing before a write
+     * would persist this device's transient signal for every device on this identifier.
+     * Limit-ad-tracking is an ad-personalization answer, not a marketing opt-out. Suppression is a
+     * read-time view (see [SignalReconciliation]).
+     *
+     * The identifier is NOT retained as manager state, so subsequent operations (e.g.
+     * [fetchUniversalConsent]) must pass it again. Requires universal consent to be enabled AND
+     * configured; throws [ConsentException.ValidationError]/[ConsentException.NotInitialized]
+     * otherwise, before any request reaches the service.
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
      *   before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
-     * @param preferences The preferences to write; defaults to the current stored preferences.
-     *   Callers that just rehydrated MUST pass the raw record explicitly, since rehydration
-     *   persists the reconciled view locally.
+     * @param trackingSignal This device's live signal, applied only to the LOCAL read/rehydration.
+     *   Read from the OS by the public adapter; defaults to [TrackingSignal.NOT_DETERMINED].
      * @param getSignature Customer-provided signature provider (calls their backend), or null for
      *   a limited-mode (API-key-only) write with no signature/timestamp/nonce headers.
+     * @param onRehydrated Invoked with the effective local preferences when — and only when — a
+     *   record was rehydrated, so the adapter can notify its consent-changed listener.
      */
     suspend fun setUserIdentifier(
         identifier: String,
         apiKey: String,
-        preferences: ConsentPreferences? = null,
+        trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
         getSignature: SignatureProvider? = null,
+        onRehydrated: ((ConsentPreferences) -> Unit)? = null,
     ) {
         val config = requireUniversalConsentReady()
 
-        val current = preferences ?: getCategories() ?: getDefaultPreferences()
+        // READ then WRITE. The raw preferences off the rehydrated record are what the write must
+        // carry; rehydration persists the reconciled view locally, so falling back to
+        // getCategories() when a record exists would store that suppression as the user's choice.
+        var rawPreferences: ConsentPreferences? = null
+        try {
+            rawPreferences = rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal)
+            if (rawPreferences != null) {
+                getCategories()?.let { onRehydrated?.invoke(it) }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // A read failure must not block the write — a user who just answered the banner still
+            // needs their choice saved. Swallowed deliberately, logged so a persistently failing
+            // read stays diagnosable.
+            ConsentLogger.w("universal consent rehydrate failed, continuing to write: ${e.message}")
+        }
+
+        val current = rawPreferences ?: getCategories() ?: getDefaultPreferences()
         val rawMap =
             current?.cookieOptions?.associate { it.gtmKey to it.isEnabled } ?: emptyMap()
 

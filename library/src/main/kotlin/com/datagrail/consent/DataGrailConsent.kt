@@ -613,35 +613,18 @@ class DataGrailConsent private constructor() {
 
         scope.launch {
             try {
+                // Read this device's live signal (the manager applies it only to the local
+                // rehydration), then hand the whole READ-then-WRITE sequence to the manager, which
+                // owns the invariant. This adapter stays a thin scope.launch wrapper like its
+                // siblings; the compound flow and its read-failure handling live in ConsentManager
+                // where they are unit-tested.
                 val trackingSignal = readTrackingSignal(context)
-
-                // READ then WRITE, matching the web SDK's setUserIdentifier flow. Rehydrating
-                // first means the write persists the user's actual cross-device state rather than
-                // clobbering a richer server-side record with whatever this fresh install holds.
-                //
-                // The RAW preferences off the record, when one was found. Rehydration persists the
-                // reconciled view locally, so letting the write fall back to getCategories() would
-                // read that suppressed state back and store it as the user's choice.
-                var rawPreferences: ConsentPreferences? = null
-                try {
-                    rawPreferences = mgr.rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal)
-                    if (rawPreferences != null) {
-                        mgr.getCategories()?.let { onConsentChangedCallback?.invoke(it) }
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    // A read failure must not block the write — a user who just answered the
-                    // banner still needs their choice saved. Swallowed deliberately, and logged
-                    // so a persistently failing read is still diagnosable.
-                    ConsentLogger.w("universal consent rehydrate failed, continuing to write: ${e.message}")
-                }
-
                 mgr.setUserIdentifier(
                     identifier = identifier,
                     apiKey = apiKey,
-                    preferences = rawPreferences,
+                    trackingSignal = trackingSignal,
                     getSignature = getSignature,
+                    onRehydrated = { prefs -> onConsentChangedCallback?.invoke(prefs) },
                 )
                 callback(Result.success(Unit))
             } catch (e: Exception) {
