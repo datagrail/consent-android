@@ -254,6 +254,10 @@ internal class ConsentService(
                     UniversalConsentSigningPayload(
                         stringToSign = stringToSign,
                         customerId = config.dgCustomerId,
+                        // The RAW identifier, so the backend can bind signing to its authenticated
+                        // session and recompute the hash itself rather than blindly signing a
+                        // client-supplied userHash for whoever the caller named.
+                        identifier = identifier,
                         userHash = userHash,
                         timestamp = timestamp,
                         nonce = nonce,

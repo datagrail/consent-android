@@ -427,6 +427,7 @@ class DataGrailConsentTests {
 
     private fun samplePayload(
         customerId: String = "cust-1",
+        identifier: String = "user@example.com",
         userHash: String = "hash-1",
         timestamp: Long = 1_700_000_000L,
         nonce: String = "0123456789abcdef0123456789abcdef",
@@ -434,6 +435,7 @@ class DataGrailConsentTests {
         UniversalConsentSigningPayload(
             stringToSign = "$customerId:$userHash:$timestamp:$nonce",
             customerId = customerId,
+            identifier = identifier,
             userHash = userHash,
             timestamp = timestamp,
             nonce = nonce,
