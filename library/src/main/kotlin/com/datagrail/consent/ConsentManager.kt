@@ -209,6 +209,29 @@ internal class ConsentManager(
     }
 
     /**
+     * The single source of truth for signal reconciliation on a fetched record.
+     *
+     * Both [fetchUniversalConsent] (which hands the reconciled record back to a caller) and
+     * [rehydrateReturningRawPreferences] (which persists the reconciled view to local storage)
+     * MUST produce a byte-identical reconciled map for the same record — one drives what a caller
+     * acts on directly, the other drives [isCategoryEnabled] / [needsConsent]. Keeping the suppress
+     * predicate (`record.gpc || trackingSignal.suppressesNonEssential`) and the essential-key set in
+     * one place stops the two paths from silently disagreeing about the effective consent state.
+     */
+    private fun reconciledCookieOptions(
+        record: UniversalConsentRecord,
+        trackingSignal: TrackingSignal,
+    ): Map<String, Boolean> =
+        SignalReconciliation.reconcile(
+            cookieOptions = record.consentPreferences?.cookieOptions ?: emptyMap(),
+            // Either signal suppresses. The stored `gpc` came from the web, the tracking signal
+            // from this device; the most privacy-protective of the two wins, and neither can
+            // re-enable what the other suppressed.
+            suppress = record.gpc || trackingSignal.suppressesNonEssential,
+            essentialKeys = getEssentialCategories().toSet(),
+        )
+
+    /**
      * Fetch the user's universal consent record and reconcile opt-out signals on-device.
      *
      * The server returns raw, unreconciled data. This method applies mandatory client-side
@@ -239,17 +262,9 @@ internal class ConsentManager(
         val record = consentService.getUniversalConsent(config, identifier, apiKey) ?: return null
 
         val prefs = record.consentPreferences ?: return record
-        val essentialKeys = getEssentialCategories().toSet()
-        val reconciled =
-            SignalReconciliation.reconcile(
-                cookieOptions = prefs.cookieOptions,
-                // Either signal suppresses. The stored `gpc` came from the web, the tracking
-                // signal from this device; the most privacy-protective of the two wins, and
-                // neither can re-enable what the other suppressed.
-                suppress = record.gpc || trackingSignal.suppressesNonEssential,
-                essentialKeys = essentialKeys,
-            )
-        return record.copy(consentPreferences = prefs.copy(cookieOptions = reconciled))
+        return record.copy(
+            consentPreferences = prefs.copy(cookieOptions = reconciledCookieOptions(record, trackingSignal)),
+        )
     }
 
     /**
@@ -317,15 +332,10 @@ internal class ConsentManager(
                 cookieOptions = rawCookieOptions.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
             )
 
-        // Local state gets the RECONCILED view — either signal suppresses. The stored `gpc` came
-        // from the web, the tracking signal from this device; neither can re-enable what the other
-        // suppressed.
-        val reconciled =
-            SignalReconciliation.reconcile(
-                cookieOptions = rawCookieOptions,
-                suppress = record.gpc || trackingSignal.suppressesNonEssential,
-                essentialKeys = getEssentialCategories().toSet(),
-            )
+        // Local state gets the RECONCILED view. Shares the exact reconciliation policy with
+        // fetchUniversalConsent via reconciledCookieOptions, so the persisted state and the
+        // returned record can never disagree about what a signal suppresses.
+        val reconciled = reconciledCookieOptions(record, trackingSignal)
         storage.savePreferences(
             ConsentPreferences(
                 isCustomised = true,
