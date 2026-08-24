@@ -209,6 +209,21 @@ internal class ConsentManager(
     }
 
     /**
+     * Gate every universal-consent entry point on one predicate. Fails fast with
+     * [ConsentException.NotInitialized] when there is no config and
+     * [ConsentException.ValidationError] when universal consent is not both enabled and configured
+     * (see [ConsentConfig.universalConsentReady]), so the network layer never has to re-discover a
+     * missing `consentProjectId` mid-write.
+     */
+    private fun requireUniversalConsentReady(): ConsentConfig {
+        val config = currentConfig ?: throw ConsentException.NotInitialized()
+        if (!config.universalConsentReady) {
+            throw ConsentException.ValidationError("Universal consent is not enabled for this configuration")
+        }
+        return config
+    }
+
+    /**
      * The single source of truth for signal reconciliation on a fetched record.
      *
      * Both [fetchUniversalConsent] (which hands the reconciled record back to a caller) and
@@ -255,10 +270,7 @@ internal class ConsentManager(
         apiKey: String,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
     ): UniversalConsentRecord? {
-        val config = currentConfig ?: throw ConsentException.NotInitialized()
-        if (!isUniversalConsentEnabled()) {
-            throw ConsentException.ValidationError("Universal consent is not enabled for this configuration")
-        }
+        val config = requireUniversalConsentReady()
         val record = consentService.getUniversalConsent(config, identifier, apiKey) ?: return null
 
         val prefs = record.consentPreferences ?: return record
@@ -310,10 +322,7 @@ internal class ConsentManager(
         apiKey: String,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
     ): ConsentPreferences? {
-        val config = currentConfig ?: throw ConsentException.NotInitialized()
-        if (!isUniversalConsentEnabled()) {
-            throw ConsentException.ValidationError("Universal consent is not enabled for this configuration")
-        }
+        val config = requireUniversalConsentReady()
 
         // Goes to the service directly rather than through fetchUniversalConsent, which returns an
         // already-reconciled record. Both views are needed here: the reconciled one to persist
@@ -382,10 +391,7 @@ internal class ConsentManager(
         preferences: ConsentPreferences? = null,
         getSignature: SignatureProvider? = null,
     ) {
-        val config = currentConfig ?: throw ConsentException.NotInitialized()
-        if (!isUniversalConsentEnabled()) {
-            throw ConsentException.ValidationError("Universal consent is not enabled for this configuration")
-        }
+        val config = requireUniversalConsentReady()
 
         val current = preferences ?: getCategories() ?: getDefaultPreferences()
         val rawMap =

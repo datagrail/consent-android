@@ -498,6 +498,27 @@ class ConsentManagerTests {
             verifyNoInteractions(mockConsentService)
         }
 
+    @Test
+    fun `setUserIdentifier rejects when enabled but consentProjectId is missing`() =
+        runTest {
+            // enabled=true with a null consentProjectId is a live misconfiguration: both fields are
+            // independently nullable. The single universalConsentReady gate must reject it here,
+            // BEFORE any request reaches the service and fails deep in the network layer instead.
+            sut.currentConfig =
+                createBaseConfig().copy(
+                    consentProjectId = null,
+                    universalConsent = UniversalConsentConfig(enabled = true),
+                )
+
+            assertThrows(ConsentException.ValidationError::class.java) {
+                runBlocking {
+                    sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+                }
+            }
+
+            verifyNoInteractions(mockConsentService)
+        }
+
     /**
      * The write carries the RAW preferences it was given, never a signal-suppressed view.
      *
