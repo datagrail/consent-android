@@ -2,6 +2,7 @@
 package com.datagrail.consent
 
 import com.datagrail.consent.models.ConsentException
+import com.datagrail.consent.models.TrackingSignal
 import com.datagrail.consent.models.UniversalConsentSignature
 import com.datagrail.consent.models.UniversalConsentSigningPayload
 import com.datagrail.consent.utils.ConsentLogger
@@ -400,6 +401,28 @@ class DataGrailConsentTests {
             provider(payload)
 
             assertEquals(payload, seenPayload)
+        }
+
+    @Test
+    fun `readTrackingSignalBounded interrupts a wedged read and falls back within the timeout`() =
+        runBlocking {
+            // Simulates a wedged Play Services binder call: a reader that blocks far past the
+            // timeout. runInterruptible must convert the deadline into a thread interrupt so the
+            // bound actually fires — a cooperative timeout alone cannot interrupt a blocking call,
+            // and structured concurrency would otherwise wait the full 10s for the body to return.
+            val start = System.currentTimeMillis()
+            val signal =
+                sut.readTrackingSignalBounded(timeoutMs = 100L) {
+                    Thread.sleep(10_000)
+                    TrackingSignal.AUTHORIZED
+                }
+            val elapsed = System.currentTimeMillis() - start
+
+            assertEquals(TrackingSignal.NOT_DETERMINED, signal)
+            assertTrue(
+                "bound must fire near the timeout, not wait for the blocking read (elapsed=$elapsed ms)",
+                elapsed < 5_000L,
+            )
         }
 
     private fun samplePayload(

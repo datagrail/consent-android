@@ -22,6 +22,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -537,8 +538,30 @@ class DataGrailConsent private constructor() {
      * signal is not a refusal, so nothing is suppressed on its account.
      */
     private suspend fun readTrackingSignal(context: Context?): TrackingSignal =
-        withTimeoutOrNull(TRACKING_SIGNAL_TIMEOUT_MS) {
-            withContext(Dispatchers.IO) { TrackingSignalReader.read(context) }
+        readTrackingSignalBounded { TrackingSignalReader.read(context) }
+
+    /**
+     * Bound a blocking tracking-signal read so a wedged Play Services cannot hang the universal
+     * consent entry points forever.
+     *
+     * The read runs inside [runInterruptible] on [Dispatchers.IO]. `withTimeoutOrNull` enforces its
+     * deadline by cancelling the coroutine, and cancellation is COOPERATIVE — a thread parked in the
+     * reflective `getAdvertisingIdInfo` binder call (which has no suspension points) would never
+     * observe it, so structured concurrency would keep `withContext` from returning until that
+     * blocking call finished on its own and the bound would not actually fire. [runInterruptible]
+     * turns the cancellation into a THREAD INTERRUPT, so the blocking call is interrupted at the
+     * deadline. On timeout we fall back to [TrackingSignal.NOT_DETERMINED] — the same value an
+     * unreadable signal produces — so a timeout suppresses nothing.
+     *
+     * Internal (not private) and timeout-parameterised so a test with a blocking reader can assert
+     * the bound fires without waiting the full production timeout.
+     */
+    internal suspend fun readTrackingSignalBounded(
+        timeoutMs: Long = TRACKING_SIGNAL_TIMEOUT_MS,
+        read: () -> TrackingSignal,
+    ): TrackingSignal =
+        withTimeoutOrNull(timeoutMs) {
+            withContext(Dispatchers.IO) { runInterruptible { read() } }
         } ?: TrackingSignal.NOT_DETERMINED.also {
             ConsentLogger.w("Timed out reading the device ad-tracking signal; treating it as undetermined")
         }
