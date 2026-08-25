@@ -633,6 +633,66 @@ class DataGrailConsent private constructor() {
         getSignature: SignatureProvider,
         callback: (Result<Unit>) -> Unit,
     ) {
+        launchSetUserIdentifier(identifier, apiKey, getSignature, callback)
+    }
+
+    /**
+     * Sync the current effective consent preferences to the DataGrail Universal Consent store
+     * for the given user identifier, without a signature (limited, API-key-only) (Kotlin-friendly).
+     *
+     * Same READ-then-WRITE flow as the signed overload, but omits [getSignature]: the write carries
+     * only the customer's API key, with no X-DG-Signature / X-DG-Timestamp / X-DG-Nonce / X-DG-Key-Id
+     * headers. Per the shared cross-SDK contract, omitting getSignature performs a limited,
+     * API-key-only write. Use the signed overloads when you have a signing backend; this exists for
+     * customers who do not yet.
+     *
+     * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
+     *   lowercase) before hashing, per the canonical cross-SDK contract.
+     * @param apiKey The customer's DataGrail API key.
+     * @param callback Callback with the result.
+     */
+    fun setUserIdentifier(
+        identifier: String,
+        apiKey: String,
+        callback: (Result<Unit>) -> Unit,
+    ) {
+        launchSetUserIdentifier(identifier, apiKey, getSignature = null, callback = callback)
+    }
+
+    /**
+     * Sync the current effective consent preferences to the DataGrail Universal Consent store
+     * for the given user identifier, without a signature (limited, API-key-only) (Java-friendly).
+     *
+     * Thin adapter over the Kotlin lambda overload. Performs an API-key-only write with no signature
+     * headers — the limited mode of the shared cross-SDK contract.
+     *
+     * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
+     *   lowercase) before hashing, per the canonical cross-SDK contract.
+     * @param apiKey The customer's DataGrail API key.
+     * @param callback Callback interface for success/failure.
+     */
+    fun setUserIdentifier(
+        identifier: String,
+        apiKey: String,
+        callback: ConsentCallback,
+    ) {
+        setUserIdentifier(identifier, apiKey) { result -> adaptResult(result, callback) }
+    }
+
+    /**
+     * Shared READ-then-WRITE launcher for every [setUserIdentifier] overload. A null [getSignature]
+     * selects the limited, API-key-only write (no signature headers); a non-null one signs the
+     * write. Reads this device's live signal (the manager applies it only to the local rehydration),
+     * then hands the whole READ-then-WRITE sequence to the manager, which owns the invariant. Stays
+     * a thin scope.launch wrapper like its siblings; the compound flow and its read-failure handling
+     * live in ConsentManager where they are unit-tested.
+     */
+    private fun launchSetUserIdentifier(
+        identifier: String,
+        apiKey: String,
+        getSignature: SignatureProvider?,
+        callback: (Result<Unit>) -> Unit,
+    ) {
         val mgr = manager
         if (mgr == null) {
             callback(Result.failure(ConsentException.NotInitialized()))
@@ -643,11 +703,6 @@ class DataGrailConsent private constructor() {
 
         scope.launch {
             try {
-                // Read this device's live signal (the manager applies it only to the local
-                // rehydration), then hand the whole READ-then-WRITE sequence to the manager, which
-                // owns the invariant. This adapter stays a thin scope.launch wrapper like its
-                // siblings; the compound flow and its read-failure handling live in ConsentManager
-                // where they are unit-tested.
                 val trackingSignal = readTrackingSignal(context)
                 mgr.setUserIdentifier(
                     identifier = identifier,

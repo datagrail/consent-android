@@ -14,6 +14,7 @@ import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
+import org.mockito.kotlin.isNull
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoInteractions
 import org.mockito.kotlin.whenever
@@ -785,6 +786,46 @@ class ConsentManagerTests {
             )
 
             assertEquals(true, prefsCaptor.firstValue.cookieOptions["category_marketing"])
+        }
+
+    /**
+     * The public API-key-only overload (DataGrailConsent.setUserIdentifier without getSignature)
+     * delegates here with getSignature = null — the limited mode of the shared cross-SDK contract:
+     * "omitting getSignature performs a limited, API-key-only write (no signature headers)". The
+     * null must reach saveUniversalConsent verbatim so ConsentService sends no signature headers.
+     */
+    @Test
+    fun `setUserIdentifier without a signature performs an api-key-only write`() =
+        runTest {
+            sut.currentConfig =
+                universalConfig(
+                    listOf(
+                        MockCategory("category_essential", alwaysOn = true),
+                        MockCategory("category_marketing", alwaysOn = false),
+                    ),
+                )
+            whenever(mockStorage.loadPreferences()).thenReturn(
+                ConsentPreferences(
+                    isCustomised = true,
+                    cookieOptions =
+                        listOf(
+                            CategoryConsent(gtmKey = "category_essential", isEnabled = true),
+                            CategoryConsent(gtmKey = "category_marketing", isEnabled = true),
+                        ),
+                ),
+            )
+
+            // getSignature omitted — the unsigned public path.
+            sut.setUserIdentifier("user@example.com", "dg_key")
+
+            verify(mockConsentService).saveUniversalConsent(
+                any(),
+                eq("user@example.com"),
+                any(),
+                eq("dg_key"),
+                eq(false),
+                isNull(),
+            )
         }
 
     @Test
