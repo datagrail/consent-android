@@ -139,6 +139,15 @@ class DataGrailConsent private constructor() {
                 }
             }
 
+        /**
+         * Map any throwable onto a [ConsentException], preserving one that already is and wrapping
+         * anything else as [ConsentException.NetworkError] with the cause attached. Single source
+         * for the mapping every universal-consent entry point and callback arm applies, so a future
+         * change to how non-ConsentException errors are wrapped happens in one place.
+         */
+        internal fun toConsentException(error: Throwable): ConsentException =
+            error as? ConsentException ?: ConsentException.NetworkError(error.message ?: "Unknown error", error)
+
         internal fun adaptResult(
             result: Result<Unit>,
             callback: ConsentCallback,
@@ -147,7 +156,7 @@ class DataGrailConsent private constructor() {
                 onSuccess = { callback.onSuccess() },
                 onFailure = { error ->
                     callback.onFailure(
-                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
+                        toConsentException(error),
                     )
                 },
             )
@@ -721,7 +730,7 @@ class DataGrailConsent private constructor() {
             } catch (e: Exception) {
                 callback(
                     Result.failure(
-                        if (e is ConsentException) e else ConsentException.NetworkError(e.message ?: "Unknown error", e),
+                        toConsentException(e),
                     ),
                 )
             }
@@ -764,7 +773,7 @@ class DataGrailConsent private constructor() {
             } catch (e: Exception) {
                 callback(
                     Result.failure(
-                        if (e is ConsentException) e else ConsentException.NetworkError(e.message ?: "Unknown error", e),
+                        toConsentException(e),
                     ),
                 )
             }
@@ -792,7 +801,7 @@ class DataGrailConsent private constructor() {
                 onSuccess = { record -> callback.onSuccess(record) },
                 onFailure = { error ->
                     callback.onFailure(
-                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
+                        toConsentException(error),
                     )
                 },
             )
@@ -843,7 +852,7 @@ class DataGrailConsent private constructor() {
             } catch (e: Exception) {
                 callback(
                     Result.failure(
-                        if (e is ConsentException) e else ConsentException.NetworkError(e.message ?: "Unknown error", e),
+                        toConsentException(e),
                     ),
                 )
             }
@@ -871,7 +880,7 @@ class DataGrailConsent private constructor() {
                 onSuccess = { rehydrated -> callback.onSuccess(rehydrated) },
                 onFailure = { error ->
                     callback.onFailure(
-                        if (error is ConsentException) error else ConsentException.NetworkError(error.message ?: "Unknown error", error),
+                        toConsentException(error),
                     )
                 },
             )
