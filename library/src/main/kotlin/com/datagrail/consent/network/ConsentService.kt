@@ -8,6 +8,9 @@ import com.datagrail.consent.models.UniversalConsentPreferences
 import com.datagrail.consent.models.UniversalConsentRecord
 import com.datagrail.consent.models.UniversalConsentSigningPayload
 import com.datagrail.consent.storage.ConsentStorage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -43,19 +46,22 @@ internal class ConsentService(
     // truth for the wire shape, shared with the read path) so the two paths cannot drift.
     @Serializable
     private data class UniversalSaveRequest(
-        val customer_id: String,
-        val user_hash: String,
-        val consent_preferences: UniversalConsentPreferences,
-        val consent_mode: String,
-        val ccpa_optout: Boolean,
+        @SerialName("customer_id") val customerId: String,
+        @SerialName("user_hash") val userHash: String,
+        @SerialName("consent_preferences") val consentPreferences: UniversalConsentPreferences,
+        @SerialName("consent_mode") val consentMode: String,
+        @SerialName("ccpa_optout") val ccpaOptout: Boolean,
         val platform: String,
-        val policy_name: String,
-        val config_version: String,
+        @SerialName("policy_name") val policyName: String,
+        @SerialName("config_version") val configVersion: String,
     )
 
     companion object {
         private const val MAX_PENDING_EVENTS = 100
         private const val PLATFORM = "android"
+
+        /** Lowercase-hex encode a byte array. Single source for both the user_hash and nonce. */
+        private fun toHex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
 
         /**
          * Normalize a user identifier before hashing: Unicode NFC → trim → lowercase.
@@ -101,7 +107,7 @@ internal class ConsentService(
             val input = "$dgCustomerId:$consentProjectId:$normalized"
             val digest = MessageDigest.getInstance("SHA-256")
             val hashBytes = digest.digest(input.toByteArray(Charsets.UTF_8))
-            return hashBytes.joinToString("") { "%02x".format(it) }
+            return toHex(hashBytes)
         }
     }
 
@@ -128,7 +134,7 @@ internal class ConsentService(
     private fun generateNonce(): String {
         val bytes = ByteArray(16)
         secureRandom.nextBytes(bytes)
-        return bytes.joinToString("") { "%02x".format(it) }
+        return toHex(bytes)
     }
 
     private fun encodeParam(value: String): String = URLEncoder.encode(value, "UTF-8")
@@ -157,7 +163,10 @@ internal class ConsentService(
      * before acting on it (see [SignalReconciliation]).
      *
      * @return the parsed record, or null when the server responds `{ "status": "not_found" }`.
-     * @throws ConsentException.NetworkError on network/parse failure.
+     * @throws ConsentException.NetworkError on network/parse failure, or on any status that is
+     *   neither `found` nor `not_found` — an unrecognized status is an ambiguous read, not a clean
+     *   miss, and treating it as a miss would let the read-then-write path overwrite a record we
+     *   could not actually read (the TRUST-2491 corruption class). A read failure must block the write.
      */
     suspend fun getUniversalConsent(
         config: ConsentConfig,
@@ -180,7 +189,13 @@ internal class ConsentService(
                     headers = mapOf("X-DG-Api-Key" to apiKey),
                 )
             val record = json.decodeFromString<UniversalConsentRecord>(response)
-            return if (record.isFound) record else null
+            if (record.isFound) return record
+            // Only the documented "not_found" is a genuine miss. Any other status (a degraded/error
+            // string, or a future value this SDK version predates) is an ambiguous read: returning
+            // null here would let the caller adopt-and-write over a record it never read. Fail loud
+            // so the read failure blocks the write instead.
+            if (record.status == "not_found") return null
+            throw ConsentException.NetworkError("Unexpected universal consent status: ${record.status}")
         } catch (e: ConsentException) {
             throw e
         } catch (e: Exception) {
@@ -226,17 +241,17 @@ internal class ConsentService(
 
         val requestBody =
             UniversalSaveRequest(
-                customer_id = config.dgCustomerId,
-                user_hash = userHash,
-                consent_preferences = preferences,
-                consent_mode = config.consentMode,
+                customerId = config.dgCustomerId,
+                userHash = userHash,
+                consentPreferences = preferences,
+                consentMode = config.consentMode,
                 // The user's actual CCPA/US opt-out value, only synced when the
                 // universalConsent.syncOptout feature flag is enabled (otherwise false).
                 // syncOptout is a feature gate, NOT the opt-out value itself.
-                ccpa_optout = (config.universalConsent?.syncOptout == true) && ccpaOptout,
+                ccpaOptout = (config.universalConsent?.syncOptout == true) && ccpaOptout,
                 platform = PLATFORM,
-                policy_name = config.consentPolicy.name,
-                config_version = config.version,
+                policyName = config.consentPolicy.name,
+                configVersion = config.version,
             )
 
         val headers =
@@ -262,8 +277,15 @@ internal class ConsentService(
                         timestamp = timestamp,
                         nonce = nonce,
                     )
-                // Ask the customer's backend to sign. Secret never leaves their backend.
-                val sig = getSignature(payload)
+                // Ask the customer's backend to sign. Secret never leaves their backend. Run on
+                // Dispatchers.IO: the public entry points launch on Dispatchers.Main, and a customer
+                // implementation that does a blocking network call inside getSignature would throw
+                // NetworkOnMainThreadException on Main. This honors SignatureProviderCallback's "may
+                // be called from a background thread" contract. (The wait is intentionally unbounded:
+                // signing round-trips to a customer backend and a hardcoded timeout would cancel
+                // legitimately slow signers; the resume-once contract in asSignatureProvider guards
+                // against a provider that resumes more than once.)
+                val sig = withContext(Dispatchers.IO) { getSignature(payload) }
                 mapOf(
                     "X-DG-Api-Key" to apiKey,
                     "X-DG-Signature" to sig.signature,
