@@ -180,9 +180,17 @@ internal class ConsentManager(
      * Get list of essential/always-on category GTM keys from config
      * @return List of GTM keys for categories that are always enabled
      */
-    fun getEssentialCategories(): List<String> {
-        val config = currentConfig ?: return emptyList()
+    fun getEssentialCategories(): List<String> = currentConfig?.let { essentialCategories(it) } ?: emptyList()
 
+    /**
+     * Essential/always-on category keys for a SPECIFIC config.
+     *
+     * The universal-consent read paths pass the config snapshot they captured before their
+     * suspending network call, rather than re-reading [currentConfig]. A concurrent [loadConfig]
+     * replacing [currentConfig] while the network GET is suspended would otherwise let
+     * reconciliation read one config's essential set against another config's record — a torn read.
+     */
+    private fun essentialCategories(config: ConsentConfig): List<String> {
         val essentialKeys = mutableListOf<String>()
 
         // Check all layers for categories marked as alwaysOn
@@ -238,15 +246,26 @@ internal class ConsentManager(
     private fun reconciledCookieOptions(
         record: UniversalConsentRecord,
         trackingSignal: TrackingSignal,
-    ): Map<String, Boolean> =
-        SignalReconciliation.reconcile(
-            cookieOptions = record.consentPreferences?.cookieOptions ?: emptyMap(),
-            // Either signal suppresses. The stored `gpc` came from the web, the tracking signal
-            // from this device; the most privacy-protective of the two wins, and neither can
-            // re-enable what the other suppressed.
-            suppress = record.gpc || trackingSignal.suppressesNonEssential,
-            essentialKeys = getEssentialCategories().toSet(),
-        )
+        config: ConsentConfig,
+    ): Map<String, Boolean> {
+        val essentialKeys = essentialCategories(config).toSet()
+        val reconciled =
+            SignalReconciliation.reconcile(
+                cookieOptions = record.consentPreferences?.cookieOptions ?: emptyMap(),
+                // Either signal suppresses. The stored `gpc` came from the web, the tracking signal
+                // from this device; the most privacy-protective of the two wins, and neither can
+                // re-enable what the other suppressed.
+                suppress = record.gpc || trackingSignal.suppressesNonEssential,
+                essentialKeys = essentialKeys,
+            )
+        // An essential/always-on category this config defines but the cross-device record omits
+        // (taxonomy drift between platforms) would otherwise be absent from the map, and
+        // ConsentPreferences.isCategoryEnabled falls back to false for any missing key — silently
+        // disabling an always-on category with no banner re-prompt to recover it. Always-on means
+        // always enabled, so surface any missing essential key as true. Suppression above never
+        // touches essential keys, so this cannot re-enable something a signal turned off.
+        return reconciled + essentialKeys.associateWith { key -> reconciled[key] ?: true }
+    }
 
     /**
      * Fetch the user's universal consent record and reconcile opt-out signals on-device.
@@ -277,7 +296,7 @@ internal class ConsentManager(
 
         val prefs = record.consentPreferences ?: return record
         return record.copy(
-            consentPreferences = prefs.copy(cookieOptions = reconciledCookieOptions(record, trackingSignal)),
+            consentPreferences = prefs.copy(cookieOptions = reconciledCookieOptions(record, trackingSignal, config)),
         )
     }
 
@@ -354,18 +373,19 @@ internal class ConsentManager(
         // a non-customised local copy would re-prompt a user who already answered elsewhere. This
         // is local-storage correctness and deliberately does not travel back to the server (see the
         // raw preferences above).
-        val reconciled = reconciledCookieOptions(record, trackingSignal)
+        val reconciled = reconciledCookieOptions(record, trackingSignal, config)
         storage.savePreferences(
             ConsentPreferences(
                 isCustomised = true,
                 cookieOptions = reconciled.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
             ),
         )
-        // Stamp the CURRENT config version, not the record's. This marks the rehydrated consent
-        // as current for the config this app is running, which is what needsConsent() compares
-        // against; carrying over a stale version from the writing device would re-prompt
-        // immediately and undo the rehydration we just did.
-        currentConfig?.version?.let { storage.saveConfigVersion(it) }
+        // Stamp the version of the config snapshot this request was validated against — not a fresh
+        // read of currentConfig, which a concurrent loadConfig() could have swapped while the
+        // network GET was suspended. This marks the rehydrated consent as current for the config
+        // this app is running, which is what needsConsent() compares against; carrying over a stale
+        // version from the writing device would re-prompt immediately and undo the rehydration.
+        storage.saveConfigVersion(config.version)
         return raw
     }
 

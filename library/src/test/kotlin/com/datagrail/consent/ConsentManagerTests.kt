@@ -822,6 +822,46 @@ class ConsentManagerTests {
             assertEquals("marketing suppressed by stored gpc", false, options["category_marketing"])
         }
 
+    /**
+     * Taxonomy drift: a cross-device record omits an essential/always-on category this config
+     * defines (e.g. a newer or platform-specific GTM key the writing platform never had).
+     * Reconciliation must still surface it enabled — ConsentPreferences.isCategoryEnabled falls
+     * back to false for any key missing from the persisted map, which would silently disable an
+     * always-on category with no banner to recover it.
+     */
+    @Test
+    fun `rehydrate keeps an always-on category the record omitted enabled`() =
+        runTest {
+            sut.currentConfig =
+                universalConfig(
+                    listOf(
+                        MockCategory("category_essential", alwaysOn = true),
+                        MockCategory("category_marketing", alwaysOn = false),
+                    ),
+                )
+            // The record was written on a platform whose taxonomy lacked category_essential.
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
+                UniversalConsentRecord(
+                    status = "found",
+                    consentPreferences =
+                        UniversalConsentPreferences(
+                            isCustomised = true,
+                            cookieOptions = mapOf("category_marketing" to true),
+                        ),
+                ),
+            )
+
+            sut.rehydrateFromUniversalConsent("user@example.com", "dg_key")
+
+            val storedCaptor = argumentCaptor<ConsentPreferences>()
+            verify(mockStorage).savePreferences(storedCaptor.capture())
+            assertEquals(
+                "always-on category absent from the record is surfaced enabled, not dropped",
+                true,
+                storedCaptor.firstValue.cookieOptions.firstOrNull { it.gtmKey == "category_essential" }?.isEnabled,
+            )
+        }
+
     @Test
     fun `fetchUniversalConsent returns null when no record exists`() =
         runTest {
