@@ -109,8 +109,8 @@ data class UniversalConsentPreferences(
  *
  * IMPORTANT: this data is RAW and UNRECONCILED. The server never computes an "effective"
  * consent state — it returns the stored [consentPreferences] plus the IAB signals
- * ([gpc], [tcfString], [gppString]) exactly as written. Clients MUST reconcile GPC locally
- * before acting on consent (see [GpcReconciliation]).
+ * ([gpc], [tcfString], [gppString]) exactly as written. Clients MUST reconcile signals locally
+ * before acting on consent (see [SignalReconciliation]).
  */
 @Serializable
 data class UniversalConsentRecord(

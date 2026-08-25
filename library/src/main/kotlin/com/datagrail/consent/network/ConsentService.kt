@@ -153,8 +153,8 @@ internal class ConsentService(
      * Read a user's universal consent record for cross-device rehydration.
      *
      * GET /universal_consent?customer_id=..&user_hash=.. with an X-DG-Api-Key header.
-     * The returned record is RAW and UNRECONCILED — callers must apply GPC reconciliation
-     * before acting on it (see GpcReconciliation).
+     * The returned record is RAW and UNRECONCILED — callers must apply signal reconciliation
+     * before acting on it (see [SignalReconciliation]).
      *
      * @return the parsed record, or null when the server responds `{ "status": "not_found" }`.
      * @throws ConsentException.NetworkError on network/parse failure.
