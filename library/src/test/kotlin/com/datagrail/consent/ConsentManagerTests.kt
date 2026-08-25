@@ -498,6 +498,27 @@ class ConsentManagerTests {
             verifyNoInteractions(mockConsentService)
         }
 
+    @Test
+    fun `setUserIdentifier rejects when enabled but consentProjectId is missing`() =
+        runTest {
+            // enabled=true with a null consentProjectId is a live misconfiguration: both fields are
+            // independently nullable. The single universalConsentReady gate must reject it here,
+            // BEFORE any request reaches the service and fails deep in the network layer instead.
+            sut.currentConfig =
+                createBaseConfig().copy(
+                    consentProjectId = null,
+                    universalConsent = UniversalConsentConfig(enabled = true),
+                )
+
+            assertThrows(ConsentException.ValidationError::class.java) {
+                runBlocking {
+                    sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+                }
+            }
+
+            verifyNoInteractions(mockConsentService)
+        }
+
     /**
      * The write carries the RAW preferences it was given, never a signal-suppressed view.
      *
@@ -557,12 +578,14 @@ class ConsentManagerTests {
         }
 
     /**
-     * An explicitly-passed raw record wins over local state. The read-then-write entry point relies
-     * on this: rehydration persists the SUPPRESSED view locally, so if the write fell back to
-     * `getCategories()` it would read that suppression back and store it as the user's choice.
+     * READ then WRITE, composed inside the manager: when a stored record is rehydrated, the write
+     * carries the RECORD's RAW preferences — even under a suppressing signal that turns the LOCAL
+     * view off. Rehydration persists the reconciled/suppressed view locally, so a write sourced
+     * from getCategories() would read that suppression back and store it as the user's choice. The
+     * raw/effective split is the whole point: local state is suppressed, the wire write is not.
      */
     @Test
-    fun `setUserIdentifier writes explicitly-passed preferences over the suppressed local state`() =
+    fun `setUserIdentifier writes the record's raw preferences while local state is suppressed`() =
         runTest {
             sut.currentConfig =
                 universalConfig(
@@ -571,32 +594,84 @@ class ConsentManagerTests {
                         MockCategory("category_marketing", alwaysOn = false),
                     ),
                 )
-            // Local state as rehydration would have left it under a DENIED signal: marketing off.
+            // The server holds the user's real cross-device opt-in: marketing true.
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
+                UniversalConsentRecord(
+                    status = "found",
+                    consentPreferences =
+                        UniversalConsentPreferences(
+                            isCustomised = true,
+                            cookieOptions =
+                                mapOf(
+                                    "category_essential" to true,
+                                    "category_marketing" to true,
+                                ),
+                        ),
+                ),
+            )
+
+            // A DENIED device signal must suppress marketing LOCALLY but never on the wire.
+            sut.setUserIdentifier(
+                "user@example.com",
+                "dg_key",
+                trackingSignal = TrackingSignal.DENIED,
+                getSignature = signatureProvider(),
+            )
+
+            // Local storage got the reconciled (suppressed) view: marketing forced off.
+            val storedCaptor = argumentCaptor<ConsentPreferences>()
+            verify(mockStorage).savePreferences(storedCaptor.capture())
+            assertEquals(
+                "local state suppressed under DENIED",
+                false,
+                storedCaptor.firstValue.cookieOptions.first { it.gtmKey == "category_marketing" }.isEnabled,
+            )
+
+            // The write carries the record's RAW opt-in, unsuppressed.
+            val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
+            verify(mockConsentService).saveUniversalConsent(
+                any(),
+                any(),
+                prefsCaptor.capture(),
+                any(),
+                eq(false),
+                any(),
+            )
+            assertEquals(
+                "write carries the record's raw opt-in, not the suppressed local view",
+                true,
+                prefsCaptor.firstValue.cookieOptions["category_marketing"],
+            )
+        }
+
+    /**
+     * A rehydrate READ failure must not block the WRITE — a user who just answered the banner still
+     * needs their choice saved. The failed read is swallowed and the write proceeds from local state.
+     */
+    @Test
+    fun `setUserIdentifier still writes when the rehydrate read fails`() =
+        runTest {
+            sut.currentConfig =
+                universalConfig(
+                    listOf(
+                        MockCategory("category_essential", alwaysOn = true),
+                        MockCategory("category_marketing", alwaysOn = false),
+                    ),
+                )
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any()))
+                .thenThrow(RuntimeException("network down"))
             whenever(mockStorage.loadPreferences()).thenReturn(
                 ConsentPreferences(
                     isCustomised = true,
                     cookieOptions =
                         listOf(
                             CategoryConsent(gtmKey = "category_essential", isEnabled = true),
-                            CategoryConsent(gtmKey = "category_marketing", isEnabled = false),
+                            CategoryConsent(gtmKey = "category_marketing", isEnabled = true),
                         ),
                 ),
             )
 
-            sut.setUserIdentifier(
-                "user@example.com",
-                "dg_key",
-                preferences =
-                    ConsentPreferences(
-                        isCustomised = true,
-                        cookieOptions =
-                            listOf(
-                                CategoryConsent(gtmKey = "category_essential", isEnabled = true),
-                                CategoryConsent(gtmKey = "category_marketing", isEnabled = true),
-                            ),
-                    ),
-                getSignature = signatureProvider(),
-            )
+            sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
 
             val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
             verify(mockConsentService).saveUniversalConsent(
@@ -607,8 +682,11 @@ class ConsentManagerTests {
                 eq(false),
                 any(),
             )
-
-            assertEquals(true, prefsCaptor.firstValue.cookieOptions["category_marketing"])
+            assertEquals(
+                "write proceeds from local state after a failed read",
+                true,
+                prefsCaptor.firstValue.cookieOptions["category_marketing"],
+            )
         }
 
     @Test

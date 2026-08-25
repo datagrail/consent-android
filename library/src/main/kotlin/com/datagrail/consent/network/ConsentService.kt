@@ -140,6 +140,16 @@ internal class ConsentService(
     private fun universalConsentUrl(): String = "https://$privacyDomain/universal_consent"
 
     /**
+     * The consent project id, which every universal-consent write/read hashes the user against.
+     * `ConsentManager` gates callers on [ConsentConfig.universalConsentReady] first, so by the time
+     * a request reaches here a non-null id is a guaranteed precondition; this is the single
+     * defensive check for it rather than an inline `?:` repeated in every method.
+     */
+    private fun requireProjectId(config: ConsentConfig): String =
+        config.consentProjectId
+            ?: throw ConsentException.ValidationError("consentProjectId is required for universal consent")
+
+    /**
      * Read a user's universal consent record for cross-device rehydration.
      *
      * GET /universal_consent?customer_id=..&user_hash=.. with an X-DG-Api-Key header.
@@ -154,9 +164,7 @@ internal class ConsentService(
         identifier: String,
         apiKey: String,
     ): UniversalConsentRecord? {
-        val projectId =
-            config.consentProjectId
-                ?: throw ConsentException.ValidationError("consentProjectId is required for universal consent")
+        val projectId = requireProjectId(config)
 
         val userHash = computeUserHash(config.dgCustomerId, projectId, identifier)
         val url =
@@ -212,9 +220,7 @@ internal class ConsentService(
         ccpaOptout: Boolean,
         getSignature: SignatureProvider?,
     ) {
-        val projectId =
-            config.consentProjectId
-                ?: throw ConsentException.ValidationError("consentProjectId is required for universal consent")
+        val projectId = requireProjectId(config)
 
         val userHash = computeUserHash(config.dgCustomerId, projectId, identifier)
 
@@ -248,6 +254,10 @@ internal class ConsentService(
                     UniversalConsentSigningPayload(
                         stringToSign = stringToSign,
                         customerId = config.dgCustomerId,
+                        // The RAW identifier, so the backend can bind signing to its authenticated
+                        // session and recompute the hash itself rather than blindly signing a
+                        // client-supplied userHash for whoever the caller named.
+                        identifier = identifier,
                         userHash = userHash,
                         timestamp = timestamp,
                         nonce = nonce,

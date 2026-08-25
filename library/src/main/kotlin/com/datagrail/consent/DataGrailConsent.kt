@@ -22,6 +22,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -537,8 +538,30 @@ class DataGrailConsent private constructor() {
      * signal is not a refusal, so nothing is suppressed on its account.
      */
     private suspend fun readTrackingSignal(context: Context?): TrackingSignal =
-        withTimeoutOrNull(TRACKING_SIGNAL_TIMEOUT_MS) {
-            withContext(Dispatchers.IO) { TrackingSignalReader.read(context) }
+        readTrackingSignalBounded { TrackingSignalReader.read(context) }
+
+    /**
+     * Bound a blocking tracking-signal read so a wedged Play Services cannot hang the universal
+     * consent entry points forever.
+     *
+     * The read runs inside [runInterruptible] on [Dispatchers.IO]. `withTimeoutOrNull` enforces its
+     * deadline by cancelling the coroutine, and cancellation is COOPERATIVE — a thread parked in the
+     * reflective `getAdvertisingIdInfo` binder call (which has no suspension points) would never
+     * observe it, so structured concurrency would keep `withContext` from returning until that
+     * blocking call finished on its own and the bound would not actually fire. [runInterruptible]
+     * turns the cancellation into a THREAD INTERRUPT, so the blocking call is interrupted at the
+     * deadline. On timeout we fall back to [TrackingSignal.NOT_DETERMINED] — the same value an
+     * unreadable signal produces — so a timeout suppresses nothing.
+     *
+     * Internal (not private) and timeout-parameterised so a test with a blocking reader can assert
+     * the bound fires without waiting the full production timeout.
+     */
+    internal suspend fun readTrackingSignalBounded(
+        timeoutMs: Long = TRACKING_SIGNAL_TIMEOUT_MS,
+        read: () -> TrackingSignal,
+    ): TrackingSignal =
+        withTimeoutOrNull(timeoutMs) {
+            withContext(Dispatchers.IO) { runInterruptible { read() } }
         } ?: TrackingSignal.NOT_DETERMINED.also {
             ConsentLogger.w("Timed out reading the device ad-tracking signal; treating it as undetermined")
         }
@@ -613,35 +636,18 @@ class DataGrailConsent private constructor() {
 
         scope.launch {
             try {
+                // Read this device's live signal (the manager applies it only to the local
+                // rehydration), then hand the whole READ-then-WRITE sequence to the manager, which
+                // owns the invariant. This adapter stays a thin scope.launch wrapper like its
+                // siblings; the compound flow and its read-failure handling live in ConsentManager
+                // where they are unit-tested.
                 val trackingSignal = readTrackingSignal(context)
-
-                // READ then WRITE, matching the web SDK's setUserIdentifier flow. Rehydrating
-                // first means the write persists the user's actual cross-device state rather than
-                // clobbering a richer server-side record with whatever this fresh install holds.
-                //
-                // The RAW preferences off the record, when one was found. Rehydration persists the
-                // reconciled view locally, so letting the write fall back to getCategories() would
-                // read that suppressed state back and store it as the user's choice.
-                var rawPreferences: ConsentPreferences? = null
-                try {
-                    rawPreferences = mgr.rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal)
-                    if (rawPreferences != null) {
-                        mgr.getCategories()?.let { onConsentChangedCallback?.invoke(it) }
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    // A read failure must not block the write — a user who just answered the
-                    // banner still needs their choice saved. Swallowed deliberately, and logged
-                    // so a persistently failing read is still diagnosable.
-                    ConsentLogger.w("universal consent rehydrate failed, continuing to write: ${e.message}")
-                }
-
                 mgr.setUserIdentifier(
                     identifier = identifier,
                     apiKey = apiKey,
-                    preferences = rawPreferences,
+                    trackingSignal = trackingSignal,
                     getSignature = getSignature,
+                    onRehydrated = { prefs -> onConsentChangedCallback?.invoke(prefs) },
                 )
                 callback(Result.success(Unit))
             } catch (e: Exception) {

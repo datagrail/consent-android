@@ -42,7 +42,19 @@ data class ConsentConfig(
     // is enabled, and these are nullable-with-default for backwards compatibility).
     val consentProjectId: String? = null,
     val universalConsent: UniversalConsentConfig? = null,
-)
+) {
+    /**
+     * Whether universal (cross-device) consent is both enabled AND fully configured.
+     *
+     * `universalConsent.enabled` and `consentProjectId` are independently nullable, so a config can
+     * have the feature switched on with no project id to hash a user against. This single predicate
+     * owns "is universal consent usable" so the manager can gate on it once — rather than the
+     * manager checking `enabled` while the network layer separately discovers a null
+     * `consentProjectId` deep inside a write and fails there with a different error.
+     */
+    val universalConsentReady: Boolean
+        get() = universalConsent?.enabled == true && consentProjectId != null
+}
 
 /**
  * Universal Consent feature flags, published under the `universalConsent` config key.

@@ -362,7 +362,7 @@ class UniversalConsentTest {
         }
 
     @Test
-    fun `saveUniversalConsent invokes the signature provider with customer id and user hash`() =
+    fun `saveUniversalConsent invokes the signature provider with customer id, raw identifier and user hash`() =
         runTest {
             whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
 
@@ -373,16 +373,20 @@ class UniversalConsentTest {
                 )
 
             var seenCustomerId: String? = null
+            var seenIdentifier: String? = null
             var seenUserHash: String? = null
             val provider: SignatureProvider = { payload ->
                 seenCustomerId = payload.customerId
+                seenIdentifier = payload.identifier
                 seenUserHash = payload.userHash
                 UniversalConsentSignature("sig", "k")
             }
 
+            // A messy, unnormalized identifier — the backend must receive it verbatim so it can
+            // bind signing to its authenticated session rather than trust the derived hash.
             service.saveUniversalConsent(
                 config = config,
-                identifier = "user@example.com",
+                identifier = "  User@Example.com  ",
                 preferences = UniversalConsentPreferences(),
                 apiKey = "key",
                 ccpaOptout = false,
@@ -390,6 +394,9 @@ class UniversalConsentTest {
             )
 
             assertEquals("ac46d8ad-a67a-431f-a5d5-9e3eb922dae7", seenCustomerId)
+            // Raw, pre-normalization identifier is handed through unchanged.
+            assertEquals("  User@Example.com  ", seenIdentifier)
+            // ...while the derived hash is the normalized golden vector.
             assertEquals(
                 "1fee132c298d615098190e3e75f9c7e05db20d6cff6398f686fcebc67d1d87a4",
                 seenUserHash,
