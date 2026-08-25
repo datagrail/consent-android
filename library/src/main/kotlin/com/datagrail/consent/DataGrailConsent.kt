@@ -691,6 +691,48 @@ class DataGrailConsent private constructor() {
     }
 
     /**
+     * The one place every universal-consent entry point ([launchSetUserIdentifier],
+     * [fetchUniversalConsent], [rehydrateFromUniversalConsent]) shares: the not-initialized guard,
+     * the device tracking-signal read, the `scope.launch`, and the cancellation-passthrough /
+     * [toConsentException] error mapping. Only [block] — the manager call each entry point runs
+     * under that signal — differs. Centralizing it means a future change to how cancellation or
+     * errors are handled happens once, not three times, and the three paths can never drift apart.
+     *
+     * The manager null-check runs synchronously (before the launch) so a not-initialized call
+     * reports immediately, exactly as before. [block] is suspending; any 30s signer timeout it
+     * relies on continues to live inside the manager call, untouched by this wrapper.
+     */
+    private fun <T> launchUniversalConsentOperation(
+        callback: (Result<T>) -> Unit,
+        block: suspend (manager: ConsentManager, trackingSignal: TrackingSignal) -> T,
+    ) {
+        val mgr = manager
+        if (mgr == null) {
+            callback(Result.failure(ConsentException.NotInitialized()))
+            return
+        }
+
+        val context = appContext
+
+        scope.launch {
+            try {
+                val trackingSignal = readTrackingSignal(context)
+                callback(Result.success(block(mgr, trackingSignal)))
+            } catch (e: CancellationException) {
+                // Never swallow cancellation — let it propagate so the coroutine unwinds normally
+                // rather than being reported to the caller as a NetworkError. Matches initialize().
+                throw e
+            } catch (e: Exception) {
+                callback(
+                    Result.failure(
+                        toConsentException(e),
+                    ),
+                )
+            }
+        }
+    }
+
+    /**
      * Shared READ-then-WRITE launcher for every [setUserIdentifier] overload. A null [getSignature]
      * selects the limited, API-key-only write (no signature headers); a non-null one signs the
      * write. Reads this device's live signal (the manager applies it only to the local rehydration),
@@ -704,36 +746,14 @@ class DataGrailConsent private constructor() {
         getSignature: SignatureProvider?,
         callback: (Result<Unit>) -> Unit,
     ) {
-        val mgr = manager
-        if (mgr == null) {
-            callback(Result.failure(ConsentException.NotInitialized()))
-            return
-        }
-
-        val context = appContext
-
-        scope.launch {
-            try {
-                val trackingSignal = readTrackingSignal(context)
-                mgr.setUserIdentifier(
-                    identifier = identifier,
-                    apiKey = apiKey,
-                    trackingSignal = trackingSignal,
-                    getSignature = getSignature,
-                    onRehydrated = { prefs -> onConsentChangedCallback?.invoke(prefs) },
-                )
-                callback(Result.success(Unit))
-            } catch (e: CancellationException) {
-                // Never swallow cancellation — let it propagate so the coroutine unwinds normally
-                // rather than being reported to the caller as a NetworkError. Matches initialize().
-                throw e
-            } catch (e: Exception) {
-                callback(
-                    Result.failure(
-                        toConsentException(e),
-                    ),
-                )
-            }
+        launchUniversalConsentOperation(callback) { mgr, trackingSignal ->
+            mgr.setUserIdentifier(
+                identifier = identifier,
+                apiKey = apiKey,
+                trackingSignal = trackingSignal,
+                getSignature = getSignature,
+                onRehydrated = { prefs -> onConsentChangedCallback?.invoke(prefs) },
+            )
         }
     }
 
@@ -754,29 +774,8 @@ class DataGrailConsent private constructor() {
         apiKey: String,
         callback: (Result<UniversalConsentRecord?>) -> Unit,
     ) {
-        val mgr = manager
-        if (mgr == null) {
-            callback(Result.failure(ConsentException.NotInitialized()))
-            return
-        }
-
-        val context = appContext
-
-        scope.launch {
-            try {
-                val trackingSignal = readTrackingSignal(context)
-                callback(Result.success(mgr.fetchUniversalConsent(identifier, apiKey, trackingSignal)))
-            } catch (e: CancellationException) {
-                // Never swallow cancellation — let it propagate so the coroutine unwinds normally
-                // rather than being reported to the caller as a NetworkError. Matches initialize().
-                throw e
-            } catch (e: Exception) {
-                callback(
-                    Result.failure(
-                        toConsentException(e),
-                    ),
-                )
-            }
+        launchUniversalConsentOperation(callback) { mgr, trackingSignal ->
+            mgr.fetchUniversalConsent(identifier, apiKey, trackingSignal)
         }
     }
 
@@ -829,33 +828,12 @@ class DataGrailConsent private constructor() {
         apiKey: String,
         callback: (Result<Boolean>) -> Unit,
     ) {
-        val mgr = manager
-        if (mgr == null) {
-            callback(Result.failure(ConsentException.NotInitialized()))
-            return
-        }
-
-        val context = appContext
-
-        scope.launch {
-            try {
-                val trackingSignal = readTrackingSignal(context)
-                val rehydrated = mgr.rehydrateFromUniversalConsent(identifier, apiKey, trackingSignal)
-                if (rehydrated) {
-                    mgr.getCategories()?.let { onConsentChangedCallback?.invoke(it) }
-                }
-                callback(Result.success(rehydrated))
-            } catch (e: CancellationException) {
-                // Never swallow cancellation — let it propagate so the coroutine unwinds normally
-                // rather than being reported to the caller as a NetworkError. Matches initialize().
-                throw e
-            } catch (e: Exception) {
-                callback(
-                    Result.failure(
-                        toConsentException(e),
-                    ),
-                )
+        launchUniversalConsentOperation(callback) { mgr, trackingSignal ->
+            val rehydrated = mgr.rehydrateFromUniversalConsent(identifier, apiKey, trackingSignal)
+            if (rehydrated) {
+                mgr.getCategories()?.let { onConsentChangedCallback?.invoke(it) }
             }
+            rehydrated
         }
     }
 
