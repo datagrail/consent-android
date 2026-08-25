@@ -645,6 +645,64 @@ class ConsentManagerTests {
         }
 
     /**
+     * A server record written unbannered carries isCustomised=false (e.g. a default state synced
+     * from web). Rehydrate-then-write must NOT flip that flag: rehydration forces the LOCAL copy
+     * customised so needsConsent() stops re-prompting, but that forcing must not leak into the POST
+     * body — otherwise every device opening the app would silently rewrite the cross-device
+     * record's isCustomised false->true even though the user made no new choice.
+     */
+    @Test
+    fun `setUserIdentifier preserves an isCustomised-false record on the write`() =
+        runTest {
+            sut.currentConfig =
+                universalConfig(
+                    listOf(
+                        MockCategory("category_essential", alwaysOn = true),
+                        MockCategory("category_marketing", alwaysOn = false),
+                    ),
+                )
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
+                UniversalConsentRecord(
+                    status = "found",
+                    consentPreferences =
+                        UniversalConsentPreferences(
+                            isCustomised = false,
+                            cookieOptions =
+                                mapOf(
+                                    "category_essential" to true,
+                                    "category_marketing" to true,
+                                ),
+                        ),
+                ),
+            )
+
+            sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+
+            val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
+            verify(mockConsentService).saveUniversalConsent(
+                any(),
+                any(),
+                prefsCaptor.capture(),
+                any(),
+                eq(false),
+                any(),
+            )
+            assertFalse(
+                "the record's isCustomised=false must not be flipped to true by the write",
+                prefsCaptor.firstValue.isCustomised,
+            )
+
+            // The LOCAL copy is still stamped customised so the banner does not re-prompt a user
+            // who already answered on another device.
+            val storedCaptor = argumentCaptor<ConsentPreferences>()
+            verify(mockStorage).savePreferences(storedCaptor.capture())
+            assertTrue(
+                "local copy stays customised so needsConsent() does not re-prompt",
+                storedCaptor.firstValue.isCustomised,
+            )
+        }
+
+    /**
      * A rehydrate READ failure must not block the WRITE — a user who just answered the banner still
      * needs their choice saved. The failed read is swallowed and the write proceeds from local state.
      */

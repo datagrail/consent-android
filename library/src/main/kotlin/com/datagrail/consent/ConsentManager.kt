@@ -333,19 +333,27 @@ internal class ConsentManager(
         val rawCookieOptions = record.consentPreferences?.cookieOptions
         if (rawCookieOptions.isNullOrEmpty()) return null
 
-        // A record that came back at all represents an answered prompt, so the rehydrated state is
-        // customised even if the writer left the flag false. needsConsent() keys off stored
-        // preferences existing, and a non-customised record would re-prompt a user who already
-        // answered.
+        // The RAW preferences are handed back for the WRITE, so they carry the record's OWN
+        // isCustomised flag verbatim. setUserIdentifier POSTs this value straight back as the
+        // record's isCustomised; forcing it true here would flip a record written unbannered
+        // (isCustomised=false, e.g. a default state synced from web) to true on every device that
+        // opens the app, even though the user made no new choice. The local-storage forcing below
+        // must not leak onto the wire.
         val raw =
             ConsentPreferences(
-                isCustomised = true,
+                isCustomised = record.consentPreferences?.isCustomised ?: false,
                 cookieOptions = rawCookieOptions.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
             )
 
         // Local state gets the RECONCILED view. Shares the exact reconciliation policy with
         // fetchUniversalConsent via reconciledCookieOptions, so the persisted state and the
         // returned record can never disagree about what a signal suppresses.
+        //
+        // isCustomised is forced true for the LOCAL copy ONLY: a record that came back at all
+        // represents an answered prompt, and needsConsent() keys off stored preferences existing —
+        // a non-customised local copy would re-prompt a user who already answered elsewhere. This
+        // is local-storage correctness and deliberately does not travel back to the server (see the
+        // raw preferences above).
         val reconciled = reconciledCookieOptions(record, trackingSignal)
         storage.savePreferences(
             ConsentPreferences(
