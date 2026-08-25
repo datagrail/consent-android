@@ -602,9 +602,11 @@ class DataGrailConsent private constructor() {
      * for the given user identifier, for cross-device retrieval (Kotlin-friendly).
      *
      * This READS before it WRITES. Any stored record for this identifier is rehydrated onto the
-     * device first, then the resulting state is persisted back — so a fresh install cannot post
-     * its empty preferences over a richer server-side record. A read failure does not block the
-     * write: a user who just answered the banner still needs their choice saved.
+     * device first (honoring a choice made on the web or another device); the write then carries
+     * the user's CURRENT LOCAL choice — sync-on-change / write-through — and never re-POSTs the
+     * fetched record. A found record with no genuine local change is adopted WITHOUT a POST. A read
+     * failure blocks the write and surfaces as a failure result, so a record we could not read is
+     * never overwritten; retry to re-read first.
      *
      * The identifier is NOT retained as state — later calls such as [fetchUniversalConsent] and
      * [rehydrateFromUniversalConsent] require it to be passed again.

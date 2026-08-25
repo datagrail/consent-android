@@ -15,6 +15,7 @@ import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.isNull
+import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoInteractions
 import org.mockito.kotlin.whenever
@@ -579,14 +580,14 @@ class ConsentManagerTests {
         }
 
     /**
-     * READ then WRITE, composed inside the manager: when a stored record is rehydrated, the write
-     * carries the RECORD's RAW preferences — even under a suppressing signal that turns the LOCAL
-     * view off. Rehydration persists the reconciled/suppressed view locally, so a write sourced
-     * from getCategories() would read that suppression back and store it as the user's choice. The
-     * raw/effective split is the whole point: local state is suppressed, the wire write is not.
+     * WRITE-THROUGH / sync-on-change: on a FOUND record the write carries the user's CURRENT LOCAL
+     * choice — the choice they made on THIS device before associating their identity — and NEVER
+     * re-POSTs the record it just fetched. Re-POSTing the fetched map would discard that local
+     * choice (the launch-blocking "lose an explicit opt-out" / revocation-resurrection class) and
+     * only echo state the edge already holds.
      */
     @Test
-    fun `setUserIdentifier writes the record's raw preferences while local state is suppressed`() =
+    fun `setUserIdentifier writes the local choice, not the fetched record, on a found record`() =
         runTest {
             sut.currentConfig =
                 universalConfig(
@@ -595,7 +596,85 @@ class ConsentManagerTests {
                         MockCategory("category_marketing", alwaysOn = false),
                     ),
                 )
-            // The server holds the user's real cross-device opt-in: marketing true.
+            // The user opted marketing OFF locally before associating their identity...
+            whenever(mockStorage.loadPreferences()).thenReturn(
+                ConsentPreferences(
+                    isCustomised = true,
+                    cookieOptions =
+                        listOf(
+                            CategoryConsent(gtmKey = "category_essential", isEnabled = true),
+                            CategoryConsent(gtmKey = "category_marketing", isEnabled = false),
+                        ),
+                ),
+            )
+            // ...while the stored record disagrees (marketing ON).
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
+                UniversalConsentRecord(
+                    status = "found",
+                    consentPreferences =
+                        UniversalConsentPreferences(
+                            isCustomised = true,
+                            cookieOptions =
+                                mapOf(
+                                    "category_essential" to true,
+                                    "category_marketing" to true,
+                                ),
+                        ),
+                ),
+            )
+
+            sut.setUserIdentifier(
+                "user@example.com",
+                "dg_key",
+                trackingSignal = TrackingSignal.AUTHORIZED,
+                getSignature = signatureProvider(),
+            )
+
+            val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
+            verify(mockConsentService).saveUniversalConsent(
+                any(),
+                any(),
+                prefsCaptor.capture(),
+                any(),
+                eq(false),
+                any(),
+            )
+            assertEquals(
+                "write carries the user's CURRENT LOCAL choice, not the fetched record",
+                false,
+                prefsCaptor.firstValue.cookieOptions["category_marketing"],
+            )
+        }
+
+    /**
+     * Signals are a READ-TIME view only: when a genuine local change is written through, a live
+     * device signal (here DENIED) suppresses marketing in LOCAL storage but must NEVER be folded
+     * into the write body. The store holds raw choices and the server never merges, so persisting
+     * this device's transient signal would read back as a revocation the user never made — for
+     * every device on their identifier.
+     */
+    @Test
+    fun `setUserIdentifier does not fold a live device signal into the write body`() =
+        runTest {
+            sut.currentConfig =
+                universalConfig(
+                    listOf(
+                        MockCategory("category_essential", alwaysOn = true),
+                        MockCategory("category_marketing", alwaysOn = false),
+                    ),
+                )
+            // The user's genuine local choice: marketing ON.
+            whenever(mockStorage.loadPreferences()).thenReturn(
+                ConsentPreferences(
+                    isCustomised = true,
+                    cookieOptions =
+                        listOf(
+                            CategoryConsent(gtmKey = "category_essential", isEnabled = true),
+                            CategoryConsent(gtmKey = "category_marketing", isEnabled = true),
+                        ),
+                ),
+            )
+            // A stored record exists, so the rehydrate persists a reconciled (suppressed) view.
             whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
                 UniversalConsentRecord(
                     status = "found",
@@ -628,7 +707,7 @@ class ConsentManagerTests {
                 storedCaptor.firstValue.cookieOptions.first { it.gtmKey == "category_marketing" }.isEnabled,
             )
 
-            // The write carries the record's RAW opt-in, unsuppressed.
+            // The write carries the user's RAW local opt-in, unsuppressed — the signal is not folded in.
             val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
             verify(mockConsentService).saveUniversalConsent(
                 any(),
@@ -639,21 +718,21 @@ class ConsentManagerTests {
                 any(),
             )
             assertEquals(
-                "write carries the record's raw opt-in, not the suppressed local view",
+                "write carries the raw local opt-in, not the suppressed local view",
                 true,
                 prefsCaptor.firstValue.cookieOptions["category_marketing"],
             )
         }
 
     /**
-     * A server record written unbannered carries isCustomised=false (e.g. a default state synced
-     * from web). Rehydrate-then-write must NOT flip that flag: rehydration forces the LOCAL copy
-     * customised so needsConsent() stops re-prompting, but that forcing must not leak into the POST
-     * body — otherwise every device opening the app would silently rewrite the cross-device
-     * record's isCustomised false->true even though the user made no new choice.
+     * ADOPT-WITHOUT-POST: a FOUND record with no genuine local change (a fresh install that merely
+     * adopted it — no stored preferences) is applied to LOCAL state by the rehydrate and NOTHING is
+     * POSTed. Re-POSTing would only echo state the edge already holds. This also preserves an
+     * unbannered record's isCustomised=false: it is never written, so it can never be flipped to
+     * true by every device that opens the app.
      */
     @Test
-    fun `setUserIdentifier preserves an isCustomised-false record on the write`() =
+    fun `setUserIdentifier adopts a found record without posting when there is no local change`() =
         runTest {
             sut.currentConfig =
                 universalConfig(
@@ -662,6 +741,7 @@ class ConsentManagerTests {
                         MockCategory("category_marketing", alwaysOn = false),
                     ),
                 )
+            // No local choice on this device (fresh install), and loadPreferences returns null.
             whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
                 UniversalConsentRecord(
                     status = "found",
@@ -679,22 +759,11 @@ class ConsentManagerTests {
 
             sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
 
-            val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
-            verify(mockConsentService).saveUniversalConsent(
-                any(),
-                any(),
-                prefsCaptor.capture(),
-                any(),
-                eq(false),
-                any(),
-            )
-            assertFalse(
-                "the record's isCustomised=false must not be flipped to true by the write",
-                prefsCaptor.firstValue.isCustomised,
-            )
+            // Nothing was POSTed: the record is adopted, not re-POSTed.
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
 
-            // The LOCAL copy is still stamped customised so the banner does not re-prompt a user
-            // who already answered on another device.
+            // The record was adopted into local state, stamped customised so the banner does not
+            // re-prompt a user who already answered on another device.
             val storedCaptor = argumentCaptor<ConsentPreferences>()
             verify(mockStorage).savePreferences(storedCaptor.capture())
             assertTrue(
@@ -704,11 +773,12 @@ class ConsentManagerTests {
         }
 
     /**
-     * A rehydrate READ failure must not block the WRITE — a user who just answered the banner still
-     * needs their choice saved. The failed read is swallowed and the write proceeds from local state.
+     * A rehydrate READ FAILURE (as opposed to a miss) blocks the WRITE and propagates: the server
+     * never merges, so overwriting a record we could not read would silently erase the user's real
+     * cross-device choice (the TRUST-2491 corruption class). The caller can retry, which re-reads.
      */
     @Test
-    fun `setUserIdentifier still writes when the rehydrate read fails`() =
+    fun `setUserIdentifier blocks the write when the rehydrate read fails`() =
         runTest {
             sut.currentConfig =
                 universalConfig(
@@ -730,22 +800,14 @@ class ConsentManagerTests {
                 ),
             )
 
-            sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+            assertThrows(RuntimeException::class.java) {
+                runBlocking {
+                    sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+                }
+            }
 
-            val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
-            verify(mockConsentService).saveUniversalConsent(
-                any(),
-                any(),
-                prefsCaptor.capture(),
-                any(),
-                eq(false),
-                any(),
-            )
-            assertEquals(
-                "write proceeds from local state after a failed read",
-                true,
-                prefsCaptor.firstValue.cookieOptions["category_marketing"],
-            )
+            // A record we could not read is never overwritten.
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
         }
 
     @Test

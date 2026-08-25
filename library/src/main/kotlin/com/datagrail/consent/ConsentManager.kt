@@ -12,8 +12,6 @@ import com.datagrail.consent.models.UniversalConsentRecord
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
-import com.datagrail.consent.utils.ConsentLogger
-import kotlinx.coroutines.CancellationException
 
 /**
  * Manages consent state and coordinates between storage, network, and configuration
@@ -394,22 +392,32 @@ internal class ConsentManager(
      * universal consent store in one coordinated operation. This is the headline invariant of the
      * feature and it lives here, in the coordinator, not in the public singleton adapter.
      *
-     * READ first: [rehydrateReturningRawPreferences] pulls any existing record, applies it to local
-     * state, and hands back the record's RAW preferences. Rehydrating first means the subsequent
-     * write persists the user's actual cross-device state rather than clobbering a richer
-     * server-side record with whatever this (possibly fresh) install happens to hold.
+     * READ first: [rehydrateReturningRawPreferences] pulls any existing record and applies it to
+     * local state, so a choice the same person made on the web or another device is honored here.
      *
-     * A read failure does NOT block the write: a user who just answered the banner still needs
-     * their choice saved, so a failed rehydrate is swallowed (and logged) and the write proceeds
-     * from local state. [CancellationException] is rethrown so structured concurrency is preserved.
+     * WRITE-THROUGH / sync-on-change: the write carries the user's CURRENT LOCAL choice — captured
+     * from storage BEFORE the rehydrate persists the reconciled view — and NEVER re-POSTs the record
+     * it just fetched. Echoing the fetched record back would discard a choice the user made on THIS
+     * device before associating their identity (the launch-blocking "lose an explicit opt-out" /
+     * revocation-resurrection class) while only telling the edge what it already holds. When a FOUND
+     * record meets no genuine local change — a fresh install that merely adopted it — the call
+     * ADOPTS WITHOUT POSTING: the record is already applied to local state, so there is nothing to
+     * write. Cross-device conflict resolution is the edge's job, not the SDK's.
      *
-     * WRITE carries the RAW preferences. When a record was rehydrated its raw preferences are used
-     * — NOT [getCategories], which would read back the reconciled/suppressed view rehydration just
-     * persisted and store that as the user's choice. The tracking signal is never applied to the
-     * write: the store holds raw choices and the server never merges, so suppressing before a write
-     * would persist this device's transient signal for every device on this identifier.
-     * Limit-ad-tracking is an ad-personalization answer, not a marketing opt-out. Suppression is a
-     * read-time view (see [SignalReconciliation]).
+     * A genuine local choice is distinguished from initialize()'s defaults by the presence of a
+     * stored record ([ConsentStorage.loadPreferences] non-null — the same read [hasUserConsent]
+     * keys off); initialize() never seeds storage, so no auto-persisted default is mistaken for a
+     * user choice. The choice is captured BEFORE rehydrate so no ATT/GPC-suppressed view leaks into
+     * the write body — the store holds raw choices and the server never merges, so suppressing
+     * before a write would persist this device's transient signal for every device on this
+     * identifier. Limit-ad-tracking is an ad-personalization answer, not a marketing opt-out.
+     * Suppression stays a read-time view (see [SignalReconciliation]).
+     *
+     * A read MISS (no record) writes: local state seeds the first cross-device record. A read
+     * FAILURE, by contrast, THROWS and blocks the write — the server never merges, so overwriting a
+     * record we could not read would silently erase the user's real cross-device choice (the
+     * TRUST-2491 corruption class). The caller can retry, which re-reads first. Coroutine
+     * cancellation propagates so structured concurrency is preserved.
      *
      * The identifier is NOT retained as manager state, so subsequent operations (e.g.
      * [fetchUniversalConsent]) must pass it again. Requires universal consent to be enabled AND
@@ -435,25 +443,34 @@ internal class ConsentManager(
     ) {
         val config = requireUniversalConsentReady()
 
-        // READ then WRITE. The raw preferences off the rehydrated record are what the write must
-        // carry; rehydration persists the reconciled view locally, so falling back to
-        // getCategories() when a record exists would store that suppression as the user's choice.
-        var rawPreferences: ConsentPreferences? = null
-        try {
-            rawPreferences = rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal)
-            if (rawPreferences != null) {
-                getCategories()?.let { onRehydrated?.invoke(it) }
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // A read failure must not block the write — a user who just answered the banner still
-            // needs their choice saved. Swallowed deliberately, logged so a persistently failing
-            // read stays diagnosable.
-            ConsentLogger.w("universal consent rehydrate failed, continuing to write: ${e.message}")
+        // Capture the user's RAW local choice BEFORE the rehydrate below persists the
+        // signal-reconciled view. null means no genuine local choice yet: initialize() never seeds
+        // storage (the same read [hasUserConsent] keys off), so a non-null value here is an explicit
+        // choice, and capturing it now keeps any ATT/GPC-suppressed view out of the write body.
+        val localChoice = storage.loadPreferences()
+
+        // READ then WRITE. Rehydrate applies any found record to local state first (honoring a
+        // choice made on the web or another device). A genuine MISS returns null and the write
+        // below seeds the first record; a read FAILURE THROWS and blocks the write — overwriting a
+        // record we could not read would silently erase the user's real cross-device choice
+        // (the TRUST-2491 corruption class). Coroutine cancellation propagates for the same reason.
+        val rawFromRecord = rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal)
+        if (rawFromRecord != null) {
+            getCategories()?.let { onRehydrated?.invoke(it) }
         }
 
-        val current = rawPreferences ?: getCategories() ?: getDefaultPreferences()
+        // Adopt-without-POST: a FOUND record with no genuine local change is already applied to
+        // local state by the rehydrate above. Re-POSTing it would only echo state the edge already
+        // holds. Conflict resolution across devices is the edge's job, not the SDK's.
+        if (rawFromRecord != null && localChoice == null) {
+            return
+        }
+
+        // Write-through the user's CURRENT LOCAL choice (sync-on-change) — NEVER the fetched
+        // record, which would discard a choice the user made on this device before associating
+        // their identity. The choice was captured raw, before rehydrate, so no device signal leaks
+        // onto the wire. On a genuine miss with no explicit choice this seeds the first record.
+        val current = localChoice ?: getCategories() ?: getDefaultPreferences()
         val rawMap =
             current?.cookieOptions?.associate { it.gtmKey to it.isEnabled } ?: emptyMap()
 
