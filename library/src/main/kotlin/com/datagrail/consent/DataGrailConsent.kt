@@ -27,6 +27,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URL
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -115,17 +116,23 @@ class DataGrailConsent private constructor() {
         internal fun asSignatureProvider(callback: SignatureProviderCallback): SignatureProvider =
             { payload ->
                 suspendCancellableCoroutine { continuation ->
+                    // A customer signing implementation may invoke onSignature and onFailure from
+                    // two different threads at nearly the same time (a success racing a timeout
+                    // handler). A check-then-act on continuation.isActive is not atomic across the
+                    // two arms, so both could observe active and the second resume would throw
+                    // IllegalStateException on its thread. This CAS lets exactly one arm resume; the
+                    // loser is silently ignored, which is what the "resumed at most once" contract
+                    // promises — for concurrent duplicates, not just sequential ones.
+                    val settled = AtomicBoolean(false)
                     callback.getSignature(
                         payload,
                         object : SignatureResult {
                             override fun onSignature(signature: UniversalConsentSignature) {
-                                // isActive guards a provider that calls back more than once, or
-                                // after cancellation — resuming a settled continuation throws.
-                                if (continuation.isActive) continuation.resume(signature)
+                                if (settled.compareAndSet(false, true)) continuation.resume(signature)
                             }
 
                             override fun onFailure(error: ConsentException) {
-                                if (continuation.isActive) continuation.resumeWithException(error)
+                                if (settled.compareAndSet(false, true)) continuation.resumeWithException(error)
                             }
                         },
                     )
@@ -650,6 +657,10 @@ class DataGrailConsent private constructor() {
                     onRehydrated = { prefs -> onConsentChangedCallback?.invoke(prefs) },
                 )
                 callback(Result.success(Unit))
+            } catch (e: CancellationException) {
+                // Never swallow cancellation — let it propagate so the coroutine unwinds normally
+                // rather than being reported to the caller as a NetworkError. Matches initialize().
+                throw e
             } catch (e: Exception) {
                 callback(
                     Result.failure(
@@ -689,6 +700,10 @@ class DataGrailConsent private constructor() {
             try {
                 val trackingSignal = readTrackingSignal(context)
                 callback(Result.success(mgr.fetchUniversalConsent(identifier, apiKey, trackingSignal)))
+            } catch (e: CancellationException) {
+                // Never swallow cancellation — let it propagate so the coroutine unwinds normally
+                // rather than being reported to the caller as a NetworkError. Matches initialize().
+                throw e
             } catch (e: Exception) {
                 callback(
                     Result.failure(
@@ -764,6 +779,10 @@ class DataGrailConsent private constructor() {
                     mgr.getCategories()?.let { onConsentChangedCallback?.invoke(it) }
                 }
                 callback(Result.success(rehydrated))
+            } catch (e: CancellationException) {
+                // Never swallow cancellation — let it propagate so the coroutine unwinds normally
+                // rather than being reported to the caller as a NetworkError. Matches initialize().
+                throw e
             } catch (e: Exception) {
                 callback(
                     Result.failure(
