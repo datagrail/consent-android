@@ -53,7 +53,11 @@ data class ConsentConfig(
      * `consentProjectId` deep inside a write and fails there with a different error.
      */
     val universalConsentReady: Boolean
-        get() = universalConsent?.enabled == true && consentProjectId != null
+        // Guard against blank as well as null: a config that serializes consentProjectId as "" would
+        // otherwise pass this gate and let computeUserHash hash "{customerId}::{identifier}" with an
+        // empty project segment, silently collapsing every such misconfigured customer onto one hash
+        // namespace. Fail fast instead, matching the empty-after-trim rejection on the identifier.
+        get() = universalConsent?.enabled == true && !consentProjectId.isNullOrBlank()
 }
 
 /**

@@ -441,7 +441,7 @@ class ConsentManagerTests {
     // MARK: - Universal Consent Tests
 
     @Test
-    fun `isUniversalConsentEnabled reflects the config flag`() {
+    fun `isUniversalConsentEnabled reflects readiness, not just the enabled flag`() {
         assertFalse("no config loaded", sut.isUniversalConsentEnabled())
 
         sut.currentConfig = createBaseConfig()
@@ -450,14 +450,26 @@ class ConsentManagerTests {
         sut.currentConfig =
             createBaseConfig().copy(
                 universalConsent = UniversalConsentConfig(enabled = false),
+                consentProjectId = "proj_abc123",
             )
         assertFalse("universalConsent disabled", sut.isUniversalConsentEnabled())
+
+        // Enabled but no project id is a live misconfiguration: this predicate must NOT diverge from
+        // universalConsentReady (which every entry point gates on), or a caller could trust a `true`
+        // here and then hit a ValidationError on setUserIdentifier.
+        sut.currentConfig =
+            createBaseConfig().copy(
+                universalConsent = UniversalConsentConfig(enabled = true),
+                consentProjectId = null,
+            )
+        assertFalse("enabled but no consentProjectId is not ready", sut.isUniversalConsentEnabled())
 
         sut.currentConfig =
             createBaseConfig().copy(
                 universalConsent = UniversalConsentConfig(enabled = true),
+                consentProjectId = "proj_abc123",
             )
-        assertTrue("universalConsent enabled", sut.isUniversalConsentEnabled())
+        assertTrue("enabled and configured", sut.isUniversalConsentEnabled())
     }
 
     @Test
@@ -509,6 +521,27 @@ class ConsentManagerTests {
             sut.currentConfig =
                 createBaseConfig().copy(
                     consentProjectId = null,
+                    universalConsent = UniversalConsentConfig(enabled = true),
+                )
+
+            assertThrows(ConsentException.ValidationError::class.java) {
+                runBlocking {
+                    sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+                }
+            }
+
+            verifyNoInteractions(mockConsentService)
+        }
+
+    @Test
+    fun `setUserIdentifier rejects when consentProjectId is blank`() =
+        runTest {
+            // A config that serializes consentProjectId as "" (rather than null/omitted) must not
+            // pass the readiness gate — computeUserHash would otherwise hash an empty project
+            // segment and collapse every such customer onto one hash namespace.
+            sut.currentConfig =
+                createBaseConfig().copy(
+                    consentProjectId = "   ",
                     universalConsent = UniversalConsentConfig(enabled = true),
                 )
 

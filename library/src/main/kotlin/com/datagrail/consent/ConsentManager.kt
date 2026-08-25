@@ -98,19 +98,23 @@ internal class ConsentManager(
      * Get default preferences based on configuration
      * @return Default preferences with initial categories enabled
      */
-    fun getDefaultPreferences(): ConsentPreferences? {
-        val config = currentConfig ?: return null
+    fun getDefaultPreferences(): ConsentPreferences? = currentConfig?.let { defaultPreferences(it) }
 
-        val cookieOptions =
-            config.initialCategories.initial.map { category ->
-                CategoryConsent(gtmKey = category, isEnabled = true)
-            }
-
-        return ConsentPreferences(
+    /**
+     * Default preferences for a SPECIFIC config snapshot. The universal-consent write path passes
+     * the snapshot it captured before its suspending network call rather than re-reading live
+     * [currentConfig], which a concurrent [loadConfig] could have swapped while the GET was
+     * suspended — that would derive the write's cookieOptions from a different config than the
+     * `config_version` stamped on the same request (a torn read).
+     */
+    private fun defaultPreferences(config: ConsentConfig): ConsentPreferences =
+        ConsentPreferences(
             isCustomised = false,
-            cookieOptions = cookieOptions,
+            cookieOptions =
+                config.initialCategories.initial.map { category ->
+                    CategoryConsent(gtmKey = category, isEnabled = true)
+                },
         )
-    }
 
     /**
      * Save consent preferences
@@ -210,10 +214,15 @@ internal class ConsentManager(
     // MARK: - Universal Consent
 
     /**
-     * Whether universal (cross-device) consent is enabled for the loaded config.
+     * Whether universal (cross-device) consent is enabled AND fully configured for the loaded
+     * config. Delegates to the same [ConsentConfig.universalConsentReady] predicate that
+     * [requireUniversalConsentReady] gates every entry point on, so this "is it usable" answer can
+     * never disagree with what a subsequent setUserIdentifier/fetch will actually accept — a caller
+     * (e.g. UI deciding whether to show a "link your account" affordance) that trusts this and then
+     * calls in would otherwise hit a ValidationError for a missing/blank consentProjectId.
      */
     fun isUniversalConsentEnabled(): Boolean {
-        return currentConfig?.universalConsent?.enabled == true
+        return currentConfig?.universalConsentReady == true
     }
 
     /**
@@ -246,23 +255,17 @@ internal class ConsentManager(
         trackingSignal: TrackingSignal,
         config: ConsentConfig,
     ): Map<String, Boolean> {
-        val essentialKeys = essentialCategories(config).toSet()
-        val reconciled =
-            SignalReconciliation.reconcile(
-                cookieOptions = record.consentPreferences?.cookieOptions ?: emptyMap(),
-                // Either signal suppresses. The stored `gpc` came from the web, the tracking signal
-                // from this device; the most privacy-protective of the two wins, and neither can
-                // re-enable what the other suppressed.
-                suppress = record.gpc || trackingSignal.suppressesNonEssential,
-                essentialKeys = essentialKeys,
-            )
-        // An essential/always-on category this config defines but the cross-device record omits
-        // (taxonomy drift between platforms) would otherwise be absent from the map, and
-        // ConsentPreferences.isCategoryEnabled falls back to false for any missing key — silently
-        // disabling an always-on category with no banner re-prompt to recover it. Always-on means
-        // always enabled, so surface any missing essential key as true. Suppression above never
-        // touches essential keys, so this cannot re-enable something a signal turned off.
-        return reconciled + essentialKeys.associateWith { key -> reconciled[key] ?: true }
+        // Essential-key backfill (a config's always-on category absent from — or stored false in —
+        // the cross-device record must still read enabled) is owned by SignalReconciliation.reconcile
+        // itself, so every caller of reconcile inherits it and the guarantee cannot drift a layer away.
+        return SignalReconciliation.reconcile(
+            cookieOptions = record.consentPreferences?.cookieOptions ?: emptyMap(),
+            // Either signal suppresses. The stored `gpc` came from the web, the tracking signal
+            // from this device; the most privacy-protective of the two wins, and neither can
+            // re-enable what the other suppressed.
+            suppress = record.gpc || trackingSignal.suppressesNonEssential,
+            essentialKeys = essentialCategories(config).toSet(),
+        )
     }
 
     /**
@@ -334,14 +337,19 @@ internal class ConsentManager(
      * store it in the universal record as though the user had chosen it. Returning the raw
      * preferences lets the write carry what the user actually consented to.
      *
+     * @param config Optional config snapshot to validate/read against. [setUserIdentifier] passes
+     *   the snapshot it captured at entry so the READ here and the WRITE that follows use ONE
+     *   config — otherwise this would re-read [currentConfig] independently and a concurrent
+     *   [loadConfig] could make the read and write disagree on consentProjectId/version. Other
+     *   callers omit it and get a fresh [requireUniversalConsentReady].
      * @return the record's raw preferences, or null on a miss.
      */
     suspend fun rehydrateReturningRawPreferences(
         identifier: String,
         apiKey: String,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
+        config: ConsentConfig = requireUniversalConsentReady(),
     ): ConsentPreferences? {
-        val config = requireUniversalConsentReady()
 
         // Goes to the service directly rather than through fetchUniversalConsent, which returns an
         // already-reconciled record. Both views are needed here: the reconciled one to persist
@@ -454,7 +462,11 @@ internal class ConsentManager(
         // below seeds the first record; a read FAILURE THROWS and blocks the write — overwriting a
         // record we could not read would silently erase the user's real cross-device choice
         // (the TRUST-2491 corruption class). Coroutine cancellation propagates for the same reason.
-        val rawFromRecord = rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal)
+        // Pass the captured `config` snapshot so the READ below and the WRITE that follows are
+        // validated and hashed against ONE config — a concurrent loadConfig() cannot make the read's
+        // consentProjectId/version disagree with the write's (the torn-read hazard this file guards
+        // against elsewhere via essentialCategories(config)/reconciledCookieOptions).
+        val rawFromRecord = rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal, config)
         if (rawFromRecord != null) {
             getCategories()?.let { onRehydrated?.invoke(it) }
         }
@@ -469,14 +481,17 @@ internal class ConsentManager(
         // Write-through the user's CURRENT LOCAL choice (sync-on-change) — NEVER the fetched
         // record, which would discard a choice the user made on this device before associating
         // their identity. The choice was captured raw, before rehydrate, so no device signal leaks
-        // onto the wire. On a genuine miss with no explicit choice this seeds the first record.
-        val current = localChoice ?: getCategories() ?: getDefaultPreferences()
-        val rawMap =
-            current?.cookieOptions?.associate { it.gtmKey to it.isEnabled } ?: emptyMap()
+        // onto the wire. On a genuine miss with no explicit choice this seeds the first record from
+        // the `config` SNAPSHOT's defaults — not getCategories()/getDefaultPreferences(), which
+        // re-read live currentConfig (a torn read against a concurrent loadConfig, and a stale
+        // signal-suppressed local map would leak into the write) and whose extra fallback tier was
+        // dead anyway (getCategories() already falls back to the defaults when storage is empty).
+        val current = localChoice ?: defaultPreferences(config)
+        val rawMap = current.cookieOptions.associate { it.gtmKey to it.isEnabled }
 
         val universalPrefs =
             UniversalConsentPreferences(
-                isCustomised = current?.isCustomised ?: false,
+                isCustomised = current.isCustomised,
                 cookieOptions = rawMap,
             )
 

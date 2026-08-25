@@ -161,18 +161,29 @@ object SignalReconciliation {
      * @param cookieOptions The raw stored `{ categoryKey: Boolean }` map.
      * @param suppress Whether an opt-out signal applies (device signal, stored GPC, or both).
      * @param essentialKeys The set of category keys that are essential / always-on and therefore
-     *   never suppressed.
+     *   never suppressed AND always enabled.
      * @return A new map where, when [suppress] is true, every non-essential category is forced to
-     *   `false`. When [suppress] is false the input map is returned unchanged.
+     *   `false`; and, regardless of [suppress], every essential key is forced to `true` — even if
+     *   the input omits the key or stored it `false` under an older/looser taxonomy. "Always-on
+     *   means always enabled" is owned here so no caller can bypass it (a missing or stored-false
+     *   essential key would otherwise read as disabled with no banner to recover it).
      */
     fun reconcile(
         cookieOptions: Map<String, Boolean>,
         suppress: Boolean,
         essentialKeys: Set<String>,
     ): Map<String, Boolean> {
-        if (!suppress) return cookieOptions
-        return cookieOptions.mapValues { (key, enabled) ->
-            if (essentialKeys.contains(key)) enabled else false
-        }
+        val suppressed =
+            if (!suppress) {
+                cookieOptions
+            } else {
+                cookieOptions.mapValues { (key, enabled) ->
+                    if (essentialKeys.contains(key)) enabled else false
+                }
+            }
+        // Layer the always-on guarantee LAST. Suppression above never touches essential keys, so
+        // this cannot re-enable something a signal turned off; it only ensures every essential key
+        // is present and true (taxonomy-drift backfill lives here, not in each caller).
+        return suppressed + essentialKeys.associateWith { true }
     }
 }

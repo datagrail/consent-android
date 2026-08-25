@@ -193,6 +193,31 @@ class UniversalConsentTest {
         }
     }
 
+    @Test
+    fun `reconcile forces an essential key enabled even when the record stored it false or omits it`() {
+        // Taxonomy drift: a category may become always-on in a newer config after another device
+        // wrote it false (or never wrote it) under an older/looser taxonomy. Always-on means always
+        // enabled, so reconcile must surface it true regardless of the stored value or its absence —
+        // and it must do so whether or not a signal is suppressing.
+        val stored =
+            mapOf(
+                "dg-category-essential" to false,
+                "dg-category-marketing" to true,
+            )
+
+        for (suppress in listOf(true, false)) {
+            val reconciled =
+                SignalReconciliation.reconcile(
+                    cookieOptions = stored,
+                    suppress = suppress,
+                    essentialKeys = setOf("dg-category-essential", "dg-category-analytics"),
+                )
+
+            assertTrue("stored-false essential forced true (suppress=$suppress)", reconciled["dg-category-essential"]!!)
+            assertTrue("omitted essential backfilled true (suppress=$suppress)", reconciled["dg-category-analytics"]!!)
+        }
+    }
+
     // MARK: - Signed POST
 
     @Test
@@ -447,6 +472,26 @@ class UniversalConsentTest {
 
             val result = service.getUniversalConsent(config, "user@example.com", "key")
             assertNull(result)
+        }
+
+    @Test
+    fun `getUniversalConsent throws on an unrecognized status instead of treating it as a miss`() =
+        runTest {
+            // A degraded/unknown status is an ambiguous read, not a clean miss. Returning null here
+            // would let the read-then-write path overwrite a record we could not read (TRUST-2491).
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull()))
+                .thenReturn("""{"status":"error"}""")
+
+            val config =
+                ConsentServiceSecurityTest.createTestConfig().copy(consentProjectId = "proj_abc123")
+
+            var thrown: Throwable? = null
+            try {
+                service.getUniversalConsent(config, "user@example.com", "key")
+            } catch (e: Throwable) {
+                thrown = e
+            }
+            assertTrue("unrecognized status must throw", thrown is ConsentException.NetworkError)
         }
 
     @Test
