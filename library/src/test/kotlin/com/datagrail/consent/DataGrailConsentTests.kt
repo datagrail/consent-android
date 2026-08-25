@@ -2,6 +2,9 @@
 package com.datagrail.consent
 
 import com.datagrail.consent.models.ConsentException
+import com.datagrail.consent.models.TrackingSignal
+import com.datagrail.consent.models.UniversalConsentSignature
+import com.datagrail.consent.models.UniversalConsentSigningPayload
 import com.datagrail.consent.utils.ConsentLogger
 import com.datagrail.consent.utils.LogLevel
 import kotlinx.coroutines.Dispatchers
@@ -331,4 +334,110 @@ class DataGrailConsentTests {
             }
         assertNotNull(exception)
     }
+
+    // MARK: - Java Signature Provider Adapter
+
+    @Test
+    fun `java signature provider adapter surfaces the signature`() =
+        runBlocking {
+            val expected = UniversalConsentSignature("sig", "key-1")
+            val provider =
+                DataGrailConsent.asSignatureProvider { _, onResult -> onResult.onSignature(expected) }
+
+            val actual = provider(samplePayload())
+
+            assertEquals(expected, actual)
+        }
+
+    @Test
+    fun `java signature provider adapter propagates a signing failure`() =
+        runBlocking {
+            // Without the onFailure arm, a signing request that fails has no way to report back:
+            // the suspended write never resumes and setUserIdentifier's callback never fires.
+            val provider =
+                DataGrailConsent.asSignatureProvider { _, onResult ->
+                    onResult.onFailure(ConsentException.NetworkError("signing endpoint 503"))
+                }
+
+            val error =
+                assertThrows(ConsentException.NetworkError::class.java) {
+                    runBlocking { provider(samplePayload()) }
+                }
+
+            assertTrue(error.message!!.contains("signing endpoint 503"))
+        }
+
+    @Test
+    fun `java signature provider adapter ignores a duplicate callback`() =
+        runBlocking {
+            // A customer provider that reports twice must not crash the app by resuming an
+            // already-settled continuation.
+            val expected = UniversalConsentSignature("sig", "key-1")
+            val provider =
+                DataGrailConsent.asSignatureProvider { _, onResult ->
+                    onResult.onSignature(expected)
+                    onResult.onFailure(ConsentException.NetworkError("late failure, ignored"))
+                    onResult.onSignature(expected)
+                }
+
+            assertEquals(expected, provider(samplePayload()))
+        }
+
+    @Test
+    fun `java signature provider adapter passes the signing payload through`() =
+        runBlocking {
+            var seenPayload: UniversalConsentSigningPayload? = null
+            val provider =
+                DataGrailConsent.asSignatureProvider { payload, onResult ->
+                    seenPayload = payload
+                    onResult.onSignature(UniversalConsentSignature("sig", "key-1"))
+                }
+
+            val payload =
+                samplePayload(
+                    customerId = "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
+                    userHash = "1fee132c",
+                )
+            provider(payload)
+
+            assertEquals(payload, seenPayload)
+        }
+
+    @Test
+    fun `readTrackingSignalBounded interrupts a wedged read and falls back within the timeout`() =
+        runBlocking {
+            // Simulates a wedged Play Services binder call: a reader that blocks far past the
+            // timeout. runInterruptible must convert the deadline into a thread interrupt so the
+            // bound actually fires — a cooperative timeout alone cannot interrupt a blocking call,
+            // and structured concurrency would otherwise wait the full 10s for the body to return.
+            val start = System.currentTimeMillis()
+            val signal =
+                sut.readTrackingSignalBounded(timeoutMs = 100L) {
+                    Thread.sleep(10_000)
+                    TrackingSignal.AUTHORIZED
+                }
+            val elapsed = System.currentTimeMillis() - start
+
+            assertEquals(TrackingSignal.NOT_DETERMINED, signal)
+            assertTrue(
+                "bound must fire near the timeout, not wait for the blocking read (elapsed=$elapsed ms)",
+                elapsed < 5_000L,
+            )
+        }
+
+    private fun samplePayload(
+        customerId: String = "cust-1",
+        identifier: String = "user@example.com",
+        userHash: String = "hash-1",
+        timestamp: Long = 1_700_000_000L,
+        nonce: String = "0123456789abcdef0123456789abcdef",
+    ): UniversalConsentSigningPayload =
+        UniversalConsentSigningPayload(
+            stringToSign = "$customerId:$userHash:$timestamp:$nonce",
+            customerId = customerId,
+            identifier = identifier,
+            userHash = userHash,
+            timestamp = timestamp,
+            nonce = nonce,
+        )
 }

@@ -37,6 +37,68 @@ data class ConsentConfig(
     val gppUsNat: Boolean,
     val initialCategories: InitialCategories,
     val layout: Layout,
+    // Universal Consent (TRUST-1843). Both fields are optional and default to null so
+    // configs published before universal consent existed keep parsing (ignoreUnknownKeys
+    // is enabled, and these are nullable-with-default for backwards compatibility).
+    val consentProjectId: String? = null,
+    val universalConsent: UniversalConsentConfig? = null,
+) {
+    /**
+     * Whether universal (cross-device) consent is both enabled AND fully configured.
+     *
+     * `universalConsent.enabled` and `consentProjectId` are independently nullable, so a config can
+     * have the feature switched on with no project id to hash a user against. This single predicate
+     * owns "is universal consent usable" so the manager can gate on it once — rather than the
+     * manager checking `enabled` while the network layer separately discovers a null
+     * `consentProjectId` deep inside a write and fails there with a different error.
+     */
+    val universalConsentReady: Boolean
+        // Guard against blank as well as null: a config that serializes consentProjectId as "" would
+        // otherwise pass this gate and let computeUserHash hash "{customerId}::{identifier}" with an
+        // empty project segment, silently collapsing every such misconfigured customer onto one hash
+        // namespace. Fail fast instead, matching the empty-after-trim rejection on the identifier.
+        get() = universalConsent?.enabled == true && !consentProjectId.isNullOrBlank()
+}
+
+/**
+ * The GTM keys of every category this config treats as "essential" — always enabled, never
+ * suppressible by a privacy signal, and force-on/hidden in the banner.
+ *
+ * A category is essential when it is marked `always_on` OR its `gtm_key` contains "essential"
+ * (case-insensitive). This is the ONE definition of "essential", shared by:
+ *   - [com.datagrail.consent.ui.BannerDialog], which force-enables and hides these categories, and
+ *   - [com.datagrail.consent.ConsentManager], including the universal-consent reconcile/backfill
+ *     that force-enables them on a fetched cross-device record.
+ *
+ * Keeping both paths on this single predicate stops them from disagreeing about what is essential —
+ * e.g. a category with `always_on = false` but a `gtm_key` like "essential_analytics" is essential
+ * to both the banner and reconciliation, rather than being hidden/forced-on by the banner yet
+ * treated as non-essential (and therefore suppressible) by reconciliation.
+ */
+fun ConsentConfig.essentialCategoryKeys(): Set<String> {
+    val essentialKeys = mutableSetOf<String>()
+    for (layer in layout.consentLayers.values) {
+        for (element in layer.elements) {
+            element.consentLayerCategories?.forEach { category ->
+                if (category.alwaysOn || category.gtmKey.contains("essential", ignoreCase = true)) {
+                    essentialKeys.add(category.gtmKey)
+                }
+            }
+        }
+    }
+    return essentialKeys
+}
+
+/**
+ * Universal Consent feature flags, published under the `universalConsent` config key.
+ * @property enabled Whether cross-device universal consent is turned on for this container.
+ * @property syncOptout Whether CCPA/US opt-out state should be synced to the universal record.
+ */
+@Serializable
+data class UniversalConsentConfig(
+    val enabled: Boolean = false,
+    @SerialName("sync_optout")
+    val syncOptout: Boolean = false,
 )
 
 /**
