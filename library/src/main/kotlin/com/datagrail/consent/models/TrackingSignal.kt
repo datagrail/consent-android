@@ -2,6 +2,7 @@ package com.datagrail.consent.models
 
 import android.content.Context
 import com.datagrail.consent.utils.ConsentLogger
+import java.lang.reflect.Method
 
 /**
  * The device's live opt-out signal, as read from the operating system.
@@ -80,6 +81,48 @@ object TrackingSignalReader {
     /** A deleted advertising ID is reported as all zeroes rather than as an error. */
     private const val ZEROED_AD_ID = "00000000-0000-0000-0000-000000000000"
 
+    /** The three reflection handles the read needs, resolved together. */
+    private class AdIdReflection(
+        val getAdvertisingIdInfo: Method,
+        val isLimitAdTrackingEnabled: Method,
+        val getId: Method,
+    )
+
+    /**
+     * Resolve the `AdvertisingIdClient` reflection handles once and cache the result.
+     *
+     * Every universal-consent entry point reads this signal, so re-running `Class.forName` plus
+     * three `getMethod` lookups on each call is wasted work on a path already budgeted with a
+     * timeout. `by lazy` resolves at most once; when resolution fails (class stripped by R8,
+     * Play Services absent, a Play Services API rename) it caches null and every read then degrades
+     * to [TrackingSignal.NOT_DETERMINED] rather than repeatedly re-attempting a lookup that cannot
+     * succeed.
+     */
+    private val reflection: AdIdReflection? by lazy { resolveReflection() }
+
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun resolveReflection(): AdIdReflection? =
+        try {
+            val clientClass = Class.forName(ADVERTISING_ID_CLIENT)
+            val infoClass = Class.forName("$ADVERTISING_ID_CLIENT\$Info")
+            AdIdReflection(
+                getAdvertisingIdInfo = clientClass.getMethod("getAdvertisingIdInfo", Context::class.java),
+                isLimitAdTrackingEnabled = infoClass.getMethod("isLimitAdTrackingEnabled"),
+                getId = infoClass.getMethod("getId"),
+            )
+        } catch (e: ClassNotFoundException) {
+            // The app does not ship play-services-ads-identifier. Expected, not an error.
+            null
+        } catch (e: LinkageError) {
+            // R8/ProGuard stripped or renamed the class/method, or a Play Services update changed
+            // its shape (NoClassDefFoundError / NoSuchMethodError are Errors, not Exceptions).
+            ConsentLogger.d("Ad-tracking signal reflection unavailable: ${e.message}")
+            null
+        } catch (e: Exception) {
+            ConsentLogger.d("Could not resolve the device ad-tracking signal reader: ${e.message}")
+            null
+        }
+
     /**
      * Read the current ad-tracking signal.
      *
@@ -92,18 +135,12 @@ object TrackingSignalReader {
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     fun read(context: Context?): TrackingSignal {
         if (context == null) return TrackingSignal.NOT_DETERMINED
+        val handles = reflection ?: return TrackingSignal.NOT_DETERMINED
 
         return try {
-            val clientClass = Class.forName(ADVERTISING_ID_CLIENT)
-            val info =
-                clientClass
-                    .getMethod("getAdvertisingIdInfo", Context::class.java)
-                    .invoke(null, context)
-                    ?: return TrackingSignal.NOT_DETERMINED
-
-            val limitAdTracking =
-                info.javaClass.getMethod("isLimitAdTrackingEnabled").invoke(info) as? Boolean ?: false
-            val adId = info.javaClass.getMethod("getId").invoke(info) as? String
+            val info = handles.getAdvertisingIdInfo.invoke(null, context) ?: return TrackingSignal.NOT_DETERMINED
+            val limitAdTracking = handles.isLimitAdTrackingEnabled.invoke(info) as? Boolean ?: false
+            val adId = handles.getId.invoke(info) as? String
 
             when {
                 limitAdTracking -> TrackingSignal.DENIED
@@ -113,8 +150,11 @@ object TrackingSignalReader {
                 adId.isNullOrEmpty() -> TrackingSignal.NOT_DETERMINED
                 else -> TrackingSignal.AUTHORIZED
             }
-        } catch (e: ClassNotFoundException) {
-            // The app does not ship play-services-ads-identifier. Expected, not an error.
+        } catch (e: LinkageError) {
+            // A reflective invoke can still fail with an Error (not an Exception) if Play Services
+            // was updated to an incompatible shape after the handles were resolved. Degrade like
+            // any other unreadable signal rather than crashing the universal-consent entry point.
+            ConsentLogger.d("Ad-tracking signal read failed: ${e.message}")
             TrackingSignal.NOT_DETERMINED
         } catch (e: Exception) {
             // Play Services missing/repairable, IO failure, or a reflection mismatch after a
