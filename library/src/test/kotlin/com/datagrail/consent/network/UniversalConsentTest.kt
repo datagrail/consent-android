@@ -2,6 +2,8 @@ package com.datagrail.consent.network
 
 import com.datagrail.consent.models.*
 import com.datagrail.consent.storage.ConsentStorage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -30,7 +32,16 @@ class UniversalConsentTest {
     fun setUp() {
         MockitoAnnotations.openMocks(this)
         whenever(mockStorage.getOrCreateUniqueId()).thenReturn("test-unique-id")
-        service = ConsentService(mockNetworkClient, mockStorage, "consent.example.com")
+        // Run the signing callback inline (Dispatchers.Unconfined) rather than on a real
+        // Dispatchers.IO thread, so the write's withTimeout ceiling is governed by runTest's
+        // virtual-time scheduler — the signer resolves (or the timeout fires) deterministically.
+        service =
+            ConsentService(
+                mockNetworkClient,
+                mockStorage,
+                "consent.example.com",
+                signingDispatcher = Dispatchers.Unconfined,
+            )
     }
 
     // MARK: - Golden hash vector
@@ -528,4 +539,46 @@ class UniversalConsentTest {
             )
             assertEquals("dg_live_key", headersCaptor.firstValue["X-DG-Api-Key"])
         }
+
+    @Test
+    fun `saveUniversalConsent fails with SignatureTimeout when the signer never returns`() {
+        // A customer getSignature that never resolves must not suspend the write forever.
+        // withTimeout(SIGNATURE_TIMEOUT_MS) bounds the wait and the write fails with
+        // ConsentException.SignatureTimeout. Under runTest the 30s ceiling is virtual time —
+        // advanced by the scheduler, never actually slept — so this returns instantly.
+        val config =
+            ConsentServiceSecurityTest.createTestConfig().copy(
+                consentProjectId = "proj_abc123",
+                universalConsent = UniversalConsentConfig(enabled = true, syncOptout = false),
+            )
+
+        // Suspends and is never resumed; cancellable so the timeout can unwind it.
+        val provider: SignatureProvider = {
+            suspendCancellableCoroutine<UniversalConsentSignature> { /* never resumes */ }
+        }
+
+        // runTest advances virtual time past the ceiling and rethrows the write's failure.
+        val thrown =
+            assertThrows(ConsentException.SignatureTimeout::class.java) {
+                runTest {
+                    service.saveUniversalConsent(
+                        config = config,
+                        identifier = "user@example.com",
+                        preferences = UniversalConsentPreferences(),
+                        apiKey = "dg_live_key",
+                        ccpaOptout = false,
+                        getSignature = provider,
+                    )
+                }
+            }
+
+        assertTrue(
+            "message names the signing deadline",
+            thrown.message!!.contains("did not return within"),
+        )
+        // The write must abort before touching the network — no signature, no POST.
+        verifyBlocking(mockNetworkClient, never()) {
+            request(any(), any(), anyOrNull(), anyOrNull())
+        }
+    }
 }

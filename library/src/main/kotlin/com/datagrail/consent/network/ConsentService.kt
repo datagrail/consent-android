@@ -8,8 +8,11 @@ import com.datagrail.consent.models.UniversalConsentPreferences
 import com.datagrail.consent.models.UniversalConsentRecord
 import com.datagrail.consent.models.UniversalConsentSigningPayload
 import com.datagrail.consent.storage.ConsentStorage
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -28,6 +31,10 @@ internal class ConsentService(
     private val networkClient: NetworkClient,
     private val storage: ConsentStorage,
     private val privacyDomain: String,
+    // Dispatcher the customer's getSignature callback runs on. Defaults to Dispatchers.IO so a
+    // blocking signer never touches the main thread; injectable so tests can drive the bounded
+    // wait on their virtual-time scheduler instead of a real background thread.
+    private val signingDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     @Serializable
     private data class SavePreferencesRequest(
@@ -59,6 +66,15 @@ internal class ConsentService(
     companion object {
         private const val MAX_PENDING_EVENTS = 100
         private const val PLATFORM = "android"
+
+        /**
+         * Ceiling on how long a universal-consent write waits for the customer's `getSignature`
+         * callback to return. Signing round-trips to the customer's own backend, so this is set
+         * suitably high — but not forever. Past this deadline the write fails with
+         * [ConsentException.SignatureTimeout] rather than leaving the caller's [ConsentCallback]
+         * suspended indefinitely behind an unresponsive signer.
+         */
+        internal const val SIGNATURE_TIMEOUT_MS = 30_000L
 
         /** Lowercase-hex encode a byte array. Single source for both the user_hash and nonce. */
         private fun toHex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
@@ -281,11 +297,23 @@ internal class ConsentService(
                 // Dispatchers.IO: the public entry points launch on Dispatchers.Main, and a customer
                 // implementation that does a blocking network call inside getSignature would throw
                 // NetworkOnMainThreadException on Main. This honors SignatureProviderCallback's "may
-                // be called from a background thread" contract. (The wait is intentionally unbounded:
-                // signing round-trips to a customer backend and a hardcoded timeout would cancel
-                // legitimately slow signers; the resume-once contract in asSignatureProvider guards
-                // against a provider that resumes more than once.)
-                val sig = withContext(Dispatchers.IO) { getSignature(payload) }
+                // be called from a background thread" contract.
+                //
+                // Bound the wait with SIGNATURE_TIMEOUT_MS: signing round-trips to a customer
+                // backend, so the ceiling is suitably high, but a signer that never returns must
+                // not leave the caller's ConsentCallback suspended forever. On timeout the write
+                // fails with ConsentException.SignatureTimeout. The resume-once contract in
+                // asSignatureProvider still guards against a provider that resumes more than once.
+                val sig =
+                    try {
+                        withTimeout(SIGNATURE_TIMEOUT_MS) {
+                            withContext(signingDispatcher) { getSignature(payload) }
+                        }
+                    } catch (e: TimeoutCancellationException) {
+                        throw ConsentException.SignatureTimeout(
+                            "getSignature did not return within $SIGNATURE_TIMEOUT_MS ms",
+                        )
+                    }
                 mapOf(
                     "X-DG-Api-Key" to apiKey,
                     "X-DG-Signature" to sig.signature,
