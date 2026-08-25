@@ -365,6 +365,38 @@ class ConsentManagerTests {
         assertTrue(essentialCategories.isEmpty())
     }
 
+    /**
+     * Regression: a category with `alwaysOn = false` whose gtmKey contains "essential" is essential.
+     * The banner (getEssentialCategoryKeys) force-enables/hides it; before the shared definition,
+     * ConsentManager.getEssentialCategories treated it as non-essential, so the universal-consent
+     * reconcile/backfill would let it be suppressed — the two paths disagreed. Both must now agree,
+     * so we assert the manager path AND the shared definition the banner uses both include it.
+     */
+    @Test
+    fun `essential-named category with alwaysOn false is essential to both the manager and the shared definition`() {
+        // Given
+        val config =
+            createMockConfig(
+                listOf(
+                    MockCategory("essential_analytics", alwaysOn = false),
+                    MockCategory("category_marketing", alwaysOn = false),
+                ),
+            )
+        sut.currentConfig = config
+
+        // When
+        val managerEssential = sut.getEssentialCategories()
+        // The single definition the banner (BannerDialog.getEssentialCategoryKeys) delegates to.
+        val bannerEssential = config.essentialCategoryKeys()
+
+        // Then - both paths agree the "essential"-named, non-alwaysOn category is essential
+        assertTrue("manager treats essential_analytics as essential", managerEssential.contains("essential_analytics"))
+        assertTrue("banner treats essential_analytics as essential", bannerEssential.contains("essential_analytics"))
+        assertFalse("manager excludes marketing", managerEssential.contains("category_marketing"))
+        assertFalse("banner excludes marketing", bannerEssential.contains("category_marketing"))
+        assertEquals("both paths produce the same essential set", managerEssential.toSet(), bannerEssential)
+    }
+
     @Test
     fun `getEssentialCategories with alwaysOn categories returns correct keys`() {
         // Given

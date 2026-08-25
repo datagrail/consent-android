@@ -9,6 +9,7 @@ import com.datagrail.consent.models.SignatureProvider
 import com.datagrail.consent.models.TrackingSignal
 import com.datagrail.consent.models.UniversalConsentPreferences
 import com.datagrail.consent.models.UniversalConsentRecord
+import com.datagrail.consent.models.essentialCategoryKeys
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
@@ -187,29 +188,16 @@ internal class ConsentManager(
     /**
      * Essential/always-on category keys for a SPECIFIC config.
      *
+     * Delegates to [ConsentConfig.essentialCategoryKeys] — the single definition of "essential"
+     * shared with [com.datagrail.consent.ui.BannerDialog] so the two never disagree about which
+     * categories are always-on/hidden versus reconciled as suppressible.
+     *
      * The universal-consent read paths pass the config snapshot they captured before their
      * suspending network call, rather than re-reading [currentConfig]. A concurrent [loadConfig]
      * replacing [currentConfig] while the network GET is suspended would otherwise let
      * reconciliation read one config's essential set against another config's record — a torn read.
      */
-    private fun essentialCategories(config: ConsentConfig): List<String> {
-        val essentialKeys = mutableListOf<String>()
-
-        // Check all layers for categories marked as alwaysOn
-        for ((_, layer) in config.layout.consentLayers) {
-            for (element in layer.elements) {
-                if (element.type == "ConsentLayerCategoryElement") {
-                    element.consentLayerCategories?.forEach { category ->
-                        if (category.alwaysOn) {
-                            essentialKeys.add(category.gtmKey)
-                        }
-                    }
-                }
-            }
-        }
-
-        return essentialKeys
-    }
+    private fun essentialCategories(config: ConsentConfig): List<String> = config.essentialCategoryKeys().toList()
 
     // MARK: - Universal Consent
 
@@ -264,7 +252,7 @@ internal class ConsentManager(
             // from this device; the most privacy-protective of the two wins, and neither can
             // re-enable what the other suppressed.
             suppress = record.gpc || trackingSignal.suppressesNonEssential,
-            essentialKeys = essentialCategories(config).toSet(),
+            essentialKeys = config.essentialCategoryKeys(),
         )
     }
 

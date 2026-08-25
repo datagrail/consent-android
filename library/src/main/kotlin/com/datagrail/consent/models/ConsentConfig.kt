@@ -61,6 +61,35 @@ data class ConsentConfig(
 }
 
 /**
+ * The GTM keys of every category this config treats as "essential" — always enabled, never
+ * suppressible by a privacy signal, and force-on/hidden in the banner.
+ *
+ * A category is essential when it is marked `always_on` OR its `gtm_key` contains "essential"
+ * (case-insensitive). This is the ONE definition of "essential", shared by:
+ *   - [com.datagrail.consent.ui.BannerDialog], which force-enables and hides these categories, and
+ *   - [com.datagrail.consent.ConsentManager], including the universal-consent reconcile/backfill
+ *     that force-enables them on a fetched cross-device record.
+ *
+ * Keeping both paths on this single predicate stops them from disagreeing about what is essential —
+ * e.g. a category with `always_on = false` but a `gtm_key` like "essential_analytics" is essential
+ * to both the banner and reconciliation, rather than being hidden/forced-on by the banner yet
+ * treated as non-essential (and therefore suppressible) by reconciliation.
+ */
+fun ConsentConfig.essentialCategoryKeys(): Set<String> {
+    val essentialKeys = mutableSetOf<String>()
+    for (layer in layout.consentLayers.values) {
+        for (element in layer.elements) {
+            element.consentLayerCategories?.forEach { category ->
+                if (category.alwaysOn || category.gtmKey.contains("essential", ignoreCase = true)) {
+                    essentialKeys.add(category.gtmKey)
+                }
+            }
+        }
+    }
+    return essentialKeys
+}
+
+/**
  * Universal Consent feature flags, published under the `universalConsent` config key.
  * @property enabled Whether cross-device universal consent is turned on for this container.
  * @property syncOptout Whether CCPA/US opt-out state should be synced to the universal record.

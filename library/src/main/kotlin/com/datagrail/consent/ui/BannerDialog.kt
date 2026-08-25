@@ -20,6 +20,7 @@ import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentLayerCategory
 import com.datagrail.consent.models.ConsentLayerElement
 import com.datagrail.consent.models.ConsentPreferences
+import com.datagrail.consent.models.essentialCategoryKeys
 import java.util.Locale
 
 /**
@@ -882,35 +883,15 @@ class BannerDialog : DialogFragment() {
     }
 
     /**
-     * Get essential/always-on category GTM keys from the config
+     * Get essential/always-on category GTM keys from the config.
+     *
+     * Delegates to [ConsentConfig.essentialCategoryKeys] — the single "is this category essential?"
+     * definition shared with [com.datagrail.consent.ConsentManager] (and its universal-consent
+     * reconcile/backfill) so the banner and reconciliation never disagree about which categories
+     * are always-on/hidden versus suppressible. A category is essential when it is `always_on` OR
+     * its `gtm_key` contains "essential" (case-insensitive).
      */
-    private fun getEssentialCategoryKeys(cfg: ConsentConfig): Set<String> {
-        val essentialKeys = mutableSetOf<String>()
-
-        // Scan consent layers for always-on categories
-        for (layer in cfg.layout.consentLayers.values) {
-            for (element in layer.elements) {
-                element.consentLayerCategories?.forEach { category ->
-                    if (category.alwaysOn) {
-                        essentialKeys.add(category.gtmKey)
-                    }
-                }
-            }
-        }
-
-        // Also check for categories with "essential" in the name as fallback
-        for (layer in cfg.layout.consentLayers.values) {
-            for (element in layer.elements) {
-                element.consentLayerCategories?.forEach { category ->
-                    if (category.gtmKey.contains("essential", ignoreCase = true)) {
-                        essentialKeys.add(category.gtmKey)
-                    }
-                }
-            }
-        }
-
-        return essentialKeys
-    }
+    private fun getEssentialCategoryKeys(cfg: ConsentConfig): Set<String> = cfg.essentialCategoryKeys()
 
     private fun navigateToLayer(layerKey: String) {
         currentLayerKey = layerKey
