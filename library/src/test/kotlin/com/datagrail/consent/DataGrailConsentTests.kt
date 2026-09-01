@@ -1,12 +1,17 @@
+
 package com.datagrail.consent
 
 import com.datagrail.consent.models.ConsentException
+import com.datagrail.consent.models.TrackingSignal
+import com.datagrail.consent.models.UniversalConsentSignature
+import com.datagrail.consent.models.UniversalConsentSigningPayload
 import com.datagrail.consent.utils.ConsentLogger
 import com.datagrail.consent.utils.LogLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -172,6 +177,59 @@ class DataGrailConsentTests {
             )
         }
 
+    // MARK: - Storage Initialization Tests
+
+    @Test
+    fun `initialize returns before storage setup completes`() {
+        // Storage creation runs inside a launched coroutine on Dispatchers.IO — a real thread
+        // pool, not the virtual StandardTestDispatcher installed in setUp(). A latch with a
+        // real timeout (rather than testScheduler.advanceUntilIdle(), which only drives
+        // virtual time on the Main dispatcher and can't wait for real IO-pool work) confirms
+        // the callback still fires once that background work completes. Swap Main to an
+        // UnconfinedTestDispatcher for just this test so the post-IO resumption dispatches
+        // immediately instead of queuing on the paused StandardTestDispatcher.
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+
+        val validUrl = "https://consent.datagrail.io/config.json"
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var resultError: Throwable? = null
+
+        // Given an unconfigured mock Context — storage creation will fail against it (no real
+        // Keystore/EncryptedSharedPreferences available in this test)
+        sut.initialize(mockContext, validUrl) { result ->
+            result.fold(
+                onSuccess = { },
+                onFailure = { error -> resultError = error },
+            )
+            latch.countDown()
+        }
+
+        // Then - the background storage init failure arrives asynchronously via the callback
+        val completed = latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+        assertTrue("Callback should fire within timeout", completed)
+        assertNotNull("Should have received an error from storage initialization", resultError)
+        assertTrue(resultError is ConsentException)
+    }
+
+    @Test
+    fun `overlapping initialize calls each fire their own callback`() {
+        // Two rapid initialize() calls race on the shared manager/configUrl assignment. The
+        // generation guard makes the commit "last wins"; here we assert the re-entrancy is at
+        // least safe — both callers get a callback and neither is left hanging. (The commit
+        // path itself needs a real EncryptedSharedPreferences, so it isn't exercised here;
+        // against the mock Context both calls fail storage init and report through the callback.)
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+
+        val url = "https://consent.datagrail.io/config.json"
+        val latch = java.util.concurrent.CountDownLatch(2)
+
+        sut.initialize(mockContext, url) { latch.countDown() }
+        sut.initialize(mockContext, url) { latch.countDown() }
+
+        val completed = latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+        assertTrue("Both initialize() callbacks should fire within timeout", completed)
+    }
+
     // MARK: - Thread Safety Tests
 
     @Test
@@ -276,4 +334,110 @@ class DataGrailConsentTests {
             }
         assertNotNull(exception)
     }
+
+    // MARK: - Java Signature Provider Adapter
+
+    @Test
+    fun `java signature provider adapter surfaces the signature`() =
+        runBlocking {
+            val expected = UniversalConsentSignature("sig", "key-1")
+            val provider =
+                DataGrailConsent.asSignatureProvider { _, onResult -> onResult.onSignature(expected) }
+
+            val actual = provider(samplePayload())
+
+            assertEquals(expected, actual)
+        }
+
+    @Test
+    fun `java signature provider adapter propagates a signing failure`() =
+        runBlocking {
+            // Without the onFailure arm, a signing request that fails has no way to report back:
+            // the suspended write never resumes and setUserIdentifier's callback never fires.
+            val provider =
+                DataGrailConsent.asSignatureProvider { _, onResult ->
+                    onResult.onFailure(ConsentException.NetworkError("signing endpoint 503"))
+                }
+
+            val error =
+                assertThrows(ConsentException.NetworkError::class.java) {
+                    runBlocking { provider(samplePayload()) }
+                }
+
+            assertTrue(error.message!!.contains("signing endpoint 503"))
+        }
+
+    @Test
+    fun `java signature provider adapter ignores a duplicate callback`() =
+        runBlocking {
+            // A customer provider that reports twice must not crash the app by resuming an
+            // already-settled continuation.
+            val expected = UniversalConsentSignature("sig", "key-1")
+            val provider =
+                DataGrailConsent.asSignatureProvider { _, onResult ->
+                    onResult.onSignature(expected)
+                    onResult.onFailure(ConsentException.NetworkError("late failure, ignored"))
+                    onResult.onSignature(expected)
+                }
+
+            assertEquals(expected, provider(samplePayload()))
+        }
+
+    @Test
+    fun `java signature provider adapter passes the signing payload through`() =
+        runBlocking {
+            var seenPayload: UniversalConsentSigningPayload? = null
+            val provider =
+                DataGrailConsent.asSignatureProvider { payload, onResult ->
+                    seenPayload = payload
+                    onResult.onSignature(UniversalConsentSignature("sig", "key-1"))
+                }
+
+            val payload =
+                samplePayload(
+                    customerId = "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
+                    userHash = "1fee132c",
+                )
+            provider(payload)
+
+            assertEquals(payload, seenPayload)
+        }
+
+    @Test
+    fun `readTrackingSignalBounded interrupts a wedged read and falls back within the timeout`() =
+        runBlocking {
+            // Simulates a wedged Play Services binder call: a reader that blocks far past the
+            // timeout. runInterruptible must convert the deadline into a thread interrupt so the
+            // bound actually fires — a cooperative timeout alone cannot interrupt a blocking call,
+            // and structured concurrency would otherwise wait the full 10s for the body to return.
+            val start = System.currentTimeMillis()
+            val signal =
+                sut.readTrackingSignalBounded(timeoutMs = 100L) {
+                    Thread.sleep(10_000)
+                    TrackingSignal.AUTHORIZED
+                }
+            val elapsed = System.currentTimeMillis() - start
+
+            assertEquals(TrackingSignal.NOT_DETERMINED, signal)
+            assertTrue(
+                "bound must fire near the timeout, not wait for the blocking read (elapsed=$elapsed ms)",
+                elapsed < 5_000L,
+            )
+        }
+
+    private fun samplePayload(
+        customerId: String = "cust-1",
+        identifier: String = "user@example.com",
+        userHash: String = "hash-1",
+        timestamp: Long = 1_700_000_000L,
+        nonce: String = "0123456789abcdef0123456789abcdef",
+    ): UniversalConsentSigningPayload =
+        UniversalConsentSigningPayload(
+            stringToSign = "$customerId:$userHash:$timestamp:$nonce",
+            customerId = customerId,
+            identifier = identifier,
+            userHash = userHash,
+            timestamp = timestamp,
+            nonce = nonce,
+        )
 }

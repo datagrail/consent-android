@@ -1,0 +1,27 @@
+# Configures the notes produced by `gh release create --generate-notes` (see
+# .github/workflows/release.yml). PRs are grouped into these categories by label,
+# so a labeled PR surfaces in the right section of every GitHub Release. Label a
+# PR `breaking-change` (or `semver:major`) to call out a source-/behavior-breaking
+# change for integrators — e.g. a public API/type change — under Breaking Changes.
+changelog:
+  categories:
+    - title: ⚠️ Breaking Changes
+      labels:
+        - breaking-change
+        - semver:major
+    - title: 🚀 Features
+      labels:
+        - feature
+        - enhancement
+    - title: 🐛 Bug Fixes
+      labels:
+        - bug
+        - bugfix
+    - title: 🧹 Maintenance & Docs
+      labels:
+        - chore
+        - documentation
+        - dependencies
+    - title: Other Changes
+      labels:
+        - "*"

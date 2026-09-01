@@ -6,7 +6,7 @@ plugins {
     id("org.jlleitschuh.gradle.ktlint") version "11.6.1"
 }
 
-val libraryVersion = "1.6.0"
+val libraryVersion = "1.7.0"
 
 android {
     namespace = "com.datagrail.consent"

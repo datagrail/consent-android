@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Align `rejectAll()` with the banner's definition of "essential": a category is now kept enabled after reject-all when `alwaysOn` is true or its `gtm_key` contains "essential", via the shared `ConsentConfig.essentialCategoryKeys()`. A category with `alwaysOn = false` whose `gtm_key` contains "essential" now stays enabled instead of being disabled (no change where essential categories are marked `alwaysOn`) (TRUST-1843)
+
+## [1.7.0] - 2026-07-17
+
+### Fixed
+
+- Move encrypted storage initialization off the main thread in `initialize()` to prevent ANRs on cold start, and harden the async path against re-entrancy and cancellation (TRUST-2318)
+- Fix close button clipping in `MODAL` display style by positioning it against the visible card, and density-scale content container side padding (TRUST-2267)
+
+### Changed
+
+- Show an "Always On" label for essential (always-on) categories instead of a disabled toggle switch (TRUST-2267)
+
 ## [1.6.0] - 2026-06-26
 
 ### Fixed
