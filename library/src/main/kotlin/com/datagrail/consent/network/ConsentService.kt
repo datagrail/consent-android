@@ -70,6 +70,15 @@ internal class ConsentService(
         private const val PLATFORM = "android"
 
         /**
+         * The consent-schema version this SDK's models are written against. This SDK mirrors the
+         * v1 wire format (byte-equivalent legacy shape) and doesn't consume consent-schema's
+         * generated types, so this is a build-time constant rather than anything derived from the
+         * wire format or fetched config — bump it only when this SDK's models are rewritten
+         * against a newer schema version.
+         */
+        private const val SCHEMA_VERSION = "v1"
+
+        /**
          * Ceiling on how long a universal-consent write waits for the customer's `getSignature`
          * callback to return. Signing round-trips to the customer's own backend, so this is set
          * suitably high — but not forever. Past this deadline the write fails with
@@ -429,6 +438,7 @@ internal class ConsentService(
                 "&consent_container_version_id=${encodeParam(config.consentContainerVersionId)}" +
                 "&library_version=${encodeParam(BuildConfig.LIBRARY_VERSION)}" +
                 "&os_version=${encodeParam(Build.VERSION.RELEASE ?: "")}" +
+                "&schema_version=${encodeParam(SCHEMA_VERSION)}" +
                 policyUuidParam
 
         try {

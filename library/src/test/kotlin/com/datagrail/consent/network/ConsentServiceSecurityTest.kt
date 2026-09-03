@@ -227,7 +227,7 @@ class ConsentServiceSecurityTest {
     // MARK: - Version Telemetry Tests
 
     @Test
-    fun `saveOpen includes library_version and os_version parameters`() =
+    fun `saveOpen includes library_version, os_version, and schema_version parameters`() =
         runTest {
             whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
 
@@ -247,7 +247,13 @@ class ConsentServiceSecurityTest {
             // `.contains("os_version=")`) ensures the value is truly empty, not e.g. "null".
             assertTrue(
                 "URL should contain os_version param with an empty (test-env) value, got: $capturedUrl",
-                capturedUrl.contains("os_version=&policy_uuid="),
+                capturedUrl.contains("os_version=&schema_version="),
+            )
+            // schema_version is a build-time constant (this SDK's models are written against v1
+            // of the wire format), not derived from the fetched config.
+            assertTrue(
+                "URL should contain schema_version=v1, got: $capturedUrl",
+                capturedUrl.contains("schema_version=v1&policy_uuid="),
             )
         }
 
