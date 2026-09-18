@@ -1,5 +1,7 @@
 package com.datagrail.consent.network
 
+import android.os.Build
+import com.datagrail.consent.BuildConfig
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
@@ -66,6 +68,15 @@ internal class ConsentService(
     companion object {
         private const val MAX_PENDING_EVENTS = 100
         private const val PLATFORM = "android"
+
+        /**
+         * The consent-schema version this SDK's models are written against. This SDK mirrors the
+         * v1 wire format (byte-equivalent legacy shape) and doesn't consume consent-schema's
+         * generated types, so this is a build-time constant rather than anything derived from the
+         * wire format or fetched config — bump it only when this SDK's models are rewritten
+         * against a newer schema version.
+         */
+        private const val SCHEMA_VERSION = "v1"
 
         /**
          * Ceiling on how long a universal-consent write waits for the customer's `getSignature`
@@ -425,6 +436,9 @@ internal class ConsentService(
                 "&uniqueId=${encodeParam(uniqueId)}" +
                 "&policy_name=${encodeParam(config.consentPolicy.name)}" +
                 "&consent_container_version_id=${encodeParam(config.consentContainerVersionId)}" +
+                "&library_version=${encodeParam(BuildConfig.LIBRARY_VERSION)}" +
+                "&os_version=${encodeParam(Build.VERSION.RELEASE ?: "")}" +
+                "&schema_version=${encodeParam(SCHEMA_VERSION)}" +
                 policyUuidParam
 
         try {

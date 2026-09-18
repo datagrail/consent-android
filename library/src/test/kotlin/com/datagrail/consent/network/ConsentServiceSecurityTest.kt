@@ -1,5 +1,6 @@
 package com.datagrail.consent.network
 
+import com.datagrail.consent.BuildConfig
 import com.datagrail.consent.models.*
 import com.datagrail.consent.storage.ConsentStorage
 import kotlinx.coroutines.test.runTest
@@ -220,6 +221,39 @@ class ConsentServiceSecurityTest {
             assertFalse(
                 "URL should not contain policy_uuid when uuid is null",
                 capturedUrl.contains("policy_uuid"),
+            )
+        }
+
+    // MARK: - Version Telemetry Tests
+
+    @Test
+    fun `saveOpen includes library_version, os_version, and schema_version parameters`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            service.saveOpen(testConfig)
+
+            val urlCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(urlCaptor.capture(), any(), anyOrNull(), anyOrNull())
+            val capturedUrl = urlCaptor.firstValue
+
+            assertTrue(
+                "URL should contain library_version param with the BuildConfig value, got: $capturedUrl",
+                capturedUrl.contains("library_version=${BuildConfig.LIBRARY_VERSION}"),
+            )
+            // Build.VERSION.RELEASE resolves to null under this module's returnDefaultValues unit
+            // test config, so ConsentService's `?: ""` fallback makes the expected value empty here.
+            // Asserting the param is immediately followed by the next param (rather than just
+            // `.contains("os_version=")`) ensures the value is truly empty, not e.g. "null".
+            assertTrue(
+                "URL should contain os_version param with an empty (test-env) value, got: $capturedUrl",
+                capturedUrl.contains("os_version=&schema_version="),
+            )
+            // schema_version is a build-time constant (this SDK's models are written against v1
+            // of the wire format), not derived from the fetched config.
+            assertTrue(
+                "URL should contain schema_version=v1, got: $capturedUrl",
+                capturedUrl.contains("schema_version=v1&policy_uuid="),
             )
         }
 
