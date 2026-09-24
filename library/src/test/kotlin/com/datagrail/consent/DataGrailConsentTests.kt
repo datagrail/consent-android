@@ -335,6 +335,15 @@ class DataGrailConsentTests {
         assertNotNull(exception)
     }
 
+    @Test
+    fun `clearUserIdentifier is a no-op when not initialized`() {
+        // Given
+        sut.reset()
+
+        // When/Then - follows reset(): safe to call before initialize, never throws
+        sut.clearUserIdentifier()
+    }
+
     // MARK: - Java Signature Provider Adapter
 
     @Test

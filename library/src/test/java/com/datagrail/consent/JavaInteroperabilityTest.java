@@ -189,6 +189,45 @@ public class JavaInteroperabilityTest {
     }
 
     @Test
+    public void testAttachAnonymousConsentOverloadsAccessible() throws NoSuchMethodException {
+        // TRUST-2902: the opt-in attribution flag is reachable from Java on both the unsigned and
+        // the signed callback-interface overloads, alongside the unchanged original overloads.
+        assertNotNull(DataGrailConsent.class.getMethod(
+                "setUserIdentifier", String.class, String.class, boolean.class, ConsentCallback.class));
+        assertNotNull(DataGrailConsent.class.getMethod(
+                "setUserIdentifier", String.class, String.class, SignatureProviderCallback.class,
+                boolean.class, ConsentCallback.class));
+        assertNotNull(DataGrailConsent.class.getMethod(
+                "setUserIdentifier", String.class, String.class, SignatureProviderCallback.class,
+                ConsentCallback.class));
+    }
+
+    @Test
+    public void testClearUserIdentifierAccessibleAndSafeWhenNotInitialized() throws NoSuchMethodException {
+        assertNotNull(DataGrailConsent.class.getMethod("clearUserIdentifier"));
+        sdk.clearUserIdentifier();
+    }
+
+    @Test
+    public void testUnsignedSetUserIdentifierWithFlagCallsFailureWhenNotInitialized() {
+        final AtomicReference<ConsentException> errorRef = new AtomicReference<>();
+
+        sdk.setUserIdentifier("user@example.com", "dg_key", true, new ConsentCallback() {
+            @Override
+            public void onSuccess() {
+                fail("Should not succeed when not initialized");
+            }
+
+            @Override
+            public void onFailure(ConsentException error) {
+                errorRef.set(error);
+            }
+        });
+
+        assertTrue("Should be NotInitialized", errorRef.get() instanceof ConsentException.NotInitialized);
+    }
+
+    @Test
     public void testUnsignedSetUserIdentifierCallsFailureWhenNotInitialized() {
         final AtomicReference<ConsentException> errorRef = new AtomicReference<>();
 

@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `clearUserIdentifier()`: logout / return-to-neutral for universal consent. Clears the device's identity binding and the stored consent choice so reads return the config defaults and the banner shows again; fires the consent-changed listener with the defaults. Non-destructive, unlike `reset()`: no network call, the server-side record is untouched, and the unique id, config cache/version, locale and pending queue are kept. Hosts must call it on logout; the SDK cannot detect a logout it is not told about (TRUST-2902)
+- `setUserIdentifier` overloads taking `attachAnonymousConsent: Boolean` (Kotlin and Java-friendly, signed and API-key-only). The existing overloads are unchanged and behave as `attachAnonymousConsent = false` (TRUST-2902)
+
 ### Changed
+
+- `setUserIdentifier` no longer attributes pre-login anonymous consent to a newly logged-in identity by default. The SDK now persists the user hash (never the raw identifier) of the identity the device is bound to. On a first login or a switch to a different identity where no universal consent record exists yet, an explicit local choice is not written to the new record; local consent returns to the defaults instead. The SDK cannot tell whether that choice was made by the person logging in or a previous user of a shared device and does no shared-device or shared-account detection, so pass `attachAnonymousConsent = true` only when the host knows the choice and the login happened in the same session. Found records, read failures, a miss with no local choice, and repeat calls for the already-bound identity are unchanged (TRUST-2902)
 
 - Align `rejectAll()` with the banner's definition of "essential": a category is now kept enabled after reject-all when `alwaysOn` is true or its `gtm_key` contains "essential", via the shared `ConsentConfig.essentialCategoryKeys()`. A category with `alwaysOn = false` whose `gtm_key` contains "essential" now stays enabled instead of being disabled (no change where essential categories are marked `alwaysOn`) (TRUST-1843)
 
