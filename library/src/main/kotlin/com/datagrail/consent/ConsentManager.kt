@@ -415,7 +415,21 @@ internal class ConsentManager(
      * TRUST-2491 corruption class). The caller can retry, which re-reads first. Coroutine
      * cancellation propagates so structured concurrency is preserved.
      *
-     * The identifier is NOT retained as manager state, so subsequent operations (e.g.
+     * NO ANONYMOUS-HISTORY ATTRIBUTION (TRUST-2902): the device persists the user hash (never the
+     * raw identifier) of the identity it is currently bound to. On a genuine MISS, when the device
+     * is NOT already bound to this identity (never bound, or bound to someone else) AND it holds an
+     * explicit local choice, that choice is pre-login anonymous history, possibly a previous user's
+     * on a shared device. It is NOT written to the new identity's record; instead local state
+     * returns to NEUTRAL (the same local operation as [clearUserIdentifier], minus clearing the
+     * binding) and [onRehydrated] fires with the now-effective defaults. The SDK cannot tell whether
+     * that choice was made by the person now logging in, so attribution is opt-in:
+     * [attachAnonymousConsent] = true (only when the host has its own same-session continuity
+     * signal) or an existing binding to this identity keeps the existing seed-the-record write. A
+     * miss with no explicit local choice, a FOUND record, and a read FAILURE are all unchanged
+     * (found-record vs local-choice conflicts are TRUST-2592's). The binding is set only after the
+     * call succeeds, so a failed write never binds and a retry is still recognised as a transition.
+     *
+     * The raw identifier is NOT retained as manager state, so subsequent operations (e.g.
      * [fetchUniversalConsent]) must pass it again. Requires universal consent to be enabled AND
      * configured; throws [ConsentException.ValidationError]/[ConsentException.NotInitialized]
      * otherwise, before any request reaches the service.
@@ -427,17 +441,31 @@ internal class ConsentManager(
      *   Read from the OS by the public adapter; defaults to [TrackingSignal.NOT_DETERMINED].
      * @param getSignature Customer-provided signature provider (calls their backend), or null for
      *   a limited-mode (API-key-only) write with no signature/timestamp/nonce headers.
-     * @param onRehydrated Invoked with the effective local preferences when — and only when — a
-     *   record was rehydrated, so the adapter can notify its consent-changed listener.
+     * @param attachAnonymousConsent When true, a genuine miss seeds the new identity's record from
+     *   the device's explicit pre-login choice even on a login transition. Defaults to false.
+     * @param onRehydrated Invoked with the effective local preferences when — and only when — local
+     *   state changed (a record was rehydrated, or a login transition returned it to neutral), so
+     *   the adapter can notify its consent-changed listener.
      */
     suspend fun setUserIdentifier(
         identifier: String,
         apiKey: String,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
         getSignature: SignatureProvider? = null,
+        attachAnonymousConsent: Boolean = false,
         onRehydrated: ((ConsentPreferences) -> Unit)? = null,
     ) {
         val config = requireUniversalConsentReady()
+
+        // The same hash the service computes for the read/write (it also rejects an identifier that
+        // is empty after normalization, before any request). Only the hash is ever persisted.
+        val userHash =
+            ConsentService.computeUserHash(
+                config.dgCustomerId,
+                requireNotNull(config.consentProjectId),
+                identifier,
+            )
+        val wasBound = storage.loadBoundUserHash() == userHash
 
         // Capture the user's RAW local choice BEFORE the rehydrate below persists the
         // signal-reconciled view. null means no genuine local choice yet: initialize() never seeds
@@ -463,6 +491,16 @@ internal class ConsentManager(
         // local state by the rehydrate above. Re-POSTing it would only echo state the edge already
         // holds. Conflict resolution across devices is the edge's job, not the SDK's.
         if (rawFromRecord != null && localChoice == null) {
+            storage.saveBoundUserHash(userHash)
+            return
+        }
+
+        // Login TRANSITION on a genuine miss (device unbound, or bound to a different identity) with
+        // an explicit local choice: that choice is pre-login anonymous history, possibly a previous
+        // user's on a shared device. Do not attribute it to this identity; return to neutral instead.
+        if (rawFromRecord == null && localChoice != null && !wasBound && !attachAnonymousConsent) {
+            returnToNeutral(onRehydrated)
+            storage.saveBoundUserHash(userHash)
             return
         }
 
@@ -496,6 +534,38 @@ internal class ConsentManager(
             ccpaOptout = false,
             getSignature = getSignature,
         )
+        // Bind only after the write succeeds: a failed write throws above and leaves the binding
+        // untouched, so a retry is still recognised as a transition.
+        storage.saveBoundUserHash(userHash)
+    }
+
+    /**
+     * Logout / return-to-neutral (TRUST-2902). Clears the persisted identity binding and returns
+     * local consent to NEUTRAL: the stored explicit choice is removed, so reads fall back to the
+     * config's defaults exactly as on a fresh install ([needsConsent] true, [getUserPreferences]
+     * null), and [onNeutral] fires with those now-effective defaults.
+     *
+     * NON-destructive, unlike [reset]: no network call, the server-side universal consent record is
+     * untouched, and the unique id, config cache, config version, locale, pending event queue and
+     * loaded config all stay in place. Idempotent and safe to call when not bound.
+     *
+     * @param onNeutral Invoked with the now-effective (default) preferences so the adapter can
+     *   notify its consent-changed listener.
+     */
+    fun clearUserIdentifier(onNeutral: ((ConsentPreferences) -> Unit)? = null) {
+        storage.clearBoundUserHash()
+        returnToNeutral(onNeutral)
+    }
+
+    /**
+     * The single "return local state to neutral" operation shared by [clearUserIdentifier] and the
+     * login-transition branch of [setUserIdentifier]: remove the stored explicit choice and reuse
+     * the existing default path ([getCategories] falls back to [getDefaultPreferences]) rather than
+     * reimplementing defaults.
+     */
+    private fun returnToNeutral(onNeutral: ((ConsentPreferences) -> Unit)?) {
+        storage.clearPreferences()
+        getCategories()?.let { onNeutral?.invoke(it) }
     }
 
     // MARK: - Retry
@@ -511,7 +581,8 @@ internal class ConsentManager(
     // MARK: - Reset
 
     /**
-     * Clear all consent data
+     * Clear all consent data, including the identity binding (destructive; see
+     * [clearUserIdentifier] for the non-destructive logout)
      */
     fun reset() {
         storage.clearAll()

@@ -151,6 +151,41 @@ class ConsentStorageTest {
         Mockito.verify(mockEditor).apply()
     }
 
+    // MARK: - Identity binding (TRUST-2902)
+
+    @Test
+    fun testBoundUserHashRoundTrip() {
+        whenever(mockSharedPreferences.getString("datagrail_consent_bound_user_hash", null))
+            .thenReturn("abc123")
+
+        storage.saveBoundUserHash("abc123")
+
+        Mockito.verify(mockEditor).putString("datagrail_consent_bound_user_hash", "abc123")
+        assertEquals("abc123", storage.loadBoundUserHash())
+    }
+
+    @Test
+    fun testClearBoundUserHashRemovesOnlyTheBinding() {
+        storage.clearBoundUserHash()
+
+        Mockito.verify(mockEditor).remove("datagrail_consent_bound_user_hash")
+        Mockito.verify(mockEditor, Mockito.never()).clear()
+        Mockito.verify(mockEditor, Mockito.never()).remove("datagrail_consent_preferences")
+    }
+
+    @Test
+    fun testClearPreferencesRemovesOnlyTheStoredChoice() {
+        storage.clearPreferences()
+
+        Mockito.verify(mockEditor).remove("datagrail_consent_preferences")
+        Mockito.verify(mockEditor, Mockito.never()).clear()
+        Mockito.verify(mockEditor, Mockito.never()).remove("datagrail_consent_id")
+        Mockito.verify(mockEditor, Mockito.never()).remove("datagrail_consent_version")
+        Mockito.verify(mockEditor, Mockito.never()).remove("datagrail_consent_config_cache")
+        Mockito.verify(mockEditor, Mockito.never()).remove("datagrail_consent_pending_events")
+        Mockito.verify(mockEditor, Mockito.never()).remove("datagrail_consent_bound_user_hash")
+    }
+
     // MARK: - Corrupted keyset recovery
 
     @Test

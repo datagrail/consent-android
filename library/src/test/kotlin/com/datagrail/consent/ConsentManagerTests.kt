@@ -621,6 +621,9 @@ class ConsentManagerTests {
                 "user@example.com",
                 "dg_key",
                 getSignature = signatureProvider(),
+                // Genuine miss on a first-ever login: opt in to attributing the local choice
+                // (TRUST-2902 suppresses it by default), so this still exercises the write body.
+                attachAnonymousConsent = true,
             )
 
             val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
@@ -895,6 +898,10 @@ class ConsentManagerTests {
                         ),
                 ),
             )
+            // Already bound to this identity (a returning logged-in user), so the genuine miss
+            // still seeds the record from the local choice rather than being treated as a
+            // TRUST-2902 login transition.
+            bindDeviceTo("user@example.com")
 
             sut.setUserIdentifier(
                 "user@example.com",
@@ -942,8 +949,9 @@ class ConsentManagerTests {
                 ),
             )
 
-            // getSignature omitted — the unsigned public path.
-            sut.setUserIdentifier("user@example.com", "dg_key")
+            // getSignature omitted — the unsigned public path. Genuine miss on a first-ever login,
+            // so opt in to attribution (TRUST-2902 suppresses the write by default).
+            sut.setUserIdentifier("user@example.com", "dg_key", attachAnonymousConsent = true)
 
             verify(mockConsentService).saveUniversalConsent(
                 any(),
@@ -954,6 +962,219 @@ class ConsentManagerTests {
                 isNull(),
             )
         }
+
+    // MARK: - TRUST-2902 identity binding / logout-to-neutral
+
+    /**
+     * (b) A login TRANSITION (device never bound) on a genuine miss with an explicit local choice:
+     * the choice is pre-login anonymous history and must NOT be attributed to the new identity.
+     * Local state returns to neutral, the listener sees the defaults, and the device binds.
+     */
+    @Test
+    fun `setUserIdentifier does not attribute anonymous history on a first-login miss`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice(), null)
+            val notified = mutableListOf<ConsentPreferences>()
+
+            sut.setUserIdentifier(
+                "user@example.com",
+                "dg_key",
+                getSignature = signatureProvider(),
+                onRehydrated = { notified.add(it) },
+            )
+
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockStorage).clearPreferences()
+            verify(mockStorage, never()).clearAll()
+            verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
+            assertEquals("listener sees the neutral defaults", listOf(sut.getDefaultPreferences()), notified)
+        }
+
+    /** (c) The same first-login miss with the host's opt-in keeps the existing seed-the-record write. */
+    @Test
+    fun `setUserIdentifier attributes anonymous history when the host opts in`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice())
+
+            sut.setUserIdentifier(
+                "user@example.com",
+                "dg_key",
+                getSignature = signatureProvider(),
+                attachAnonymousConsent = true,
+            )
+
+            val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
+            verify(mockConsentService).saveUniversalConsent(any(), any(), prefsCaptor.capture(), any(), any(), any())
+            assertEquals(false, prefsCaptor.firstValue.cookieOptions["category_marketing"])
+            verify(mockStorage, never()).clearPreferences()
+            verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
+        }
+
+    /** (d) Already bound to this identity: a miss still syncs the local choice (sync-on-change). */
+    @Test
+    fun `setUserIdentifier still writes on a miss when already bound to the same identity`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice())
+            bindDeviceTo("USER@example.com ")
+
+            sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+
+            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockStorage, never()).clearPreferences()
+            verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
+        }
+
+    /** (e) Shared-device switch: bound to user A, user B logs in and misses — A's choice is not written for B. */
+    @Test
+    fun `setUserIdentifier does not write a previous user's choice for a new identity`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice())
+            bindDeviceTo("alice@example.com")
+
+            sut.setUserIdentifier("bob@example.com", "dg_key", getSignature = signatureProvider())
+
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockStorage).clearPreferences()
+            verify(mockStorage).saveBoundUserHash(hashFor("bob@example.com"))
+        }
+
+    /** A miss with no explicit local choice is unchanged: it seeds the record from defaults and binds. */
+    @Test
+    fun `setUserIdentifier seeds defaults on a first-login miss with no local choice`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+
+            sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+
+            val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
+            verify(mockConsentService).saveUniversalConsent(any(), any(), prefsCaptor.capture(), any(), any(), any())
+            assertFalse(prefsCaptor.firstValue.isCustomised)
+            verify(mockStorage, never()).clearPreferences()
+            verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
+        }
+
+    /** (f) A found record is adopted exactly as before, and the device binds to the identity. */
+    @Test
+    fun `setUserIdentifier binds the identity when it adopts a found record`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(foundRecord())
+
+            sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockStorage, never()).clearPreferences()
+            verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
+        }
+
+    /** (f) A found record with an explicit local choice on an unbound device still writes through, unchanged. */
+    @Test
+    fun `setUserIdentifier keeps write-through on a found record for an unbound device`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice())
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(foundRecord())
+
+            sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+
+            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockStorage, never()).clearPreferences()
+            verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
+        }
+
+    /** (g) A read failure leaves the binding untouched. */
+    @Test
+    fun `setUserIdentifier does not bind when the read fails`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice())
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any()))
+                .thenThrow(RuntimeException("network down"))
+
+            assertThrows(RuntimeException::class.java) {
+                runBlocking { sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider()) }
+            }
+
+            verify(mockStorage, never()).saveBoundUserHash(any())
+            verify(mockStorage, never()).clearBoundUserHash()
+            verify(mockStorage, never()).clearPreferences()
+        }
+
+    /** A failed write never binds, so a retry is still recognised as a transition. */
+    @Test
+    fun `setUserIdentifier does not bind when the write fails`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice())
+            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), any()))
+                .thenAnswer { throw ConsentException.NetworkError("503") }
+
+            assertThrows(ConsentException.NetworkError::class.java) {
+                runBlocking {
+                    sut.setUserIdentifier(
+                        "user@example.com",
+                        "dg_key",
+                        getSignature = signatureProvider(),
+                        attachAnonymousConsent = true,
+                    )
+                }
+            }
+
+            verify(mockStorage, never()).saveBoundUserHash(any())
+        }
+
+    /**
+     * (a) Logout returns local state to neutral non-destructively: binding and explicit choice are
+     * cleared, the listener gets the defaults, and nothing else (unique id, config cache/version,
+     * locale, pending queue, loaded config, server record) is touched.
+     */
+    @Test
+    fun `clearUserIdentifier returns to neutral without touching anything else`() {
+        sut.currentConfig = twoCategoryUniversalConfig()
+        val notified = mutableListOf<ConsentPreferences>()
+
+        sut.clearUserIdentifier { notified.add(it) }
+
+        verify(mockStorage).clearBoundUserHash()
+        verify(mockStorage).clearPreferences()
+        verify(mockStorage, never()).clearAll()
+        verify(mockStorage, never()).resetIdentifier()
+        verify(mockStorage, never()).saveConfigVersion(any())
+        verify(mockStorage, never()).saveConfigCache(any())
+        verify(mockStorage, never()).saveLocaleCode(any())
+        verify(mockStorage, never()).savePendingEvents(any())
+        verifyNoInteractions(mockConsentService)
+        verifyNoInteractions(mockConfigService)
+        assertNotNull("SDK stays initialized", sut.currentConfig)
+        assertEquals("listener sees the neutral defaults", listOf(sut.getDefaultPreferences()), notified)
+        assertTrue("banner shows again once the stored choice is gone", sut.needsConsent())
+    }
+
+    @Test
+    fun `clearUserIdentifier is idempotent when not bound`() {
+        sut.currentConfig = twoCategoryUniversalConfig()
+
+        sut.clearUserIdentifier()
+        sut.clearUserIdentifier()
+
+        verify(mockStorage, org.mockito.Mockito.times(2)).clearBoundUserHash()
+        verifyNoInteractions(mockConsentService)
+    }
+
+    /** (h) The destructive reset() clears everything, which includes the identity binding. */
+    @Test
+    fun `reset clears all storage including the identity binding`() {
+        sut.currentConfig = twoCategoryUniversalConfig()
+
+        sut.reset()
+
+        verify(mockStorage).clearAll()
+        assertNull(sut.currentConfig)
+    }
 
     @Test
     fun `fetchUniversalConsent reconciles the stored gpc on the returned record`() =
@@ -1043,6 +1264,46 @@ class ConsentManagerTests {
 
     private fun signatureProvider(): SignatureProvider =
         { _ -> UniversalConsentSignature("sig", "key-1") }
+
+    private fun twoCategoryUniversalConfig(): ConsentConfig =
+        universalConfig(
+            listOf(
+                MockCategory("category_essential", alwaysOn = true),
+                MockCategory("category_marketing", alwaysOn = false),
+            ),
+        )
+
+    /** An explicit local choice (a stored record): marketing opted out. */
+    private fun explicitChoice(): ConsentPreferences =
+        ConsentPreferences(
+            isCustomised = true,
+            cookieOptions =
+                listOf(
+                    CategoryConsent(gtmKey = "category_essential", isEnabled = true),
+                    CategoryConsent(gtmKey = "category_marketing", isEnabled = false),
+                ),
+        )
+
+    private fun foundRecord(): UniversalConsentRecord =
+        UniversalConsentRecord(
+            status = "found",
+            consentPreferences =
+                UniversalConsentPreferences(
+                    isCustomised = true,
+                    cookieOptions = mapOf("category_essential" to true, "category_marketing" to true),
+                ),
+        )
+
+    /** The user hash the manager binds for [identifier] under the currently loaded config. */
+    private fun hashFor(identifier: String): String {
+        val config = sut.currentConfig!!
+        return ConsentService.computeUserHash(config.dgCustomerId, config.consentProjectId!!, identifier)
+    }
+
+    /** Stub the persisted identity binding as [identifier]'s hash under the loaded config. */
+    private fun bindDeviceTo(identifier: String) {
+        whenever(mockStorage.loadBoundUserHash()).thenReturn(hashFor(identifier))
+    }
 
     private fun universalConfig(categories: List<MockCategory>): ConsentConfig =
         createMockConfig(categories).copy(
