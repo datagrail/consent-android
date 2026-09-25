@@ -642,8 +642,11 @@ class DataGrailConsent private constructor() {
      * Login vs re-sync (TRUST-2902). The SDK records which identity this device is bound to (a hash
      * only, never the raw identifier); the binding is set only when this call succeeds and cleared
      * by [clearUserIdentifier] and [reset].
-     * - LOGIN (the device is unbound or bound to a different identity): a found record wins. It is
-     *   adopted locally and nothing is written, even if the device holds a pre-login choice. With no
+     * - LOGIN (the device is unbound or bound to a different identity): a found record wins and
+     *   nothing is written, even if the device holds a pre-login choice. A record carrying a choice
+     *   REPLACES local state: its categories take the record's value, every other category its
+     *   config default (never the prior local value), and essential stays on. A found record with no
+     *   choice (signal-only or empty) returns local state to the defaults if anything is stored. With no
      *   record, only an EXPLICIT local choice (one the user saved on this device through the banner,
      *   [savePreferences], [acceptAll] or [rejectAll] while not bound to someone else) is written to
      *   the new identity. Otherwise nothing is written; if the device was bound to a different
