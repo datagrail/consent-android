@@ -228,6 +228,22 @@ internal class ConsentManager(
     }
 
     /**
+     * Resolve the edge API key for a Universal Consent call (TRUST-2603): an explicit value passed
+     * by the host wins (existing integrations behave exactly as before); otherwise fall back to
+     * `universalConsent.apiKey` from config.json, which lets the key rotate server-side with no
+     * client release. An empty string counts as absent at either source. Throws
+     * [ConsentException.ValidationError] when neither is present, so the write is never attempted
+     * with a key the edge cannot resolve.
+     */
+    private fun resolveUniversalConsentApiKey(config: ConsentConfig, explicit: String?): String {
+        val resolved = explicit?.takeIf { it.isNotEmpty() }
+            ?: config.universalConsent?.apiKey?.takeIf { it.isNotEmpty() }
+        return resolved ?: throw ConsentException.ValidationError(
+            "A Universal Consent API key is required: pass apiKey or set universalConsent.apiKey in config.json",
+        )
+    }
+
+    /**
      * The single source of truth for signal reconciliation on a fetched record.
      *
      * Both [fetchUniversalConsent] (which hands the reconciled record back to a caller) and
@@ -281,11 +297,12 @@ internal class ConsentManager(
      */
     suspend fun fetchUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
     ): UniversalConsentRecord? {
         val config = requireUniversalConsentReady()
-        val record = consentService.getUniversalConsent(config, identifier, apiKey) ?: return null
+        val resolvedApiKey = resolveUniversalConsentApiKey(config, apiKey)
+        val record = consentService.getUniversalConsent(config, identifier, resolvedApiKey) ?: return null
 
         val prefs = record.consentPreferences ?: return record
         return record.copy(
@@ -308,16 +325,20 @@ internal class ConsentManager(
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase) before
      *   hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's edge API key, or `null` to use `universalConsent.apiKey` from config.json (TRUST-2603); an explicit value wins.
      * @param trackingSignal This device's live signal. Read from the OS by the caller (the public
      *   API does this for you) so this method never blocks on a binder call.
      * @return true when local state was rehydrated from a stored record, false on a miss.
      */
     suspend fun rehydrateFromUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
-    ): Boolean = rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal) != null
+    ): Boolean {
+        val config = requireUniversalConsentReady()
+        val resolvedApiKey = resolveUniversalConsentApiKey(config, apiKey)
+        return rehydrateReturningRawPreferences(identifier, resolvedApiKey, trackingSignal, config) != null
+    }
 
     /**
      * Rehydrate, and hand back the RAW preferences from the stored record.
@@ -462,7 +483,7 @@ internal class ConsentManager(
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
      *   before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's edge API key, or `null` to use `universalConsent.apiKey` from config.json (TRUST-2603); an explicit value wins.
      * @param trackingSignal This device's live signal, applied only to the LOCAL read/rehydration.
      *   Read from the OS by the public adapter; defaults to [TrackingSignal.NOT_DETERMINED].
      * @param getSignature Customer-provided signature provider (calls their backend), or null for
@@ -473,12 +494,14 @@ internal class ConsentManager(
      */
     suspend fun setUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
         getSignature: SignatureProvider? = null,
         onRehydrated: ((ConsentPreferences) -> Unit)? = null,
     ) {
         val config = requireUniversalConsentReady()
+        // TRUST-2603: explicit key wins, else fall back to the config value; fail fast if neither.
+        val resolvedApiKey = resolveUniversalConsentApiKey(config, apiKey)
 
         // The same hash the service computes for the read/write (it also rejects an identifier that
         // is empty after normalization, before any request). Only the hash is ever persisted.
@@ -519,7 +542,7 @@ internal class ConsentManager(
                 val rawFromRecord =
                     rehydrateReturningRawPreferences(
                         identifier,
-                        apiKey,
+                        resolvedApiKey,
                         trackingSignal,
                         config,
                         adoptCcpaOptout = localChoice == null,
@@ -531,7 +554,7 @@ internal class ConsentManager(
             } else {
                 // LOGIN. Reads the record directly so a found record without a choice is told apart
                 // from a genuine miss (rehydrate folds the two together).
-                val record = consentService.getUniversalConsent(config, identifier, apiKey)
+                val record = consentService.getUniversalConsent(config, identifier, resolvedApiKey)
                 if (record != null) {
                     // The record is authoritative for the stored CCPA choice; a pre-login local
                     // value is dropped exactly like the categories.
@@ -577,7 +600,7 @@ internal class ConsentManager(
                 config = config,
                 identifier = identifier,
                 preferences = universalPrefs,
-                apiKey = apiKey,
+                apiKey = resolvedApiKey,
                 // The user's explicit DNSMPI choice from setCcpaOptout, RAW. NEVER derived from the
                 // tracking signal or any category: the ad-tracking signal is a narrower
                 // ad-personalization signal, and treating one as the other would write a legal
@@ -589,7 +612,7 @@ internal class ConsentManager(
         // Bind only after the call succeeds: a failed read or write throws above and leaves the
         // binding untouched, so a retry is still recognised as a login.
         storage.saveBoundUserHash(userHash)
-        universalConsentSession = UniversalConsentSession(userHash, identifier, apiKey, getSignature)
+        universalConsentSession = UniversalConsentSession(userHash, identifier, resolvedApiKey, getSignature)
     }
 
     /**
