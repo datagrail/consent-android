@@ -2,25 +2,27 @@
 set -e
 
 # Parse arguments
-DEMO_TYPE="kotlin"
+DEMO_TYPE="tester"
 CLEAN_BUILD=false
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --clean) CLEAN_BUILD=true ;;
-        kotlin|java)
+        tester|kotlin|java)
             DEMO_TYPE="$1"
             ;;
         --help|-h)
-            echo "Usage: $0 [kotlin|java] [--clean]"
+            echo "Usage: $0 [tester|kotlin|java] [--clean]"
             echo ""
             echo "Arguments:"
-            echo "  kotlin    Launch Kotlin demo (default)"
+            echo "  tester    Launch the Config URL Tester (default)"
+            echo "  kotlin    Launch Kotlin demo"
             echo "  java      Launch Java demo"
             echo "  --clean   Clean build artifacts before building"
             echo ""
             echo "Examples:"
-            echo "  $0              # Launch Kotlin demo"
+            echo "  $0              # Launch Config URL Tester"
+            echo "  $0 kotlin       # Launch Kotlin demo"
             echo "  $0 java         # Launch Java demo"
             echo "  $0 java --clean # Clean build and launch Java demo"
             exit 0
@@ -136,7 +138,10 @@ echo "Installing app to emulator..."
 "$ADB" -s "$DEVICE_ID" install -r "$APK_PATH"
 
 # Determine which activity to launch
-if [ "$DEMO_TYPE" = "java" ]; then
+if [ "$DEMO_TYPE" = "tester" ]; then
+    ACTIVITY=".tester.ConfigUrlTesterActivity"
+    DEMO_LABEL="Config URL Tester"
+elif [ "$DEMO_TYPE" = "java" ]; then
     ACTIVITY=".JavaMainActivity"
     DEMO_LABEL="Java Demo"
 else

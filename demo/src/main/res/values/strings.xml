@@ -1,4 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Consent Demo</string>
+
+    <!-- Config URL tester -->
+    <string name="tester_title">Config URL Tester</string>
+    <string name="tester_url_label">Test config URL</string>
+    <string name="tester_url_hint">Paste the View config link from the Mobile tab</string>
+    <string name="tester_paste">Paste</string>
+    <string name="tester_load">Load</string>
+    <string name="tester_loading">Loading…</string>
+    <string name="tester_show_modal">Show banner (modal)</string>
+    <string name="tester_show_full_screen">Show banner (full screen)</string>
+    <string name="tester_open_sdk_demo">Open full SDK demo</string>
+    <string name="tester_clipboard_empty">Clipboard is empty</string>
+
+    <string name="tester_sdk_versions">SDK library version: %1$s\nSDK schema version: %2$s</string>
+    <string name="tester_url_metadata">Config schema: %1$s · Artifact: %2$s · Expires: %3$s</string>
+    <string name="tester_schema_legacy">unversioned (legacy config.json, treated as v1)</string>
+    <string name="tester_expiry_unknown">unknown</string>
+    <string name="tester_expiry_time">%1$s (device clock)</string>
+
+    <string name="tester_status_idle">Paste a test config URL and tap Load.</string>
+    <string name="tester_status_loading">Fetching config…</string>
+    <string name="tester_status_loaded">Loaded config version %1$s (%2$d layers). Tap a Show banner button.</string>
+    <string name="tester_status_failed">Load failed. See the error above.</string>
+    <string name="tester_status_saved">Banner closed: saved, %1$d categories enabled</string>
+    <string name="tester_status_dismissed">Banner closed: dismissed</string>
+
+    <string name="tester_error_invalid_url_title">Not a valid config URL</string>
+    <string name="tester_error_invalid_url_body">Paste the full https:// link from the Mobile tab\'s View config link.</string>
+    <string name="tester_error_expired_title">Test URL expired</string>
+    <string name="tester_error_expired_body">Test URLs are valid for 15 minutes. In the Mobile tab, reload the test config panel to get a fresh link, then paste it here.</string>
+    <string name="tester_error_expired_at">Expired at %1$s.</string>
+    <string name="tester_error_url_altered_title">URL was changed or cut off</string>
+    <string name="tester_error_url_altered_body">The link\'s signature doesn\'t match; it was probably truncated when copied. Copy the whole link again.</string>
+    <string name="tester_error_not_found_title">Config not found</string>
+    <string name="tester_error_not_found_body">This test config no longer exists (test configs are deleted after 7 days) or access was denied. Publish a new test config.</string>
+    <string name="tester_error_unreachable_title">Couldn\'t reach the config</string>
+    <string name="tester_error_unreachable_body">Check the device\'s internet connection and try again. (%1$s)</string>
+    <string name="tester_error_http_title">Unexpected response</string>
+    <string name="tester_error_http_body">HTTP %1$d.</string>
+    <string name="tester_error_http_body_with_code">HTTP %1$d – %2$s.</string>
+    <string name="tester_error_unsupported_schema_title">Unsupported schema version</string>
+    <string name="tester_error_unsupported_schema_body">This config uses schema %1$s. This test app (SDK %2$s) renders schema %3$s. Select a %3$s target in the Mobile tab, or use a test app built for %1$s.</string>
+    <string name="tester_error_parse_title">Config couldn\'t be read</string>
+    <string name="tester_error_parse_body">%1$s\n\nReport this to support with the schema version shown above.</string>
 </resources>

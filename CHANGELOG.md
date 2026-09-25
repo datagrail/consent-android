@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Demo app: a Config URL Tester screen (now the launcher) that loads a pre-signed test config URL from the Mobile tab and previews it with `BannerDialog`, with specific errors for expired, altered, deleted, unreachable, unparseable, and unsupported-schema configs. CI now runs the demo's unit tests and uploads the debug APK as an artifact. No SDK API change (TRUST-2374)
 - `ConsentException.HttpError` (with `statusCode` and `isClientError`), `ConsentException.ConfigNotPublished`, and `BuildConfig.SCHEMA_VERSION`. Both exceptions subclass `NetworkError`, so existing `NetworkError` handling still matches them (TRUST-2744)
 
 ### Changed
