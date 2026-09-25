@@ -624,29 +624,7 @@ class DataGrailConsent private constructor() {
         getSignature: SignatureProviderCallback,
         callback: ConsentCallback,
     ) {
-        setUserIdentifier(identifier, apiKey, getSignature, attachAnonymousConsent = false, callback = callback)
-    }
-
-    /**
-     * Signed [setUserIdentifier] (Java-friendly) with explicit control over anonymous-history
-     * attribution. See the Kotlin signed overload for the full contract.
-     *
-     * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
-     *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
-     * @param getSignature Java-friendly signature provider (calls the customer's backend).
-     * @param attachAnonymousConsent Pass true ONLY when you know the pre-login choice on this
-     *   device was made by this user in the same session; the other overloads pass false.
-     * @param callback Callback interface for success/failure.
-     */
-    fun setUserIdentifier(
-        identifier: String,
-        apiKey: String,
-        getSignature: SignatureProviderCallback,
-        attachAnonymousConsent: Boolean,
-        callback: ConsentCallback,
-    ) {
-        setUserIdentifier(identifier, apiKey, asSignatureProvider(getSignature), attachAnonymousConsent) { result ->
+        setUserIdentifier(identifier, apiKey, asSignatureProvider(getSignature)) { result ->
             adaptResult(result, callback)
         }
     }
@@ -656,13 +634,32 @@ class DataGrailConsent private constructor() {
      * for the given user identifier, for cross-device retrieval (Kotlin-friendly).
      *
      * This READS before it WRITES. Any stored record for this identifier is rehydrated onto the
-     * device first (honoring a choice made on the web or another device); the write then carries
-     * the user's CURRENT LOCAL choice — sync-on-change / write-through — and never re-POSTs the
-     * fetched record. A found record with no genuine local change is adopted WITHOUT a POST. A read
-     * failure blocks the write and surfaces as a failure result, so a record we could not read is
-     * never overwritten; retry to re-read first.
+     * device first (honoring a choice made on the web or another device). A read failure blocks the
+     * write and surfaces as a failure result, so a record we could not read is never overwritten;
+     * retry to re-read first. Any write carries the user's local choice and never re-POSTs the
+     * fetched record.
      *
-     * The identifier is NOT retained as state — later calls such as [fetchUniversalConsent] and
+     * Login vs re-sync (TRUST-2902). The SDK records which identity this device is bound to (a hash
+     * only, never the raw identifier); the binding is set only when this call succeeds and cleared
+     * by [clearUserIdentifier] and [reset].
+     * - LOGIN (the device is unbound or bound to a different identity): a found record wins. It is
+     *   adopted locally and nothing is written, even if the device holds a pre-login choice. With no
+     *   record, only an EXPLICIT local choice (one the user saved on this device through the banner,
+     *   [savePreferences], [acceptAll] or [rejectAll] while not bound to someone else) is written to
+     *   the new identity. Otherwise nothing is written; if the device was bound to a different
+     *   identity its local state returns to the defaults so that user's consent does not carry over.
+     * - RE-SYNC (already bound to this identity): a found record is adopted, and a local choice is
+     *   written through as before. With no record, only an explicit local choice is written; config
+     *   defaults are never seeded.
+     * "Nothing written" still reports success.
+     *
+     * What the SDK cannot detect: a logout it is not told about (call [clearUserIdentifier] on
+     * logout); whether a pre-login choice was made by the person now logging in or by a previous
+     * user of a shared device (an explicit choice on an unbound device is attached on a no-record
+     * login by design); and two people sharing one account. It does no heuristic shared-device or
+     * shared-account detection.
+     *
+     * The raw identifier is NOT retained as state — later calls such as [fetchUniversalConsent] and
      * [rehydrateFromUniversalConsent] require it to be passed again.
      *
      * The SDK does NOT hold or compute the HMAC secret. It builds the canonical string-to-sign
@@ -676,21 +673,6 @@ class DataGrailConsent private constructor() {
      * limited would erase a marketing opt-in the user made on the web, for every device on their
      * identifier. A signal never enables a category either.
      *
-     * Anonymous history is NOT attributed by default (TRUST-2902). The SDK records which identity
-     * this device is bound to (a hash only, never the raw identifier). When no record exists for
-     * this identifier and the device is not already bound to it (first login, or a different user
-     * than last time) but holds an explicit consent choice, that choice is treated as pre-login
-     * anonymous history: it is NOT written to this user's record, and local consent returns to the
-     * config defaults (the banner shows again; the consent-changed listener fires). The callback
-     * still reports success. The SDK cannot tell whether that choice was made by the person now
-     * logging in or by a previous user of a shared device, and it does no heuristic shared-device
-     * or shared-account detection, so pass attachAnonymousConsent = true (see the overload that
-     * takes it) only when you have your own same-session continuity signal, e.g. the choice and the
-     * login happened in one visit. Once bound, later calls for the same identity keep syncing the
-     * local choice as before. It also cannot detect two people sharing one account; a found record
-     * is handled exactly as before. Call [clearUserIdentifier] on logout — the SDK cannot detect a
-     * logout it is not told about.
-     *
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
@@ -704,32 +686,7 @@ class DataGrailConsent private constructor() {
         getSignature: SignatureProvider,
         callback: (Result<Unit>) -> Unit,
     ) {
-        launchSetUserIdentifier(identifier, apiKey, getSignature, attachAnonymousConsent = false, callback = callback)
-    }
-
-    /**
-     * Signed [setUserIdentifier] (Kotlin-friendly) with explicit control over anonymous-history
-     * attribution. Identical to the signed overload without the flag, except that with
-     * [attachAnonymousConsent] = true a first login (no record yet) seeds the new record from this
-     * device's pre-login choice instead of returning local state to neutral.
-     *
-     * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
-     *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
-     * @param getSignature Suspend provider that signs the SDK-built payload and returns
-     *   { signature, keyId }.
-     * @param attachAnonymousConsent Pass true ONLY when you know the pre-login choice on this
-     *   device was made by this user in the same session; the other overloads pass false.
-     * @param callback Callback with the result.
-     */
-    fun setUserIdentifier(
-        identifier: String,
-        apiKey: String,
-        getSignature: SignatureProvider,
-        attachAnonymousConsent: Boolean,
-        callback: (Result<Unit>) -> Unit,
-    ) {
-        launchSetUserIdentifier(identifier, apiKey, getSignature, attachAnonymousConsent, callback)
+        launchSetUserIdentifier(identifier, apiKey, getSignature, callback)
     }
 
     /**
@@ -752,27 +709,7 @@ class DataGrailConsent private constructor() {
         apiKey: String,
         callback: (Result<Unit>) -> Unit,
     ) {
-        setUserIdentifier(identifier, apiKey, attachAnonymousConsent = false, callback = callback)
-    }
-
-    /**
-     * Limited, API-key-only [setUserIdentifier] (Kotlin-friendly) with explicit control over
-     * anonymous-history attribution. See the signed overload for the attribution contract.
-     *
-     * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
-     *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
-     * @param attachAnonymousConsent Pass true ONLY when you know the pre-login choice on this
-     *   device was made by this user in the same session; the other overloads pass false.
-     * @param callback Callback with the result.
-     */
-    fun setUserIdentifier(
-        identifier: String,
-        apiKey: String,
-        attachAnonymousConsent: Boolean,
-        callback: (Result<Unit>) -> Unit,
-    ) {
-        launchSetUserIdentifier(identifier, apiKey, getSignature = null, attachAnonymousConsent, callback)
+        launchSetUserIdentifier(identifier, apiKey, getSignature = null, callback = callback)
     }
 
     /**
@@ -792,27 +729,7 @@ class DataGrailConsent private constructor() {
         apiKey: String,
         callback: ConsentCallback,
     ) {
-        setUserIdentifier(identifier, apiKey, attachAnonymousConsent = false, callback = callback)
-    }
-
-    /**
-     * Limited, API-key-only [setUserIdentifier] (Java-friendly) with explicit control over
-     * anonymous-history attribution. See the Kotlin signed overload for the attribution contract.
-     *
-     * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
-     *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
-     * @param attachAnonymousConsent Pass true ONLY when you know the pre-login choice on this
-     *   device was made by this user in the same session; the other overloads pass false.
-     * @param callback Callback interface for success/failure.
-     */
-    fun setUserIdentifier(
-        identifier: String,
-        apiKey: String,
-        attachAnonymousConsent: Boolean,
-        callback: ConsentCallback,
-    ) {
-        setUserIdentifier(identifier, apiKey, attachAnonymousConsent) { result -> adaptResult(result, callback) }
+        setUserIdentifier(identifier, apiKey) { result -> adaptResult(result, callback) }
     }
 
     /**
@@ -869,7 +786,6 @@ class DataGrailConsent private constructor() {
         identifier: String,
         apiKey: String,
         getSignature: SignatureProvider?,
-        attachAnonymousConsent: Boolean,
         callback: (Result<Unit>) -> Unit,
     ) {
         launchUniversalConsentOperation(callback) { mgr, trackingSignal ->
@@ -878,7 +794,6 @@ class DataGrailConsent private constructor() {
                 apiKey = apiKey,
                 trackingSignal = trackingSignal,
                 getSignature = getSignature,
-                attachAnonymousConsent = attachAnonymousConsent,
                 onRehydrated = { prefs -> onConsentChangedCallback?.invoke(prefs) },
             )
         }
