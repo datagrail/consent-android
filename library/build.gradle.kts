@@ -8,6 +8,11 @@ plugins {
 
 val libraryVersion = "1.7.0"
 
+// consent-schema version this SDK's models are written against. Build-time constant, not derived
+// from the wire format or fetched config; bump only when the models are rewritten against a newer
+// schema version. Keep README "Schema Compatibility" in sync.
+val schemaVersion = "v1"
+
 android {
     namespace = "com.datagrail.consent"
     compileSdk = 34
@@ -19,6 +24,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
         buildConfigField("String", "LIBRARY_VERSION", "\"$libraryVersion\"")
+        buildConfigField("String", "SCHEMA_VERSION", "\"$schemaVersion\"")
     }
 
     buildTypes {

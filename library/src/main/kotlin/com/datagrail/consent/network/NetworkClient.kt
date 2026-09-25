@@ -32,7 +32,8 @@ class NetworkClient {
      * @param body Optional request body string
      * @param headers Optional HTTP headers
      * @return Response body as string
-     * @throws ConsentException.NetworkError if the request fails
+     * @throws ConsentException.HttpError if the server returns a non-2xx response
+     * @throws ConsentException.NetworkError if the request fails in transport
      */
     suspend fun request(
         url: String,
@@ -82,7 +83,7 @@ class NetworkClient {
                     } catch (_: Exception) {
                     }
                     ConsentLogger.e("HTTP error $responseCode")
-                    throw ConsentException.NetworkError("HTTP $responseCode")
+                    throw ConsentException.HttpError(responseCode)
                 }
 
                 val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
@@ -104,6 +105,7 @@ class NetworkClient {
      * Retry an operation with exponential backoff and jitter
      * @param maxAttempts Maximum number of retry attempts (default: 5)
      * @param baseDelayMs Base delay in milliseconds (default: 250)
+     * @param shouldRetry Decides whether a failure is worth retrying; definite rejections should return false
      * @param operation The suspend operation to retry
      * @return The result of the operation
      * @throws The last error if all attempts fail
@@ -111,6 +113,7 @@ class NetworkClient {
     suspend fun <T> retryWithBackoff(
         maxAttempts: Int = 5,
         baseDelayMs: Long = 250,
+        shouldRetry: (Exception) -> Boolean = { true },
         operation: suspend () -> T,
     ): T {
         var attempt = 1
@@ -122,7 +125,7 @@ class NetworkClient {
             } catch (e: Exception) {
                 lastException = e
 
-                if (attempt >= maxAttempts) {
+                if (attempt >= maxAttempts || !shouldRetry(e)) {
                     throw e
                 }
 
