@@ -202,6 +202,8 @@ If you have ProGuard/R8 enabled, add these rules:
 
 A complete demo app is included in [`demo/`](demo/) showcasing SDK initialization, banner display, accept/reject flows, and consent change callbacks.
 
+The demo opens on a **Config URL Tester**: paste the pre-signed *View config* link from the Mobile tab to preview a test config with the SDK's banner. See [`demo/README.md`](demo/README.md#validating-a-test-config-from-the-mobile-tab).
+
 ```bash
 ./gradlew :demo:assembleDebug :demo:installDebug
 ```

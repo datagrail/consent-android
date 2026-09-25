@@ -14,6 +14,7 @@ internal class ConfigService(
     private val networkClient: NetworkClient,
     private val storage: ConsentStorage,
 ) {
+    // The demo's ConfigUrlLoader mirrors these decode settings; keep the two in sync.
     private val json =
         Json {
             ignoreUnknownKeys = true

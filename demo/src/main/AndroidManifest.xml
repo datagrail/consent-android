@@ -11,16 +11,20 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ConsentDemo">
         <activity
-            android:name=".MainActivity"
+            android:name=".tester.ConfigUrlTesterActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- The SDK demos are exported without intent filters so launch_demo.sh can start them with `am start -n`. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true" />
         <activity
             android:name=".JavaMainActivity"
-            android:exported="false"
+            android:exported="true"
             android:label="Java Demo" />
     </application>
 </manifest>
