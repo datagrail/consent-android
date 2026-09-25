@@ -985,6 +985,130 @@ class ConsentManagerTests {
             verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
         }
 
+    /**
+     * Rev 2.1: a LOGIN with a found record REPLACES local state, never merges. A category the record
+     * does not mention takes its config default — never the prior local value — and essential stays on.
+     */
+    @Test
+    fun `login with a found subset record replaces local and backfills config defaults`() =
+        runTest {
+            val base =
+                universalConfig(
+                    listOf(
+                        MockCategory("category_essential", alwaysOn = true),
+                        MockCategory("category_marketing", alwaysOn = false),
+                        MockCategory("category_analytics", alwaysOn = false),
+                    ),
+                )
+            // analytics is ON by config default.
+            sut.currentConfig =
+                base.copy(
+                    initialCategories =
+                        base.initialCategories.copy(initial = listOf("category_essential", "category_analytics")),
+                )
+            // Explicit local choice: analytics OFF (differs from its default), marketing OFF.
+            whenever(mockStorage.loadPreferences()).thenReturn(
+                ConsentPreferences(
+                    isCustomised = true,
+                    cookieOptions =
+                        listOf(
+                            CategoryConsent("category_essential", true),
+                            CategoryConsent("category_marketing", false),
+                            CategoryConsent("category_analytics", false),
+                        ),
+                ),
+            )
+            // The record only covers marketing.
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
+                UniversalConsentRecord(
+                    status = "found",
+                    consentPreferences =
+                        UniversalConsentPreferences(
+                            isCustomised = true,
+                            cookieOptions = mapOf("category_marketing" to true),
+                        ),
+                ),
+            )
+            val notified = mutableListOf<ConsentPreferences>()
+
+            sut.setUserIdentifier(
+                "user@example.com",
+                "dg_key",
+                getSignature = signatureProvider(),
+                onRehydrated = { notified.add(it) },
+            )
+
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            val storedCaptor = argumentCaptor<ConsentPreferences>()
+            verify(mockStorage).savePreferences(storedCaptor.capture())
+            val stored = storedCaptor.firstValue
+            assertTrue(
+                "analytics takes its config default, not the prior local OFF",
+                stored.isCategoryEnabled("category_analytics"),
+            )
+            assertTrue("marketing takes the record's value", stored.isCategoryEnabled("category_marketing"))
+            assertTrue("essential stays on", stored.isCategoryEnabled("category_essential"))
+            assertTrue(stored.isCustomised)
+            assertEquals("listener fires once for the rewrite", 1, notified.size)
+            verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
+        }
+
+    /** Rev 2.1: a LOGIN with a signal-only found record (no preferences) drops local state to neutral. */
+    @Test
+    fun `login with a signal-only found record returns local to neutral`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice(), null)
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
+                UniversalConsentRecord(status = "found", consentPreferences = null, gpc = true),
+            )
+            val notified = mutableListOf<ConsentPreferences>()
+
+            sut.setUserIdentifier(
+                "user@example.com",
+                "dg_key",
+                getSignature = signatureProvider(),
+                onRehydrated = { notified.add(it) },
+            )
+
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockStorage).clearPreferences()
+            verify(mockStorage, never()).savePreferences(any())
+            assertEquals("listener sees the neutral defaults", listOf(sut.getDefaultPreferences()), notified)
+            verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
+        }
+
+    /**
+     * Rev 2.1: a found record with an empty cookieOptions map on a LOGIN is a found record with no
+     * choice. With nothing stored locally it is a no-op: no write, no rewrite, no listener.
+     */
+    @Test
+    fun `login with an empty found record and nothing stored is a no-op`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            bindDeviceTo("alice@example.com")
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
+                UniversalConsentRecord(
+                    status = "found",
+                    consentPreferences = UniversalConsentPreferences(isCustomised = true, cookieOptions = emptyMap()),
+                ),
+            )
+            val notified = mutableListOf<ConsentPreferences>()
+
+            sut.setUserIdentifier(
+                "bob@example.com",
+                "dg_key",
+                getSignature = signatureProvider(),
+                onRehydrated = { notified.add(it) },
+            )
+
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockStorage, never()).clearPreferences()
+            verify(mockStorage, never()).savePreferences(any())
+            assertTrue("no listener on a no-op", notified.isEmpty())
+            verify(mockStorage).saveBoundUserHash(hashFor("bob@example.com"))
+        }
+
     /** (2) LOGIN + record exists + no local choice: adopted, nothing written, device binds. */
     @Test
     fun `login with a found record and no local choice adopts it and binds`() =
