@@ -102,11 +102,9 @@ internal class ConsentManager(
     fun getDefaultPreferences(): ConsentPreferences? = currentConfig?.let { defaultPreferences(it) }
 
     /**
-     * Default preferences for a SPECIFIC config snapshot. The universal-consent write path passes
-     * the snapshot it captured before its suspending network call rather than re-reading live
-     * [currentConfig], which a concurrent [loadConfig] could have swapped while the GET was
-     * suspended — that would derive the write's cookieOptions from a different config than the
-     * `config_version` stamped on the same request (a torn read).
+     * Default preferences for a SPECIFIC config snapshot. The universal-consent write path never
+     * seeds these (TRUST-2902: only an explicit local choice is written); they are the local
+     * fallback read by [getDefaultPreferences].
      */
     private fun defaultPreferences(config: ConsentConfig): ConsentPreferences =
         ConsentPreferences(
@@ -390,44 +388,39 @@ internal class ConsentManager(
      *
      * READ first: [rehydrateReturningRawPreferences] pulls any existing record and applies it to
      * local state, so a choice the same person made on the web or another device is honored here.
+     * A read FAILURE THROWS and blocks any write — the server never merges, so overwriting a record
+     * we could not read would silently erase the user's real cross-device choice (the TRUST-2491
+     * corruption class). The caller can retry, which re-reads first. Coroutine cancellation
+     * propagates so structured concurrency is preserved.
      *
-     * WRITE-THROUGH / sync-on-change: the write carries the user's CURRENT LOCAL choice — captured
-     * from storage BEFORE the rehydrate persists the reconciled view — and NEVER re-POSTs the record
-     * it just fetched. Echoing the fetched record back would discard a choice the user made on THIS
-     * device before associating their identity (the launch-blocking "lose an explicit opt-out" /
-     * revocation-resurrection class) while only telling the edge what it already holds. When a FOUND
-     * record meets no genuine local change — a fresh install that merely adopted it — the call
-     * ADOPTS WITHOUT POSTING: the record is already applied to local state, so there is nothing to
-     * write. Cross-device conflict resolution is the edge's job, not the SDK's.
+     * Any write carries the user's RAW local choice — captured from storage BEFORE the rehydrate
+     * persists the reconciled view — and NEVER re-POSTs the record it just fetched. Capturing first
+     * keeps any ATT/GPC-suppressed view out of the write body: the store holds raw choices and the
+     * server never merges, so suppressing before a write would persist this device's transient
+     * signal for every device on this identifier. Suppression stays a read-time view (see
+     * [SignalReconciliation]).
      *
-     * A genuine local choice is distinguished from initialize()'s defaults by the presence of a
-     * stored record ([ConsentStorage.loadPreferences] non-null — the same read [hasUserConsent]
-     * keys off); initialize() never seeds storage, so no auto-persisted default is mistaken for a
-     * user choice. The choice is captured BEFORE rehydrate so no ATT/GPC-suppressed view leaks into
-     * the write body — the store holds raw choices and the server never merges, so suppressing
-     * before a write would persist this device's transient signal for every device on this
-     * identifier. Limit-ad-tracking is an ad-personalization answer, not a marketing opt-out.
-     * Suppression stays a read-time view (see [SignalReconciliation]).
-     *
-     * A read MISS (no record) writes: local state seeds the first cross-device record. A read
-     * FAILURE, by contrast, THROWS and blocks the write — the server never merges, so overwriting a
-     * record we could not read would silently erase the user's real cross-device choice (the
-     * TRUST-2491 corruption class). The caller can retry, which re-reads first. Coroutine
-     * cancellation propagates so structured concurrency is preserved.
-     *
-     * NO ANONYMOUS-HISTORY ATTRIBUTION (TRUST-2902): the device persists the user hash (never the
-     * raw identifier) of the identity it is currently bound to. On a genuine MISS, when the device
-     * is NOT already bound to this identity (never bound, or bound to someone else) AND it holds an
-     * explicit local choice, that choice is pre-login anonymous history, possibly a previous user's
-     * on a shared device. It is NOT written to the new identity's record; instead local state
-     * returns to NEUTRAL (the same local operation as [clearUserIdentifier], minus clearing the
-     * binding) and [onRehydrated] fires with the now-effective defaults. The SDK cannot tell whether
-     * that choice was made by the person now logging in, so attribution is opt-in:
-     * [attachAnonymousConsent] = true (only when the host has its own same-session continuity
-     * signal) or an existing binding to this identity keeps the existing seed-the-record write. A
-     * miss with no explicit local choice, a FOUND record, and a read FAILURE are all unchanged
-     * (found-record vs local-choice conflicts are TRUST-2592's). The binding is set only after the
-     * call succeeds, so a failed write never binds and a retry is still recognised as a transition.
+     * LOGIN vs RE-SYNC (TRUST-2902). The device persists the user hash (never the raw identifier) of
+     * the identity it is bound to; it is set only here, only after the call succeeds, and cleared by
+     * [clearUserIdentifier] and [reset].
+     * - An EXPLICIT local choice is a stored record ([ConsentStorage.loadPreferences] non-null — the
+     *   same read [hasUserConsent] keys off; initialize() never seeds storage, only a user save or a
+     *   rehydrate writes it) on a device NOT bound to a different identity. When another identity
+     *   is still bound (the host skipped logout), the stored state is that user's — possibly their
+     *   rehydrated record — and is not explicit for this one.
+     * - LOGIN (unbound, or bound to a different identity): a FOUND record wins. It is adopted
+     *   locally by the rehydrate and nothing is written, even over an explicit local choice. On a
+     *   genuine MISS only an explicit local choice is written (attached to the new identity).
+     *   Otherwise nothing is written; if a different identity was bound and local state exists, it
+     *   returns to NEUTRAL (the same local operation as [clearUserIdentifier], minus clearing the
+     *   binding) so that user's state does not linger.
+     * - RE-SYNC (bound to this identity): a found record is adopted, and a local choice is written
+     *   through (sync-on-change) as before. On a miss only an explicit local choice is written;
+     *   config defaults are never seeded.
+     * "Nothing written" still returns normally. The SDK cannot tell whether a pre-login choice was
+     * made by the person now logging in or a previous user of a shared device (an explicit choice
+     * on an unbound device is attached on a no-record login by design), does no heuristic
+     * shared-device/shared-account detection, and cannot detect two people sharing one account.
      *
      * The raw identifier is NOT retained as manager state, so subsequent operations (e.g.
      * [fetchUniversalConsent]) must pass it again. Requires universal consent to be enabled AND
@@ -441,18 +434,15 @@ internal class ConsentManager(
      *   Read from the OS by the public adapter; defaults to [TrackingSignal.NOT_DETERMINED].
      * @param getSignature Customer-provided signature provider (calls their backend), or null for
      *   a limited-mode (API-key-only) write with no signature/timestamp/nonce headers.
-     * @param attachAnonymousConsent When true, a genuine miss seeds the new identity's record from
-     *   the device's explicit pre-login choice even on a login transition. Defaults to false.
      * @param onRehydrated Invoked with the effective local preferences when — and only when — local
-     *   state changed (a record was rehydrated, or a login transition returned it to neutral), so
-     *   the adapter can notify its consent-changed listener.
+     *   state changed (a record was rehydrated, or a login returned it to neutral), so the adapter
+     *   can notify its consent-changed listener.
      */
     suspend fun setUserIdentifier(
         identifier: String,
         apiKey: String,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
         getSignature: SignatureProvider? = null,
-        attachAnonymousConsent: Boolean = false,
         onRehydrated: ((ConsentPreferences) -> Unit)? = null,
     ) {
         val config = requireUniversalConsentReady()
@@ -465,19 +455,21 @@ internal class ConsentManager(
                 requireNotNull(config.consentProjectId),
                 identifier,
             )
-        val wasBound = storage.loadBoundUserHash() == userHash
+        val boundHash = storage.loadBoundUserHash()
+        val isResync = boundHash == userHash
+        val boundToOther = boundHash != null && !isResync
 
         // Capture the user's RAW local choice BEFORE the rehydrate below persists the
-        // signal-reconciled view. null means no genuine local choice yet: initialize() never seeds
-        // storage (the same read [hasUserConsent] keys off), so a non-null value here is an explicit
-        // choice, and capturing it now keeps any ATT/GPC-suppressed view out of the write body.
+        // signal-reconciled view, so no ATT/GPC-suppressed view reaches the write body. It is
+        // EXPLICIT only when no other identity is bound (see the KDoc above).
         val localChoice = storage.loadPreferences()
+        val explicitChoice = if (boundToOther) null else localChoice
 
         // READ then WRITE. Rehydrate applies any found record to local state first (honoring a
-        // choice made on the web or another device). A genuine MISS returns null and the write
-        // below seeds the first record; a read FAILURE THROWS and blocks the write — overwriting a
-        // record we could not read would silently erase the user's real cross-device choice
-        // (the TRUST-2491 corruption class). Coroutine cancellation propagates for the same reason.
+        // choice made on the web or another device). A genuine MISS returns null; a read FAILURE
+        // THROWS and blocks the write — overwriting a record we could not read would silently erase
+        // the user's real cross-device choice (the TRUST-2491 corruption class). Coroutine
+        // cancellation propagates for the same reason.
         // Pass the captured `config` snapshot so the READ below and the WRITE that follows are
         // validated and hashed against ONE config — a concurrent loadConfig() cannot make the read's
         // consentProjectId/version disagree with the write's (the torn-read hazard this file guards
@@ -487,55 +479,46 @@ internal class ConsentManager(
             getCategories()?.let { onRehydrated?.invoke(it) }
         }
 
-        // Adopt-without-POST: a FOUND record with no genuine local change is already applied to
-        // local state by the rehydrate above. Re-POSTing it would only echo state the edge already
-        // holds. Conflict resolution across devices is the edge's job, not the SDK's.
-        if (rawFromRecord != null && localChoice == null) {
-            storage.saveBoundUserHash(userHash)
-            return
-        }
+        val toWrite: ConsentPreferences? =
+            if (rawFromRecord != null) {
+                // FOUND. The rehydrate above already adopted the record locally. On a LOGIN the
+                // record wins and nothing is written; on a RE-SYNC a local choice is written through
+                // (sync-on-change), and with no local change the record is adopted without a POST —
+                // re-POSTing it would only echo state the edge already holds.
+                if (isResync) localChoice else null
+            } else {
+                // Genuine MISS: only an explicit local choice is written. Config defaults are never
+                // seeded. A different identity's leftover state returns to neutral so it does not
+                // linger for this user.
+                if (explicitChoice == null && boundToOther && localChoice != null) {
+                    returnToNeutral(onRehydrated)
+                }
+                explicitChoice
+            }
 
-        // Login TRANSITION on a genuine miss (device unbound, or bound to a different identity) with
-        // an explicit local choice: that choice is pre-login anonymous history, possibly a previous
-        // user's on a shared device. Do not attribute it to this identity; return to neutral instead.
-        if (rawFromRecord == null && localChoice != null && !wasBound && !attachAnonymousConsent) {
-            returnToNeutral(onRehydrated)
-            storage.saveBoundUserHash(userHash)
-            return
-        }
+        if (toWrite != null) {
+            val universalPrefs =
+                UniversalConsentPreferences(
+                    isCustomised = toWrite.isCustomised,
+                    cookieOptions = toWrite.cookieOptions.associate { it.gtmKey to it.isEnabled },
+                )
 
-        // Write-through the user's CURRENT LOCAL choice (sync-on-change) — NEVER the fetched
-        // record, which would discard a choice the user made on this device before associating
-        // their identity. The choice was captured raw, before rehydrate, so no device signal leaks
-        // onto the wire. On a genuine miss with no explicit choice this seeds the first record from
-        // the `config` SNAPSHOT's defaults — not getCategories()/getDefaultPreferences(), which
-        // re-read live currentConfig (a torn read against a concurrent loadConfig, and a stale
-        // signal-suppressed local map would leak into the write) and whose extra fallback tier was
-        // dead anyway (getCategories() already falls back to the defaults when storage is empty).
-        val current = localChoice ?: defaultPreferences(config)
-        val rawMap = current.cookieOptions.associate { it.gtmKey to it.isEnabled }
-
-        val universalPrefs =
-            UniversalConsentPreferences(
-                isCustomised = current.isCustomised,
-                cookieOptions = rawMap,
+            consentService.saveUniversalConsent(
+                config = config,
+                identifier = identifier,
+                preferences = universalPrefs,
+                apiKey = apiKey,
+                // NOT derived from the tracking signal. `ccpa_optout` records a CCPA/US do-not-sell
+                // choice; the device ad-tracking signal is a narrower ad-personalization signal, and
+                // treating one as the other would write a legal opt-out the user never made. Until
+                // the mobile signal-to-opt-out rule is ratified, Android has no source for this
+                // value, so it stays false and `syncOptout` writes nothing.
+                ccpaOptout = false,
+                getSignature = getSignature,
             )
-
-        consentService.saveUniversalConsent(
-            config = config,
-            identifier = identifier,
-            preferences = universalPrefs,
-            apiKey = apiKey,
-            // NOT derived from the tracking signal. `ccpa_optout` records a CCPA/US do-not-sell
-            // choice; the device ad-tracking signal is a narrower ad-personalization signal, and
-            // treating one as the other would write a legal opt-out the user never made. Until
-            // the mobile signal-to-opt-out rule is ratified, Android has no source for this
-            // value, so it stays false and `syncOptout` writes nothing.
-            ccpaOptout = false,
-            getSignature = getSignature,
-        )
-        // Bind only after the write succeeds: a failed write throws above and leaves the binding
-        // untouched, so a retry is still recognised as a transition.
+        }
+        // Bind only after the call succeeds: a failed read or write throws above and leaves the
+        // binding untouched, so a retry is still recognised as a login.
         storage.saveBoundUserHash(userHash)
     }
 
