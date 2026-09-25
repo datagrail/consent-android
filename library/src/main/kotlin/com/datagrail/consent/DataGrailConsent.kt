@@ -502,8 +502,8 @@ class DataGrailConsent private constructor() {
 
     /**
      * Reset all consent data. Destructive: wipes every stored value (preferences, unique id, config
-     * cache, pending events, identity binding). To log a user out without wiping the device, use
-     * [clearUserIdentifier].
+     * cache, pending events, identity binding, CCPA opt-out flag). To log a user out without wiping
+     * the device, use [clearUserIdentifier].
      */
     fun reset() {
         manager?.reset()
@@ -515,8 +515,9 @@ class DataGrailConsent private constructor() {
      * Clears the identity binding recorded by [setUserIdentifier] and removes the stored explicit
      * consent choice, so reads return the config's defaults exactly as a fresh install on this
      * device would see: [needsConsent]/[shouldDisplayBanner] report the banner should show again and
-     * [hasUserConsent] is false. The consent-changed listener fires with the now-effective default
-     * preferences so you can re-gate your SDKs.
+     * [hasUserConsent] is false. The CCPA opt-out flag ([getCcpaOptout]) is cleared to false. The
+     * consent-changed listener fires with the now-effective default preferences so you can re-gate
+     * your SDKs.
      *
      * Non-destructive, unlike [reset]: makes no network call, does NOT delete or modify the user's
      * server-side universal consent record, and does not clear the device unique id, config cache,
@@ -528,6 +529,74 @@ class DataGrailConsent private constructor() {
      */
     fun clearUserIdentifier() {
         manager?.clearUserIdentifier { prefs -> onConsentChangedCallback?.invoke(prefs) }
+    }
+
+    /**
+     * Record the user's explicit CCPA/CPRA "Do Not Sell or Share My Personal Information" (DNSMPI)
+     * choice for this device (TRUST-2591).
+     *
+     * Call this from your app's own DNSMPI control. On Android the host app is the ONLY source of
+     * this value: there is no OS or browser do-not-sell signal on a native device, and the SDK does
+     * not auto-detect one (it does not read the deprecated IAB `IABUSPrivacy_String` key, the device
+     * ad-tracking signal, or anything else). The SDK never derives it from a category choice either.
+     *
+     * The choice is persisted locally and changes no category preference; the consent-changed
+     * listener does not fire. It is written to the user's universal consent record as `ccpa_optout`
+     * only when universal consent is enabled, the container's `universalConsent.sync_optout` flag is
+     * on, [setUserIdentifier] has succeeded in this process for the bound identity, and the user has
+     * an explicit consent choice stored. Otherwise it is kept locally and sent with the next
+     * universal consent write. A ccpa-only change does not count as an explicit consent choice, so
+     * on a login with no existing record it is not written on its own. A login that finds a record
+     * replaces this value with the record's; [clearUserIdentifier] clears it to false; [reset] wipes
+     * it.
+     *
+     * @param optedOut true when the user opted out of the sale/sharing of their personal information.
+     * @param callback Result of the (possible) write-through; the local flag is kept on failure.
+     */
+    fun setCcpaOptout(
+        optedOut: Boolean,
+        callback: (Result<Unit>) -> Unit,
+    ) {
+        // Persist synchronously so getCcpaOptout() reflects the choice immediately; the
+        // write-through (if any) then runs on the SDK scope like the other universal consent calls.
+        manager?.saveCcpaOptout(optedOut)
+        launchUniversalConsentOperation(callback) { mgr, _ -> mgr.setCcpaOptout(optedOut) }
+    }
+
+    /**
+     * Java-friendly [setCcpaOptout].
+     *
+     * @param optedOut true when the user opted out of the sale/sharing of their personal information.
+     * @param callback Callback interface for success/failure of the (possible) write-through.
+     */
+    fun setCcpaOptout(
+        optedOut: Boolean,
+        callback: ConsentCallback,
+    ) {
+        setCcpaOptout(optedOut) { result -> adaptResult(result, callback) }
+    }
+
+    /**
+     * [setCcpaOptout] without a callback; a write-through failure is logged.
+     *
+     * @param optedOut true when the user opted out of the sale/sharing of their personal information.
+     */
+    fun setCcpaOptout(optedOut: Boolean) {
+        setCcpaOptout(optedOut) { result ->
+            result.exceptionOrNull()?.let { ConsentLogger.w("setCcpaOptout write-through failed: ${it.message}") }
+        }
+    }
+
+    /**
+     * The user's CCPA/CPRA "Do Not Sell or Share" choice as last recorded on this device by
+     * [setCcpaOptout] or adopted from a found universal consent record (TRUST-2591).
+     *
+     * @return true when the user opted out; false when they did not or nothing is recorded.
+     * @throws ConsentException.NotInitialized if SDK not initialized
+     */
+    fun getCcpaOptout(): Boolean {
+        val mgr = manager ?: throw ConsentException.NotInitialized()
+        return mgr.getCcpaOptout()
     }
 
     /**
@@ -655,6 +724,12 @@ class DataGrailConsent private constructor() {
      *   written through as before. With no record, only an explicit local choice is written; config
      *   defaults are never seeded.
      * "Nothing written" still reports success.
+     *
+     * CCPA opt-out (TRUST-2591): every write carries this device's [getCcpaOptout] flag as
+     * `ccpa_optout` when the container's `universalConsent.sync_optout` flag is on (otherwise
+     * `false`). A login that finds a record sets the local flag to the record's value; a re-sync that
+     * writes the local choice through keeps the local flag. A ccpa-only change never triggers a write
+     * on its own.
      *
      * What the SDK cannot detect: a logout it is not told about (call [clearUserIdentifier] on
      * logout); whether a pre-login choice was made by the person now logging in or by a previous
