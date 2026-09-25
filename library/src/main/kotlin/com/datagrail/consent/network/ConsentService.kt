@@ -245,10 +245,10 @@ internal class ConsentService(
      * Limited mode: when [getSignature] is null no signing callback is configured, so the write
      * goes out with X-DG-Api-Key ONLY — no signature, timestamp, or nonce headers.
      *
-     * @param ccpaOptout the user's CCPA/US do-not-sell choice. Only written to the record when
-     *   the `universalConsent.syncOptout` feature flag is enabled; otherwise `false`. This is
-     *   NOT derived from the device's ad-tracking signal — that signal is narrower than a
-     *   do-not-sell choice, so Android currently has no source for this value and passes `false`.
+     * @param ccpaOptout the user's explicit CCPA/CPRA "Do Not Sell or Share" choice — the RAW
+     *   local flag set by the host app through `DataGrailConsent.setCcpaOptout` (TRUST-2591). Only
+     *   written to the record when the `universalConsent.syncOptout` feature flag is enabled;
+     *   otherwise `false`. Never derived from the device's ad-tracking signal or any category.
      * @param getSignature the customer signing callback, or null for a limited-mode
      *   (API-key-only) write.
      * @throws ConsentException.NetworkError on failure (also queues nothing — universal writes

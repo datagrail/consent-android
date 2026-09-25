@@ -48,6 +48,7 @@ Two Gradle modules: `library` (the SDK) and `demo` (sample app that depends on `
 - Config is fetched from a remote HTTPS URL and deserialized with kotlinx.serialization
 - Consent state is versioned — banner re-shows when remote config `version` changes
 - Failed API calls are queued for retry via `ConsentService` — with one deliberate exception: universal-consent writes (`saveUniversalConsent`) are identity-scoped and are NOT queued. A replayed write could overwrite a newer cross-device record the SDK cannot merge; conflict/replay reconciliation is the edge's job (TRUST-2592). On failure they throw and the caller re-reads-then-writes on retry.
+- Universal consent `ccpa_optout` invariant (TRUST-2591, identical in the web/iOS/React Native SDKs): it is the user's EXPLICIT DNSMPI choice, set only by `setCcpaOptout` (the host app is the source of truth; there is no native signal) or by adopting a found record. It is never derived from a category, the ad-tracking signal or GPC. The wire value is `syncOptout && localFlag`, always the raw flag; `universalConsent.sync_optout` is only the per-customer gate. A found record's value replaces the local flag on login (and on re-sync only with the gate on); `clearUserIdentifier()` resets it to false.
 
 ## Testing
 
