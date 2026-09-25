@@ -500,7 +500,6 @@ internal class ConsentManager(
         onRehydrated: ((ConsentPreferences) -> Unit)? = null,
     ) {
         val config = requireUniversalConsentReady()
-        // TRUST-2603: explicit key wins, else fall back to the config value; fail fast if neither.
         val resolvedApiKey = resolveUniversalConsentApiKey(config, apiKey)
 
         // The same hash the service computes for the read/write (it also rejects an identifier that
