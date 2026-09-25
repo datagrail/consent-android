@@ -1079,11 +1079,14 @@ class ConsentManagerTests {
         }
 
     /**
-     * Rev 2.1: a found record with an empty cookieOptions map on a LOGIN is a found record with no
-     * choice. With nothing stored locally it is a no-op: no write, no rewrite, no listener.
+     * TRUST-2961: a found record with a PRESENT consent_preferences block whose cookieOptions map is
+     * empty is an ANSWERED essential-only choice on a LOGIN, not a no-choice miss. It is ADOPTED
+     * (local state replaced with the essential-only view, the listener fired) rather than left
+     * neutral — only an ABSENT (null) block is signal-only. No POST: the record wins as-is. This
+     * keeps Android aligned with iOS/web, where a present empty map already stops the re-prompt.
      */
     @Test
-    fun `login with an empty found record and nothing stored is a no-op`() =
+    fun `login with a present but empty found record is adopted as essential-only`() =
         runTest {
             sut.currentConfig = twoCategoryUniversalConfig()
             bindDeviceTo("alice@example.com")
@@ -1102,10 +1105,16 @@ class ConsentManagerTests {
                 onRehydrated = { notified.add(it) },
             )
 
+            // The record wins as-is: adopted locally, never posted, never reset to neutral.
             verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
             verify(mockStorage, never()).clearPreferences()
-            verify(mockStorage, never()).savePreferences(any())
-            assertTrue("no listener on a no-op", notified.isEmpty())
+            val storedCaptor = argumentCaptor<ConsentPreferences>()
+            verify(mockStorage).savePreferences(storedCaptor.capture())
+            val stored = storedCaptor.firstValue
+            assertTrue("the adopted essential-only choice is customised", stored.isCustomised)
+            assertTrue("essential is always on", stored.isCategoryEnabled("category_essential"))
+            assertFalse("marketing was not consented", stored.isCategoryEnabled("category_marketing"))
+            assertFalse("listener fires with the adopted choice", notified.isEmpty())
             verify(mockStorage).saveBoundUserHash(hashFor("bob@example.com"))
         }
 
