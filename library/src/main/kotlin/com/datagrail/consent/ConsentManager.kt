@@ -492,8 +492,10 @@ internal class ConsentManager(
                 val rawFromRecord = rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal, config)
                 if (rawFromRecord != null) {
                     getCategories()?.let { onRehydrated?.invoke(it) }
+                    localChoice
+                } else {
+                    explicitChoice
                 }
-                if (rawFromRecord != null) localChoice else explicitChoice
             } else {
                 // LOGIN. Reads the record directly so a found record without a choice is told apart
                 // from a genuine miss (rehydrate folds the two together).
