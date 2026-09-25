@@ -353,6 +353,11 @@ internal class ConsentManager(
      *   config — otherwise this would re-read [currentConfig] independently and a concurrent
      *   [loadConfig] could make the read and write disagree on consentProjectId/version. Other
      *   callers omit it and get a fresh [requireUniversalConsentReady].
+     * @param adoptCcpaOptout Whether a found record's `ccpa_optout` replaces the local flag
+     *   (TRUST-2591: the record is authoritative for the stored choice), applied only when
+     *   `universalConsent.syncOptout` is on. [setUserIdentifier] passes
+     *   false on a re-sync that is about to write the local flag through, so a failed write cannot
+     *   drop the user's newer local choice.
      * @return the record's raw preferences, or null on a miss.
      */
     suspend fun rehydrateReturningRawPreferences(
@@ -360,6 +365,7 @@ internal class ConsentManager(
         apiKey: String,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
         config: ConsentConfig = requireUniversalConsentReady(),
+        adoptCcpaOptout: Boolean = true,
     ): ConsentPreferences? {
 
         // Goes to the service directly rather than through fetchUniversalConsent, which returns an
@@ -403,6 +409,12 @@ internal class ConsentManager(
         // this app is running, which is what needsConsent() compares against; carrying over a stale
         // version from the writing device would re-prompt immediately and undo the rehydration.
         storage.saveConfigVersion(config.version)
+        // Outside a login, adopt the record's CCPA choice only with the syncOptout gate on: with the
+        // gate off the SDK never puts the choice on the record (it always says false), so adopting it
+        // would erase a local-only setCcpaOptout(true). Same rule as the web/iOS/React Native SDKs.
+        if (adoptCcpaOptout && config.universalConsent?.syncOptout == true) {
+            storage.saveCcpaOptout(record.ccpaOptout)
+        }
         return raw
     }
 
@@ -451,6 +463,16 @@ internal class ConsentManager(
      * made by the person now logging in or a previous user of a shared device (an explicit choice
      * on an unbound device is attached on a no-record login by design), does no heuristic
      * shared-device/shared-account detection, and cannot detect two people sharing one account.
+     *
+     * CCPA opt-out (TRUST-2591). Any write carries the RAW local [getCcpaOptout] flag, captured
+     * before any adopt; the service writes it only when `universalConsent.syncOptout` is on. A LOGIN
+     * that finds a record (with or without a category choice) sets the local flag to the record's
+     * `ccpa_optout`, dropping a pre-login local value; a LOGIN away from a different identity with no
+     * record clears it (it was that user's). A RE-SYNC that writes the local choice through keeps the
+     * local flag (it is what the record now holds); one that only adopts takes the record's value
+     * when `syncOptout` is on (with the gate off the record never carries the choice). A
+     * ccpa-only local change is not an explicit category choice, so on its own it never triggers a
+     * write.
      *
      * The raw identifier is NOT retained as manager state, so subsequent operations (e.g.
      * [fetchUniversalConsent]) must pass it again. Requires universal consent to be enabled AND
@@ -515,6 +537,8 @@ internal class ConsentManager(
         // EXPLICIT only when no other identity is bound (see the KDoc above).
         val localChoice = storage.loadPreferences()
         val explicitChoice = if (boundToOther) null else localChoice
+        // The RAW local CCPA flag, captured before any adopt below can replace it. Never derived.
+        val localCcpaOptout = storage.loadCcpaOptout()
 
         // READ then WRITE. A read FAILURE THROWS and blocks the write — overwriting a record we
         // could not read would silently erase the user's real cross-device choice (the TRUST-2491
@@ -529,7 +553,17 @@ internal class ConsentManager(
                 // counts as a miss here, as before); a local choice is written through
                 // (sync-on-change), and a found record with no local change is adopted without a
                 // POST. On a miss only an explicit local choice is written; defaults are never seeded.
-                val rawFromRecord = rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal, config)
+                // A found record is written over whenever a local choice exists, so the local CCPA
+                // flag takes the record's value only when nothing will be written back (and, as in
+                // rehydrate, only with the syncOptout gate on).
+                val rawFromRecord =
+                    rehydrateReturningRawPreferences(
+                        identifier,
+                        apiKey,
+                        trackingSignal,
+                        config,
+                        adoptCcpaOptout = localChoice == null,
+                    )
                 // A logout landed during the read: rehydrate has already persisted the reconciled
                 // view, so re-clear it and leave the device neutral and unbound rather than letting
                 // this stale re-sync resurrect the prior identity's state.
@@ -550,6 +584,14 @@ internal class ConsentManager(
                 // A logout landed during the read: leave its neutral state in place rather than
                 // adopting/replacing local state for an identity the device is no longer bound to.
                 if (identityOperationGeneration.get() != opGeneration) return
+                if (record != null) {
+                    // The record is authoritative for the stored CCPA choice; a pre-login local
+                    // value is dropped exactly like the categories.
+                    storage.saveCcpaOptout(record.ccpaOptout)
+                } else if (boundToOther) {
+                    // The previous identity's flag must not carry over to this one.
+                    storage.clearCcpaOptout()
+                }
                 when {
                     record == null -> {
                         // Genuine MISS: only an explicit local choice is attached. A different
@@ -561,8 +603,9 @@ internal class ConsentManager(
                     }
                     record.consentPreferences?.cookieOptions.isNullOrEmpty() -> {
                         // FOUND with no choice: drop local state (neutral) if anything is stored.
+                        // The CCPA flag already took the record's value above and keeps it.
                         if (localChoice != null) {
-                            returnToNeutral(onRehydrated)
+                            returnToNeutral(onRehydrated, clearCcpaOptout = false)
                         }
                         null
                     }
@@ -587,12 +630,11 @@ internal class ConsentManager(
                 identifier = identifier,
                 preferences = universalPrefs,
                 apiKey = apiKey,
-                // NOT derived from the tracking signal. `ccpa_optout` records a CCPA/US do-not-sell
-                // choice; the device ad-tracking signal is a narrower ad-personalization signal, and
-                // treating one as the other would write a legal opt-out the user never made. Until
-                // the mobile signal-to-opt-out rule is ratified, Android has no source for this
-                // value, so it stays false and `syncOptout` writes nothing.
-                ccpaOptout = false,
+                // The user's explicit DNSMPI choice from setCcpaOptout, RAW. NEVER derived from the
+                // tracking signal or any category: the ad-tracking signal is a narrower
+                // ad-personalization signal, and treating one as the other would write a legal
+                // opt-out the user never made. The service gates it on `syncOptout`.
+                ccpaOptout = localCcpaOptout,
                 getSignature = getSignature,
             )
         }
@@ -602,6 +644,7 @@ internal class ConsentManager(
         // Bind only after the call succeeds: a failed read or write throws above and leaves the
         // binding untouched, so a retry is still recognised as a login.
         storage.saveBoundUserHash(userHash)
+        universalConsentSession = UniversalConsentSession(userHash, identifier, apiKey, getSignature)
     }
 
     /**
@@ -634,7 +677,8 @@ internal class ConsentManager(
 
     /**
      * Logout / return-to-neutral (TRUST-2902). Clears the persisted identity binding and returns
-     * local consent to NEUTRAL: the stored explicit choice is removed, so reads fall back to the
+     * local consent to NEUTRAL: the stored explicit choice and the CCPA opt-out flag (TRUST-2591)
+     * are removed, so [getCcpaOptout] reads false and category reads fall back to the
      * config's defaults exactly as on a fresh install ([needsConsent] true, [getUserPreferences]
      * null), and [onNeutral] fires with those now-effective defaults.
      *
@@ -650,6 +694,7 @@ internal class ConsentManager(
         // or rehydrate its preferences after we return the device to neutral below.
         identityOperationGeneration.incrementAndGet()
         storage.clearBoundUserHash()
+        universalConsentSession = null
         returnToNeutral(onNeutral)
     }
 
@@ -657,12 +702,77 @@ internal class ConsentManager(
      * The single "return local state to neutral" operation shared by [clearUserIdentifier] and the
      * login-transition branch of [setUserIdentifier]: remove the stored explicit choice and reuse
      * the existing default path ([getCategories] falls back to [getDefaultPreferences]) rather than
-     * reimplementing defaults.
+     * reimplementing defaults. Also clears the CCPA opt-out flag unless [clearCcpaOptout] is false
+     * (a login onto a found record has already set it to the record's value).
      */
-    private fun returnToNeutral(onNeutral: ((ConsentPreferences) -> Unit)?) {
+    private fun returnToNeutral(
+        onNeutral: ((ConsentPreferences) -> Unit)?,
+        clearCcpaOptout: Boolean = true,
+    ) {
         storage.clearPreferences()
+        if (clearCcpaOptout) {
+            storage.clearCcpaOptout()
+        }
         getCategories()?.let { onNeutral?.invoke(it) }
     }
+
+    // MARK: - CCPA opt-out (TRUST-2591)
+
+    /**
+     * The identity and credentials of the last successful [setUserIdentifier], held in memory only
+     * (the signature provider cannot be persisted) so [setCcpaOptout] can write through for the
+     * bound user. After a process restart the setter stays local until the host calls
+     * [setUserIdentifier] again.
+     */
+    private data class UniversalConsentSession(
+        val userHash: String,
+        val identifier: String,
+        val apiKey: String,
+        val getSignature: SignatureProvider?,
+    )
+
+    @Volatile
+    private var universalConsentSession: UniversalConsentSession? = null
+
+    /**
+     * Persist the user's explicit CCPA/CPRA "Do Not Sell or Share" choice for this device, then write
+     * it through to the bound identity's universal consent record when that applies. Changes no
+     * category and fires no listener.
+     *
+     * The write — the stored local choice plus the new flag, the same write [setUserIdentifier]
+     * makes — happens only when universal consent is enabled, `universalConsent.syncOptout` is on,
+     * the device is bound to the identity a [setUserIdentifier] call succeeded for in this process,
+     * and an explicit local choice is stored (config defaults are never seeded). Otherwise the flag
+     * stays local and rides the next universal consent write. A failed write throws; the local flag
+     * is kept.
+     */
+    suspend fun setCcpaOptout(optedOut: Boolean) {
+        storage.saveCcpaOptout(optedOut)
+        val config = currentConfig ?: return
+        val universalConsent = config.universalConsent ?: return
+        if (!universalConsent.enabled || !universalConsent.syncOptout) return
+        val session = universalConsentSession ?: return
+        if (session.userHash != storage.loadBoundUserHash()) return
+        val localChoice = storage.loadPreferences() ?: return
+        consentService.saveUniversalConsent(
+            config = config,
+            identifier = session.identifier,
+            preferences =
+                UniversalConsentPreferences(
+                    isCustomised = localChoice.isCustomised,
+                    cookieOptions = localChoice.cookieOptions.associate { it.gtmKey to it.isEnabled },
+                ),
+            apiKey = session.apiKey,
+            ccpaOptout = optedOut,
+            getSignature = session.getSignature,
+        )
+    }
+
+    /** Persist the CCPA opt-out flag locally only (the adapter's synchronous half of [setCcpaOptout]). */
+    fun saveCcpaOptout(optedOut: Boolean) = storage.saveCcpaOptout(optedOut)
+
+    /** The stored CCPA opt-out choice; false when none is stored. */
+    fun getCcpaOptout(): Boolean = storage.loadCcpaOptout()
 
     // MARK: - Retry
 
@@ -686,6 +796,7 @@ internal class ConsentManager(
         identityOperationGeneration.incrementAndGet()
         storage.clearAll()
         currentConfig = null
+        universalConsentSession = null
     }
 
     /**
