@@ -1303,6 +1303,51 @@ class ConsentManagerTests {
         assertNull(sut.currentConfig)
     }
 
+    /**
+     * A logout that lands while a setUserIdentifier is suspended on the READ must not be undone by
+     * that call's continuation: the found record is neither adopted nor bound once clearUserIdentifier
+     * has returned the device to neutral.
+     */
+    @Test
+    fun `logout during the read aborts the in-flight login without rebinding or adopting`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice())
+            // The logout lands mid-read, before the record comes back.
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenAnswer {
+                sut.clearUserIdentifier()
+                foundRecord()
+            }
+
+            sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+
+            verify(mockStorage).clearBoundUserHash()
+            verify(mockStorage, never()).saveBoundUserHash(any())
+            verify(mockStorage, never()).savePreferences(any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+        }
+
+    /**
+     * The same guard covers a logout that lands while suspended on the WRITE: the POST may have gone
+     * out, but the device is not rebound to the identity it just left.
+     */
+    @Test
+    fun `logout during the write aborts the in-flight login without rebinding`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice())
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(null)
+            whenever(
+                mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), any()),
+            ).thenAnswer { sut.clearUserIdentifier() }
+
+            sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
+
+            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockStorage).clearBoundUserHash()
+            verify(mockStorage, never()).saveBoundUserHash(any())
+        }
+
     @Test
     fun `fetchUniversalConsent reconciles the stored gpc on the returned record`() =
         runTest {

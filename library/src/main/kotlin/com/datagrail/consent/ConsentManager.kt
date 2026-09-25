@@ -13,6 +13,7 @@ import com.datagrail.consent.models.essentialCategoryKeys
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Manages consent state and coordinates between storage, network, and configuration
@@ -23,6 +24,14 @@ internal class ConsentManager(
     private val consentService: ConsentService,
 ) {
     internal var currentConfig: ConsentConfig? = null
+
+    // Serializes identity transitions against each other. setUserIdentifier suspends on the
+    // network read/write, and clearUserIdentifier()/reset() run synchronously on the caller's
+    // thread; without this, a logout that lands while a setUserIdentifier is in flight would be
+    // undone when that call's continuation resumes and rebinds the old identity (and rehydrates
+    // its preferences). Each logout/reset supersedes any in-flight setUserIdentifier, which then
+    // aborts its remaining storage mutations. Mirrors the initGeneration guard in DataGrailConsent.
+    private val identityOperationGeneration = AtomicInteger(0)
 
     // MARK: - Configuration
 
@@ -458,6 +467,11 @@ internal class ConsentManager(
     ) {
         val config = requireUniversalConsentReady()
 
+        // Token for this transition. A clearUserIdentifier()/reset() that lands while the reads and
+        // writes below are suspended bumps this, so the checks after each suspension abort before
+        // rewriting local state or rebinding — a logout is never silently undone by a stale login.
+        val opGeneration = identityOperationGeneration.get()
+
         // The same hash the service computes for the read/write (it also rejects an identifier that
         // is empty after normalization, before any request). Only the hash is ever persisted.
         val userHash =
@@ -490,6 +504,13 @@ internal class ConsentManager(
                 // (sync-on-change), and a found record with no local change is adopted without a
                 // POST. On a miss only an explicit local choice is written; defaults are never seeded.
                 val rawFromRecord = rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal, config)
+                // A logout landed during the read: rehydrate has already persisted the reconciled
+                // view, so re-clear it and leave the device neutral and unbound rather than letting
+                // this stale re-sync resurrect the prior identity's state.
+                if (identityOperationGeneration.get() != opGeneration) {
+                    returnToNeutral(null)
+                    return
+                }
                 if (rawFromRecord != null) {
                     getCategories()?.let { onRehydrated?.invoke(it) }
                     localChoice
@@ -500,6 +521,9 @@ internal class ConsentManager(
                 // LOGIN. Reads the record directly so a found record without a choice is told apart
                 // from a genuine miss (rehydrate folds the two together).
                 val record = consentService.getUniversalConsent(config, identifier, apiKey)
+                // A logout landed during the read: leave its neutral state in place rather than
+                // adopting/replacing local state for an identity the device is no longer bound to.
+                if (identityOperationGeneration.get() != opGeneration) return
                 when {
                     record == null -> {
                         // Genuine MISS: only an explicit local choice is attached. A different
@@ -546,6 +570,9 @@ internal class ConsentManager(
                 getSignature = getSignature,
             )
         }
+        // A logout landed while the read/write was suspended: don't rebind the identity the device
+        // just left. The call still reports success — the logout's neutral state is what stands.
+        if (identityOperationGeneration.get() != opGeneration) return
         // Bind only after the call succeeds: a failed read or write throws above and leaves the
         // binding untouched, so a retry is still recognised as a login.
         storage.saveBoundUserHash(userHash)
@@ -593,6 +620,9 @@ internal class ConsentManager(
      *   notify its consent-changed listener.
      */
     fun clearUserIdentifier(onNeutral: ((ConsentPreferences) -> Unit)? = null) {
+        // Supersede any in-flight setUserIdentifier so its continuation cannot rebind this identity
+        // or rehydrate its preferences after we return the device to neutral below.
+        identityOperationGeneration.incrementAndGet()
         storage.clearBoundUserHash()
         returnToNeutral(onNeutral)
     }
@@ -625,6 +655,9 @@ internal class ConsentManager(
      * [clearUserIdentifier] for the non-destructive logout)
      */
     fun reset() {
+        // Like clearUserIdentifier(), supersede any in-flight setUserIdentifier so a stale
+        // continuation cannot rebind an identity or restore preferences after the wipe.
+        identityOperationGeneration.incrementAndGet()
         storage.clearAll()
         currentConfig = null
     }
