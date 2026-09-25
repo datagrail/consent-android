@@ -551,7 +551,6 @@ internal class ConsentManager(
         // Superseded by a logout/reset while queued behind another setUserIdentifier.
         if (identityOperationGeneration.get() != opGeneration) return
         val config = requireUniversalConsentReady()
-        // TRUST-2603: explicit key wins, else fall back to the config value; fail fast if neither.
         val resolvedApiKey = resolveUniversalConsentApiKey(config, apiKey)
 
         // The same hash the service computes for the read/write (it also rejects an identifier that
