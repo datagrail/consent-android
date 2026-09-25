@@ -120,14 +120,14 @@ if (DataGrailConsent.getInstance().isCategoryEnabled("category_marketing")) {
 
 ## Schema Compatibility
 
-Each SDK release reads consent configurations published for one consent schema version:
+Each SDK release targets one consent schema version, which it reports to the backend as telemetry:
 
 | SDK version | Consent schema |
 |-------------|----------------|
 | 1.0.0 – 1.7.x | `v1` |
 | Unreleased | `v1` |
 
-The SDK only reads configurations published for its own schema version. If the configuration is not published at the config URL (the fetch is rejected with a 4xx other than 408 or 429) and nothing is cached, initialization fails with `ConsentException.ConfigNotPublished` without retrying.
+The SDK reports its schema version to the backend as telemetry; it does not currently reject a configuration published for a different schema version (version-based rejection is planned). If the configuration is not published at the config URL (the fetch is rejected with a 4xx other than 408 or 429) and nothing is cached, initialization fails with `ConsentException.ConfigNotPublished` without retrying.
 
 Read the versions at runtime from `com.datagrail.consent.BuildConfig.SCHEMA_VERSION` and `BuildConfig.LIBRARY_VERSION`.
 

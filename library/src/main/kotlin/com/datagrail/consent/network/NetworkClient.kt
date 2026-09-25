@@ -110,7 +110,7 @@ class NetworkClient {
      * @return The result of the operation
      * @throws The last error if all attempts fail
      */
-    suspend fun <T> retryWithBackoff(
+    internal suspend fun <T> retryWithBackoff(
         maxAttempts: Int = 5,
         baseDelayMs: Long = 250,
         shouldRetry: (Exception) -> Boolean = { true },
