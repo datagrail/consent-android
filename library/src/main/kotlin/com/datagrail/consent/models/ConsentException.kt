@@ -41,9 +41,13 @@ sealed class ConsentException(message: String, cause: Throwable? = null) : Excep
      * The consent configuration is not published at the requested location (the config fetch was
      * rejected with a definite 4xx, see [HttpError.isClientError]) and no cached configuration was
      * available. Not retried. Publish the configuration in the dashboard or check the config URL.
+     *
+     * [statusCode] is the 4xx that triggered this (nil when raised for a non-HTTP reason), matching
+     * iOS `ConsentError.configNotPublished(statusCode:)`.
      */
-    class ConfigNotPublished(cause: Throwable? = null) : NetworkError(
-        "Configuration not published. Publish the consent configuration or check the config URL.",
+    class ConfigNotPublished(val statusCode: Int? = null, cause: Throwable? = null) : NetworkError(
+        "Configuration not published${statusCode?.let { " (HTTP $it)" } ?: ""}. " +
+            "Publish the consent configuration or check the config URL.",
         cause,
     )
 

@@ -48,7 +48,7 @@ internal class ConfigService(
             // If network fails, try cached config
             storage.loadConfigCache()
                 ?: throw if (e is ConsentException.HttpError && e.isClientError) {
-                    ConsentException.ConfigNotPublished(e)
+                    ConsentException.ConfigNotPublished(statusCode = e.statusCode, cause = e)
                 } else {
                     e
                 }

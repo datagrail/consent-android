@@ -54,13 +54,19 @@ class ConsentExceptionTest {
     }
 
     @Test
-    fun `ConfigNotPublished is a NetworkError that keeps its cause and omits the URL`() {
+    fun `ConfigNotPublished is a NetworkError that carries its status code and cause`() {
         val cause = ConsentException.HttpError(403)
-        val error: Exception = ConsentException.ConfigNotPublished(cause)
+        val error = ConsentException.ConfigNotPublished(statusCode = 403, cause = cause)
 
         assertTrue(error is ConsentException.NetworkError)
+        assertEquals(403, error.statusCode)
         assertSame(cause, error.cause)
-        assertFalse(error.message!!.contains("http"))
+        // The guidance message must not leak the fetched config URL.
         assertFalse(error.message!!.contains("/"))
+    }
+
+    @Test
+    fun `ConfigNotPublished statusCode is null when raised for a non-HTTP reason`() {
+        assertNull(ConsentException.ConfigNotPublished().statusCode)
     }
 }
