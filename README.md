@@ -118,6 +118,19 @@ if (DataGrailConsent.getInstance().isCategoryEnabled("category_marketing")) {
 - Calling code: Kotlin 1.9+ or Java 8+ source compatibility
 - AndroidX
 
+## Schema Compatibility
+
+Each SDK release reads consent configurations published for one consent schema version:
+
+| SDK version | Consent schema |
+|-------------|----------------|
+| 1.0.0 – 1.7.x | `v1` |
+| Unreleased | `v1` |
+
+The SDK only reads configurations published for its own schema version. If the configuration is not published at the config URL (the fetch is rejected with a 4xx other than 408 or 429) and nothing is cached, initialization fails with `ConsentException.ConfigNotPublished` without retrying.
+
+Read the versions at runtime from `com.datagrail.consent.BuildConfig.SCHEMA_VERSION` and `BuildConfig.LIBRARY_VERSION`.
+
 ## Java Support
 
 The SDK is written in Kotlin but provides **full Java interoperability** through dedicated callback interfaces. Java developers can use all SDK features with clear success/failure callbacks instead of Kotlin's `Result` type.
