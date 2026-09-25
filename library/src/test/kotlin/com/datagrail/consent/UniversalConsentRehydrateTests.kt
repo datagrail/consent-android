@@ -12,6 +12,7 @@ import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
 import org.mockito.kotlin.doAnswer
+import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
@@ -311,6 +312,49 @@ class UniversalConsentRehydrateTests {
                     CategoryConsent(gtmKey = "category_marketing", isEnabled = marketing),
                 ),
         )
+
+    // MARK: - API key delivery via config.json (TRUST-2603)
+
+    @Test
+    fun `falls back to universalConsent apiKey from config when none is passed`() =
+        runTest {
+            sut.currentConfig = baseUniversalConfig().copy(
+                universalConsent = UniversalConsentConfig(enabled = true, apiKey = "config_key"),
+            )
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(null)
+
+            sut.fetchUniversalConsent("user@example.com", null, TrackingSignal.AUTHORIZED)
+
+            verify(mockConsentService).getUniversalConsent(any(), any(), eq("config_key"))
+        }
+
+    @Test
+    fun `prefers an explicit apiKey over the config value`() =
+        runTest {
+            sut.currentConfig = baseUniversalConfig().copy(
+                universalConsent = UniversalConsentConfig(enabled = true, apiKey = "config_key"),
+            )
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(null)
+
+            sut.fetchUniversalConsent("user@example.com", "explicit_key", TrackingSignal.AUTHORIZED)
+
+            verify(mockConsentService).getUniversalConsent(any(), any(), eq("explicit_key"))
+        }
+
+    @Test
+    fun `throws ValidationError when neither an explicit key nor a config key is present`() =
+        runTest {
+            sut.currentConfig = baseUniversalConfig().copy(
+                universalConsent = UniversalConsentConfig(enabled = true, apiKey = null),
+            )
+
+            assertThrows(ConsentException.ValidationError::class.java) {
+                kotlinx.coroutines.runBlocking {
+                    sut.fetchUniversalConsent("user@example.com", null, TrackingSignal.AUTHORIZED)
+                }
+            }
+            verify(mockConsentService, never()).getUniversalConsent(any(), any(), any())
+        }
 
     private fun universalConfig(): ConsentConfig = baseUniversalConfig()
 
