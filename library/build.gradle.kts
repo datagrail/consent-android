@@ -8,10 +8,30 @@ plugins {
 
 val libraryVersion = "1.7.0"
 
-// consent-schema version this SDK's models are written against. Build-time constant, not derived
-// from the wire format or fetched config; bump only when the models are rewritten against a newer
-// schema version. Keep README "Schema Compatibility" in sync.
-val schemaVersion = "v1"
+// consent-schema version this SDK's models are written against: the `package` of the dgapp
+// consent_schema config.proto vendored under consent_schema/ (provenance in consent_schema/SOURCE).
+// Exactly one vendored version is expected; once the SDK supports several, name the reported one
+// explicitly here. Keep README "Schema Compatibility" in sync.
+val consentSchemaVersion: String =
+    run {
+        val bumpHint = "bump the vendored proto and SCHEMA_VERSION together"
+        val protos =
+            rootProject.fileTree("consent_schema/proto/datagrail/consent") { include("*/config.proto") }.files
+        require(protos.size == 1) {
+            "Expected exactly one vendored consent_schema config.proto, found: $protos; $bumpHint"
+        }
+        val proto = protos.single()
+        val pkg =
+            Regex("""^package datagrail\.consent\.(v[1-9][0-9]*);""", RegexOption.MULTILINE)
+                .find(proto.readText())
+                ?.groupValues
+                ?.get(1)
+                ?: error("No `package datagrail.consent.vN;` in $proto; $bumpHint")
+        require(pkg == proto.parentFile.name) {
+            "$proto declares $pkg but lives under ${proto.parentFile.name}; $bumpHint"
+        }
+        pkg
+    }
 
 android {
     namespace = "com.datagrail.consent"
@@ -24,7 +44,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
         buildConfigField("String", "LIBRARY_VERSION", "\"$libraryVersion\"")
-        buildConfigField("String", "SCHEMA_VERSION", "\"$schemaVersion\"")
+        buildConfigField("String", "SCHEMA_VERSION", "\"$consentSchemaVersion\"")
     }
 
     buildTypes {
