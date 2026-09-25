@@ -1,0 +1,216 @@
+syntax = "proto3";
+
+// Consent configuration schema, version 1.
+//
+// This message is a BYTE-FOR-BYTE FAITHFUL MIRROR of the config.json payload
+// produced by dgapp today (the merge of ConsentContainerVersion#base_configuration,
+// ConsentPrivacyPolicy#consent_banner_configuration, and the layout hash,
+// merged in by Consent::ConfigService.create_merged_consent). It is v1: a
+// migration baseline, not a cleanup. Wire key names below are therefore
+// intentionally NOT renamed to "nicer" proto conventions where the real
+// payload uses a snake_case or single-letter key — see the json_name
+// overrides. All renaming/cleanup is deferred to v2.
+//
+// CORRECTION (found while building WU-T1): earlier grounding assumed the
+// payload also merged in ConsentContainerVersion#multilingual_banner_config
+// (top-level `categories` / `banner_translations` fields). That was true
+// before the "Layouts" migration (commit 63c28176c2, "Consolidate
+// LayoutsConfigService and ConfigService") replaced the multi-locale
+// category/translation rendering with the structured Layout system.
+// `multilingual_banner_config` is now dead code — nothing in
+// Consent::ConfigService.create_merged_consent calls it, and
+// ConsentContainerVersion#serialize_banner_config (the only caller) is
+// itself unused outside its own model spec. Category/translation content
+// for the live banner now lives entirely inside the `layout` tree as
+// ConsentLayerElement entries. `categories` / `banner_translations` were
+// removed from this message accordingly — they do not exist in the real
+// wire payload.
+//
+// Sources verified directly (re-check these if this proto drifts from
+// reality):
+//   app/models/consent_container_version.rb    #base_configuration
+//   app/models/consent_privacy_policy.rb       #consent_banner_configuration
+//   app/models/consent_layout.rb               #serializable_hash(:consent_banner)
+//   app/models/consent_layer.rb                #serializable_hash(:consent_banner)
+//   app/models/consent_layer_element.rb        #serializable_hash(:consent_banner)
+//   app/services/consent/config_service.rb     .create_merged_consent (layout merge)
+//
+// Evolution rules (proto3):
+//   * Field numbers are STABLE. Never reuse or renumber an existing field.
+//   * To remove a field, delete it and add its number/name to a `reserved`
+//     statement so it can never be reused.
+//   * Additive changes (new optional fields, new enum values) are the only
+//     backward-compatible changes. Breaking/renaming changes require a new
+//     version package (datagrail.consent.v2).
+package datagrail.consent.v1;
+
+// The root consent configuration delivered to a consumer. Equivalent to the
+// JSON object built by Consent::ConfigService.create_merged_consent: it merges
+// ConsentContainerVersion#base_configuration, ConsentPrivacyPolicy#consent_banner_configuration,
+// and the layout hash, in that order.
+message Config {
+  // --- From ConsentContainerVersion#base_configuration --------------------
+
+  // publish_process_id. Must always match the Banner tag template version
+  // (see app/lib/api/google_tag_manager/consent_banner_properties.rb).
+  string version = 1;
+
+  // ConsentContainerVersion UUID.
+  string consent_container_version_id = 2;
+
+  // consent_project_id, nullable in dgapp. Absent/null when not set.
+  optional string consent_project_id = 3;
+
+  // DGCustomer public_uuid.
+  string dg_customer_id = 4;
+
+  // JS timestamp in milliseconds (Time.zone.now.to_f * 1000). The real
+  // payload emits this as a bare JSON integer (Ruby Integer#to_json), NOT
+  // a string, so this field must be generated with the
+  // disallow_bigints_as_strings jsonschema option (see generate.sh) to
+  // avoid proto3-JSON's default int64-as-string convention.
+  int64 p = 5 [json_name = "p"];
+
+  // default_cookie_behavior, nullable. Field `dch` in the payload.
+  optional string dch = 6 [json_name = "dch"];
+
+  // default_cookie_category primitive, nullable. Field `dc` in the payload.
+  optional string dc = 7 [json_name = "dc"];
+
+  // hosting_domain.
+  string privacy_domain = 8;
+
+  // analytics_endpoint, nullable.
+  optional string analytics_endpoint = 9;
+
+  // plugin_name (lowerCamelCase, via String#camelize(:lower)) -> enabled.
+  map<string, bool> plugins = 10;
+
+  bool test_mode = 11;
+  bool ignore_do_not_track = 12;
+
+  // URL the consent-banner uses to fetch cookie/service details + translations.
+  string tracking_details_url = 13;
+
+  // --- From ConsentPrivacyPolicy#consent_banner_configuration -------------
+
+  // 'optin' | 'optout'. A plain string in the real payload (see
+  // ConsentPrivacyPolicy#consent_mode) -- deliberately NOT a proto enum,
+  // since the wire value must byte-match "optin"/"optout" literally.
+  string consent_mode = 14;
+
+  bool show_banner = 15;
+
+  ConsentPolicy consent_policy = 16;
+
+  bool gpp_us_nat = 17;
+
+  bool tcf = 18;
+
+  InitialCategories initial_categories = 19;
+
+  // Field numbers 20-21 were `categories` / `banner_translations`, removed
+  // (see the CORRECTION note above) — they never appear in the real wire
+  // payload. Reserved so they can never be reused.
+  reserved 20, 21;
+  reserved "categories", "banner_translations";
+
+  // --- Layout, merged in by Consent::ConfigService.create_merged_consent --
+
+  // Serialized ConsentLayout tree (nested layers/elements), matching
+  // ConsentLayout#serializable_hash(mode: :consent_banner). Modeled as a
+  // real structured message (NOT opaque bytes) per the v1 contract:
+  // this is the single most important correctness property of this file.
+  //
+  // FIDELITY NOTE: the confirmed top-level Layout/ConsentLayer shape is
+  // fully modeled below. ConsentLayerElement is polymorphic (7 element
+  // subtypes: text/link/button/category/tracking-details/browser-signal-
+  // notice/language-picker -- see ConsentLayerElement::ElementTypes and the
+  // consent-ios/consent-android/consent-banner SDK models). Rather than
+  // encode all 7 shapes as a giant oneof (a large undertaking out of scope
+  // for this WU), the common/confirmed fields across all subtypes are
+  // modeled directly on ConsentLayerElement, and deeply-nested
+  // per-element-type leaves (e.g. category/link/translation detail maps)
+  // are intentionally left to fall through the jsonschema generator's
+  // default `additionalProperties: true` rather than being exhaustively
+  // typed or dumped to bytes. This is a deliberate, flagged scope
+  // reduction -- see the WU-S1 report -- not an oversight; deepen in a
+  // follow-up if full per-element-type fidelity is required.
+  Layout layout = 22;
+}
+
+// Identifies the privacy policy that produced this config.
+message ConsentPolicy {
+  string name = 1;
+  bool default = 2;
+  // privacy_request_policy.uuid, optional in dgapp.
+  optional string uuid = 3;
+}
+
+// Category-selection behavior for GPC / DNT / opt-out signals. The `initial`,
+// `gpc`, and `optout` lists hold category gtm_keys. Inner keys are
+// snake_case in the real payload (see ConsentPrivacyPolicy#consent_banner_configuration).
+message InitialCategories {
+  bool respect_gpc = 1 [json_name = "respect_gpc"];
+  bool respect_dnt = 2 [json_name = "respect_dnt"];
+  bool respect_optout = 3 [json_name = "respect_optout"];
+  repeated string initial = 4;
+  repeated string gpc = 5;
+  repeated string optout = 6;
+}
+
+// Top-level layout envelope. Mirrors ConsentLayout#serializable_hash(mode: :consent_banner).
+message Layout {
+  string id = 1;
+  string name = 2;
+  optional string description = 3;
+  string status = 4;
+  // Real wire key `default_layout` (snake_case).
+  bool default_layout = 5 [json_name = "default_layout"];
+  // Real wire key `collapsed_on_mobile` (snake_case).
+  bool collapsed_on_mobile = 6 [json_name = "collapsed_on_mobile"];
+  // Real wire key `first_layer_id` (snake_case).
+  optional string first_layer_id = 7 [json_name = "first_layer_id"];
+  // Real wire key `gpc_dnt_layer_id` (snake_case).
+  optional string gpc_dnt_layer_id = 8 [json_name = "gpc_dnt_layer_id"];
+  // Real wire key `consent_layers` (snake_case); keyed by ConsentLayer id.
+  map<string, ConsentLayer> consent_layers = 9 [json_name = "consent_layers"];
+}
+
+// A single consent layer (screen) in the banner flow. Mirrors
+// ConsentLayer#serializable_hash(mode: :consent_banner).
+message ConsentLayer {
+  string id = 1;
+  string name = 2;
+  string position = 3;
+  // Real wire key `show_close_button` (snake_case).
+  bool show_close_button = 4 [json_name = "show_close_button"];
+  // Real wire key `banner_api_id` (snake_case).
+  string banner_api_id = 5 [json_name = "banner_api_id"];
+  repeated ConsentLayerElement elements = 6;
+}
+
+// A UI element within a consent layer. Polymorphic across 7 element
+// subtypes (see the FIDELITY NOTE on Config.layout above) -- only the
+// fields confirmed common/shared across subtypes are modeled explicitly;
+// everything else round-trips via additionalProperties in the generated
+// JSON schema rather than being dumped to bytes.
+message ConsentLayerElement {
+  string id = 1;
+  int64 order = 2;
+  // e.g. "ConsentLayerTextElement", "ConsentLayerButtonElement", etc.
+  string type = 3;
+  // Locale-keyed translation map, common to most element subtypes. Mirrors
+  // ConsentLayerTranslation#serializable_hash(mode: :application).
+  map<string, ElementTranslation> translations = 4;
+}
+
+// A single localized translation entry for a layer element. Mirrors
+// ConsentLayerTranslation#serializable_hash(mode: :application): {id,
+// locale, value} plus an optional `url` (only present for link elements).
+message ElementTranslation {
+  string id = 1;
+  string locale = 2;
+  string value = 3;
+  optional string url = 4;
+}
