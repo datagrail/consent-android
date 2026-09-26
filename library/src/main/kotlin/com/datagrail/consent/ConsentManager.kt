@@ -374,8 +374,13 @@ internal class ConsentManager(
         // already-reconciled record. Both views are needed here: the reconciled one to persist
         // locally, the raw one to hand back for the write.
         val record = consentService.getUniversalConsent(config, identifier, apiKey) ?: return null
+        // ABSENT consent_preferences is signal-only, a miss. A PRESENT block is an answered choice
+        // even when its cookieOptions map is empty (essential-only): TRUST-2961 — only a null block,
+        // not an empty map, is "no choice". cookieOptions is non-null once the block is present, so
+        // the empty-map case falls through and rehydrates (isCustomised is forced true locally
+        // below, which is what stops the banner re-prompting a user who already answered elsewhere).
         val rawCookieOptions = record.consentPreferences?.cookieOptions
-        if (rawCookieOptions.isNullOrEmpty()) return null
+        if (rawCookieOptions == null) return null
 
         // The RAW preferences are handed back for the WRITE, so they carry the record's OWN
         // isCustomised flag verbatim. setUserIdentifier POSTs this value straight back as the
@@ -571,9 +576,12 @@ internal class ConsentManager(
                         }
                         explicitChoice
                     }
-                    record.consentPreferences?.cookieOptions.isNullOrEmpty() -> {
-                        // FOUND with no choice: drop local state (neutral) if anything is stored.
-                        // The CCPA flag already took the record's value above and keeps it.
+                    record.consentPreferences == null -> {
+                        // FOUND but consent_preferences ABSENT — signal-only, the user made no
+                        // choice (TRUST-2961: a PRESENT block with an empty cookieOptions map is an
+                        // answered essential-only choice and is adopted in the else branch below,
+                        // NOT treated as neutral here). Drop local state (neutral) if anything is
+                        // stored. The CCPA flag already took the record's value above and keeps it.
                         if (localChoice != null) {
                             returnToNeutral(onRehydrated, clearCcpaOptout = false)
                         }
