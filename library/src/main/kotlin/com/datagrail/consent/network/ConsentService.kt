@@ -136,6 +136,31 @@ internal class ConsentService(
             val hashBytes = digest.digest(input.toByteArray(Charsets.UTF_8))
             return toHex(hashBytes)
         }
+
+        /**
+         * Provenance sub-digest bound into the signed string (TRUST-2971).
+         *
+         * Per-category CRDT merge (TRUST-2592) orders writes by a provenance triple —
+         * `is_explicit`, `decision_ts`, `actor_id`. Because this client sends no provenance in
+         * the request body today, the edge RESOLVES the default triple, so the SDK must sign the
+         * digest of that same resolved-default triple or the signature will not verify:
+         *
+         *   is_explicit → "true"                  (literal)
+         *   decision_ts → the signed unix-seconds timestamp (base-10, no leading zeros)
+         *   actor_id    → ""                       (absent)
+         *
+         * provInput  = is_explicit + "\n" + decision_ts + "\n" + actor_id   ("\n" = U+000A)
+         * provDigest = lowercase_hex( SHA-256( UTF-8(provInput) ) )
+         *
+         * `actor_id` is terminal, so a `\n` or `:` inside it cannot forge the digest. The
+         * derivation is identical across every signer and the edge verifier; see the TRUST-2971
+         * signing spec and the shared golden-vector corpus.
+         */
+        fun resolvedDefaultProvenanceDigest(timestamp: Long): String {
+            val provInput = "true" + "\n" + timestamp.toString() + "\n" + ""
+            val digest = MessageDigest.getInstance("SHA-256")
+            return toHex(digest.digest(provInput.toByteArray(Charsets.UTF_8)))
+        }
     }
 
     // encodeDefaults is REQUIRED on the write path. kotlinx.serialization omits properties that
@@ -291,7 +316,15 @@ internal class ConsentService(
                 // value we send. The nonce is 128-bit / 32 lowercase hex from a CSPRNG.
                 val timestamp = System.currentTimeMillis() / 1000
                 val nonce = generateNonce()
-                val stringToSign = "${config.dgCustomerId}:$userHash:$timestamp:$nonce"
+                // Bind provenance into the signed string (TRUST-2971). This client sends no
+                // provenance body fields, so it signs the digest of the resolved-DEFAULT triple
+                // ("true", the signed timestamp, "") — exactly what the edge reconstructs for a
+                // request that carries no provenance. Without this an intermediary could rewrite
+                // decision_ts/is_explicit/actor_id on an otherwise-valid write without breaking
+                // the signature. The getSignature callback contract is unchanged: it still HMACs
+                // stringToSign verbatim.
+                val provDigestDefault = resolvedDefaultProvenanceDigest(timestamp)
+                val stringToSign = "${config.dgCustomerId}:$userHash:$timestamp:$nonce:$provDigestDefault"
                 val payload =
                     UniversalConsentSigningPayload(
                         stringToSign = stringToSign,
