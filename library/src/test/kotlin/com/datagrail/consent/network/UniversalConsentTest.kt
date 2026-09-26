@@ -107,6 +107,42 @@ class UniversalConsentTest {
     }
 
     @Test
+    fun `stringToSign for a no-provenance write reproduces the cross-SDK golden vector`() {
+        // Golden vector "plain-email" from the authoritative signing-vectors corpus
+        // (consent-backend server-sdks/node/fixtures/signing-vectors.json), input.provenance ==
+        // null. THIS client must produce byte-identical stringToSign for the same
+        // customerId / userHash / timestamp / nonce, signing the resolved-DEFAULT provenance
+        // triple {"true", String(timestamp), ""} (TRUST-2971).
+        val customerId = "cust_abc123"
+        val projectId = "proj_web_01"
+        val identifier = "user@example.com"
+        val timestamp = 1760000000L
+        val nonce = "00112233445566778899aabbccddeeff"
+
+        // The SDK derives userHash on-device; it must match the corpus's signed slot.
+        val userHash = ConsentService.computeUserHash(customerId, projectId, identifier)
+        assertEquals(
+            "28b7d3a022d86efa0f672aac75cfa7cf782a04c88046fb4f2fc5c724d7fbd8b5",
+            userHash,
+        )
+
+        val provDigest = ConsentService.resolvedDefaultProvenanceDigest(timestamp)
+        assertEquals(
+            "4de0e6fe888081209009953420b400306063e95f4b2738b53204fb36a88cedb9",
+            provDigest,
+        )
+
+        val stringToSign = "$customerId:$userHash:$timestamp:$nonce:$provDigest"
+        assertEquals(
+            "cust_abc123:" +
+                "28b7d3a022d86efa0f672aac75cfa7cf782a04c88046fb4f2fc5c724d7fbd8b5:" +
+                "1760000000:00112233445566778899aabbccddeeff:" +
+                "4de0e6fe888081209009953420b400306063e95f4b2738b53204fb36a88cedb9",
+            stringToSign,
+        )
+    }
+
+    @Test
     fun `normalizeUserIdentifier applies NFC then trim then lowercase`() {
         assertEquals(
             "user@example.com",
@@ -306,11 +342,15 @@ class UniversalConsentTest {
             )
             assertEquals("nonce header == signed nonce", payload.nonce, nonce)
 
-            // The callback received the exact canonical string {cid}:{userHash}:{ts}:{nonce}.
+            // The callback received the exact canonical string
+            // {cid}:{userHash}:{ts}:{nonce}:{provDigest} (TRUST-2971). This client sends no
+            // provenance, so provDigest is the digest of the resolved-default triple over the
+            // signed timestamp.
             assertEquals(
                 "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7:" +
                     "1fee132c298d615098190e3e75f9c7e05db20d6cff6398f686fcebc67d1d87a4:" +
-                    "${payload.timestamp}:${payload.nonce}",
+                    "${payload.timestamp}:${payload.nonce}:" +
+                    ConsentService.resolvedDefaultProvenanceDigest(payload.timestamp),
                 payload.stringToSign,
             )
 
