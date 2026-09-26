@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `clearUserIdentifier()`: logout / return-to-neutral for universal consent. Clears the device's identity binding and the stored consent choice so reads return the config defaults and the banner shows again; fires the consent-changed listener with the defaults. Non-destructive, unlike `reset()`: no network call, the server-side record is untouched, and the unique id, config cache/version, locale and pending queue are kept. Hosts must call it on logout; the SDK cannot detect a logout it is not told about (TRUST-2902)
+
 ### Changed
 
+- `setUserIdentifier` now tells a login apart from a re-sync. The SDK persists the user hash (never the raw identifier) of the identity the device is bound to; it is set only when `setUserIdentifier` succeeds and cleared by `clearUserIdentifier()` and `reset()`. On a login (device unbound, or bound to a different identity), a found universal consent record wins and nothing is written, even if the device holds a pre-login choice. A record carrying a choice replaces local state rather than merging with it: each category in the record takes the record's value, every other category takes its config default (never the prior local value), and essential stays on. A found record with no choice (signal-only, or empty preferences) returns local state to the defaults if anything is stored. With no record, only an explicit local choice (one saved on this device while it was not bound to a different identity) is written to the new identity; otherwise nothing is written, and if a different identity was bound its local state returns to the defaults. On a re-sync (already bound to this identity), found records and write-through are unchanged, but a miss writes only an explicit local choice. In every case, config defaults are no longer seeded into a new record. The SDK cannot tell whether a pre-login choice was made by the person logging in or a previous user of a shared device (an explicit choice on an unbound device is attached on a no-record login by design), does no shared-device or shared-account detection, and cannot detect two people sharing one account (TRUST-2902)
 - Align `rejectAll()` with the banner's definition of "essential": a category is now kept enabled after reject-all when `alwaysOn` is true or its `gtm_key` contains "essential", via the shared `ConsentConfig.essentialCategoryKeys()`. A category with `alwaysOn = false` whose `gtm_key` contains "essential" now stays enabled instead of being disabled (no change where essential categories are marked `alwaysOn`) (TRUST-1843)
 
 ## [1.7.0] - 2026-07-17

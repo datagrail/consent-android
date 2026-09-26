@@ -189,6 +189,13 @@ public class JavaInteroperabilityTest {
     }
 
     @Test
+    public void testClearUserIdentifierAccessibleAndSafeWhenNotInitialized() throws NoSuchMethodException {
+        // TRUST-2902 logout is reachable from Java and, like reset(), a no-op before initialize.
+        assertNotNull(DataGrailConsent.class.getMethod("clearUserIdentifier"));
+        sdk.clearUserIdentifier();
+    }
+
+    @Test
     public void testUnsignedSetUserIdentifierCallsFailureWhenNotInitialized() {
         final AtomicReference<ConsentException> errorRef = new AtomicReference<>();
 

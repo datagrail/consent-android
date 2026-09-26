@@ -32,6 +32,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         private const val KEY_LOCALE_CODE = "datagrail_consent_locale_code"
         private const val KEY_CONFIG_CACHE = "datagrail_consent_config_cache"
         private const val KEY_PENDING_EVENTS = "datagrail_consent_pending_events"
+        private const val KEY_BOUND_USER_HASH = "datagrail_consent_bound_user_hash"
 
         /**
          * Create a ConsentStorage backed by EncryptedSharedPreferences
@@ -140,6 +141,42 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         } catch (e: Exception) {
             null
         }
+    }
+
+    /**
+     * Remove the stored explicit consent choice only, returning reads to the config defaults (the
+     * same state a first-time install sees: [loadPreferences] returns null, so the banner shows).
+     * Unlike [clearAll] this leaves the unique id, config cache, config version, locale, pending
+     * event queue and identity binding in place.
+     */
+    fun clearPreferences() {
+        prefs.edit().remove(KEY_PREFERENCES).apply()
+    }
+
+    // MARK: - Identity Binding
+
+    /**
+     * Persist the universal-consent user hash of the identity this device is currently bound to.
+     * Only the hash is stored, never the raw identifier. [clearAll] removes it with everything else.
+     * @param userHash The user hash computed for the identifier passed to setUserIdentifier
+     */
+    fun saveBoundUserHash(userHash: String) {
+        prefs.edit().putString(KEY_BOUND_USER_HASH, userHash).apply()
+    }
+
+    /**
+     * Load the user hash of the identity this device is currently bound to
+     * @return The bound user hash, or null if the device is not bound to an identity
+     */
+    fun loadBoundUserHash(): String? {
+        return prefs.getString(KEY_BOUND_USER_HASH, null)
+    }
+
+    /**
+     * Remove the identity binding (logout). Does not touch any other stored data.
+     */
+    fun clearBoundUserHash() {
+        prefs.edit().remove(KEY_BOUND_USER_HASH).apply()
     }
 
     // MARK: - Unique ID

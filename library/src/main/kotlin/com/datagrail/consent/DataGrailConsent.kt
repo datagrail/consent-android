@@ -501,10 +501,33 @@ class DataGrailConsent private constructor() {
     }
 
     /**
-     * Reset all consent data
+     * Reset all consent data. Destructive: wipes every stored value (preferences, unique id, config
+     * cache, pending events, identity binding). To log a user out without wiping the device, use
+     * [clearUserIdentifier].
      */
     fun reset() {
         manager?.reset()
+    }
+
+    /**
+     * Log out of universal consent and return this device to NEUTRAL (TRUST-2902).
+     *
+     * Clears the identity binding recorded by [setUserIdentifier] and removes the stored explicit
+     * consent choice, so reads return the config's defaults exactly as a fresh install on this
+     * device would see: [needsConsent]/[shouldDisplayBanner] report the banner should show again and
+     * [hasUserConsent] is false. The consent-changed listener fires with the now-effective default
+     * preferences so you can re-gate your SDKs.
+     *
+     * Non-destructive, unlike [reset]: makes no network call, does NOT delete or modify the user's
+     * server-side universal consent record, and does not clear the device unique id, config cache,
+     * config version, locale or pending event queue. The SDK stays initialized. Idempotent and safe
+     * to call when no identity is bound; a no-op when the SDK is not initialized (as [reset]).
+     *
+     * You MUST call this on logout: the SDK cannot detect a logout it is not told about, and the
+     * next [setUserIdentifier] would otherwise treat the device as still bound to the previous user.
+     */
+    fun clearUserIdentifier() {
+        manager?.clearUserIdentifier { prefs -> onConsentChangedCallback?.invoke(prefs) }
     }
 
     /**
@@ -611,13 +634,35 @@ class DataGrailConsent private constructor() {
      * for the given user identifier, for cross-device retrieval (Kotlin-friendly).
      *
      * This READS before it WRITES. Any stored record for this identifier is rehydrated onto the
-     * device first (honoring a choice made on the web or another device); the write then carries
-     * the user's CURRENT LOCAL choice — sync-on-change / write-through — and never re-POSTs the
-     * fetched record. A found record with no genuine local change is adopted WITHOUT a POST. A read
-     * failure blocks the write and surfaces as a failure result, so a record we could not read is
-     * never overwritten; retry to re-read first.
+     * device first (honoring a choice made on the web or another device). A read failure blocks the
+     * write and surfaces as a failure result, so a record we could not read is never overwritten;
+     * retry to re-read first. Any write carries the user's local choice and never re-POSTs the
+     * fetched record.
      *
-     * The identifier is NOT retained as state — later calls such as [fetchUniversalConsent] and
+     * Login vs re-sync (TRUST-2902). The SDK records which identity this device is bound to (a hash
+     * only, never the raw identifier); the binding is set only when this call succeeds and cleared
+     * by [clearUserIdentifier] and [reset].
+     * - LOGIN (the device is unbound or bound to a different identity): a found record wins and
+     *   nothing is written, even if the device holds a pre-login choice. A record carrying a choice
+     *   REPLACES local state: its categories take the record's value, every other category its
+     *   config default (never the prior local value), and essential stays on. A found record with no
+     *   choice (signal-only or empty) returns local state to the defaults if anything is stored. With no
+     *   record, only an EXPLICIT local choice (one the user saved on this device through the banner,
+     *   [savePreferences], [acceptAll] or [rejectAll] while not bound to someone else) is written to
+     *   the new identity. Otherwise nothing is written; if the device was bound to a different
+     *   identity its local state returns to the defaults so that user's consent does not carry over.
+     * - RE-SYNC (already bound to this identity): a found record is adopted, and a local choice is
+     *   written through as before. With no record, only an explicit local choice is written; config
+     *   defaults are never seeded.
+     * "Nothing written" still reports success.
+     *
+     * What the SDK cannot detect: a logout it is not told about (call [clearUserIdentifier] on
+     * logout); whether a pre-login choice was made by the person now logging in or by a previous
+     * user of a shared device (an explicit choice on an unbound device is attached on a no-record
+     * login by design); and two people sharing one account. It does no heuristic shared-device or
+     * shared-account detection.
+     *
+     * The raw identifier is NOT retained as state — later calls such as [fetchUniversalConsent] and
      * [rehydrateFromUniversalConsent] require it to be passed again.
      *
      * The SDK does NOT hold or compute the HMAC secret. It builds the canonical string-to-sign
