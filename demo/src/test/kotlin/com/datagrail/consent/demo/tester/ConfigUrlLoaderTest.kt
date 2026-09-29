@@ -168,6 +168,13 @@ class ConfigUrlLoaderTest {
         }
 
     @Test
+    fun `a truncated (oversized) success body is reported, not parsed`() =
+        runTest {
+            val result = loader(HttpResult(200, fixture, truncated = true)).load(testUrl)
+            assertEquals(Failure.Oversized, result)
+        }
+
+    @Test
     fun `IOException from the transport is Unreachable`() =
         runTest {
             val result = loader(error = IOException("Unable to resolve host")).load(testUrl)

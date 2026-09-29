@@ -48,15 +48,19 @@ sealed class ConfigUrlLoadResult {
         data class Parse(val detail: String) : Failure()
 
         data class Invalid(val detail: String) : Failure()
+
+        object Oversized : Failure()
     }
 }
 
-data class HttpResult(val status: Int, val body: String)
+data class HttpResult(val status: Int, val body: String, val truncated: Boolean = false)
 
 /**
  * Fetches a pre-signed config URL (from the Mobile tab's "View config" link) and parses it with the
- * SDK's own model, bypassing `DataGrailConsent.initialize`: the SDK's `ConfigService` falls back to a
- * cached config on any failure and retries every error, which would mask an expired or altered URL.
+ * SDK's own model, bypassing `DataGrailConsent.initialize`: on failure the SDK's `ConfigService` falls
+ * back to a cached config (and still retries transient failures), which would mask an expired or altered
+ * URL. Since TRUST-2744 it no longer retries a definite 4xx, but the cache fallback alone is reason
+ * enough to bypass it here.
  */
 class ConfigUrlLoader(
     private val sdkSchemaVersion: String = BuildConfig.SCHEMA_VERSION,
@@ -86,6 +90,9 @@ class ConfigUrlLoader(
 
         if (response.status !in 200..299) {
             return classifyError(response, metadata)
+        }
+        if (response.truncated) {
+            return ConfigUrlLoadResult.Failure.Oversized
         }
         return decode(response.body, metadata)
     }
@@ -138,6 +145,10 @@ class ConfigUrlLoader(
     companion object {
         const val TIMEOUT_MS = 15_000
         private const val MAX_ERROR_BODY_BYTES = 4 * 1024
+
+        // A valid consent config is well under 1 MiB (the real fixture is ~22 KB). Cap the success
+        // body so a large or endless response can't exhaust the heap before we try to parse it.
+        private const val MAX_SUCCESS_BODY_BYTES = 1024 * 1024
         private const val PREVIEW_CHARS = 200
 
         private val SCHEMA_IN_PATH = Regex("""config\.(v\d+)\.json$""")
@@ -213,20 +224,22 @@ class ConfigUrlLoader(
                     connection.connectTimeout = TIMEOUT_MS
                     connection.readTimeout = TIMEOUT_MS
                     val status = connection.responseCode
-                    val body =
-                        if (status in 200..299) {
-                            connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
-                        } else {
-                            connection.errorStream?.use { it.readCapped(MAX_ERROR_BODY_BYTES) }.orEmpty()
-                        }
-                    HttpResult(status, body)
+                    if (status in 200..299) {
+                        val capped = connection.inputStream.use { it.readCapped(MAX_SUCCESS_BODY_BYTES) }
+                        HttpResult(status, capped.text, truncated = capped.truncated)
+                    } else {
+                        val body = connection.errorStream?.use { it.readCapped(MAX_ERROR_BODY_BYTES).text }.orEmpty()
+                        HttpResult(status, body)
+                    }
                 } finally {
                     connection.disconnect()
                 }
             }
 
+        private class Capped(val text: String, val truncated: Boolean)
+
         @Throws(IOException::class)
-        private fun InputStream.readCapped(maxBytes: Int): String {
+        private fun InputStream.readCapped(maxBytes: Int): Capped {
             val buffer = ByteArray(maxBytes)
             var total = 0
             while (total < maxBytes) {
@@ -234,7 +247,9 @@ class ConfigUrlLoader(
                 if (read < 0) break
                 total += read
             }
-            return String(buffer, 0, total, Charsets.UTF_8)
+            // If the buffer filled, probe for one more byte to tell "exactly maxBytes" from "more remains".
+            val truncated = total == maxBytes && read() >= 0
+            return Capped(String(buffer, 0, total, Charsets.UTF_8), truncated)
         }
     }
 }

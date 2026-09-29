@@ -45,6 +45,9 @@ fun Failure.userFacing(context: Context): Pair<String, String> =
         is Failure.Invalid ->
             context.getString(R.string.tester_error_parse_title) to
                 context.getString(R.string.tester_error_parse_body, detail)
+        Failure.Oversized ->
+            context.getString(R.string.tester_error_oversized_title) to
+                context.getString(R.string.tester_error_oversized_body)
     }
 
 fun formatDeviceTime(

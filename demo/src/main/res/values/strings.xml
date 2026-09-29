@@ -45,4 +45,6 @@
     <string name="tester_error_unsupported_schema_body">This config uses schema %1$s. This test app (SDK %2$s) renders schema %3$s. Select a %3$s target in the Mobile tab, or use a test app built for %1$s.</string>
     <string name="tester_error_parse_title">Config couldn\'t be read</string>
     <string name="tester_error_parse_body">%1$s\n\nReport this to support with the schema version shown above.</string>
+    <string name="tester_error_oversized_title">Response too large</string>
+    <string name="tester_error_oversized_body">The response at this URL is unexpectedly large and was not loaded. A valid consent config is well under 1 MB, so this URL may not point to a config.</string>
 </resources>
