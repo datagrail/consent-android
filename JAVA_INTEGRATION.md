@@ -215,13 +215,17 @@ DataGrailConsent.getInstance().retryPendingRequests(new RetryCallback() {
 
 ## Error Handling
 
-All error types extend `ConsentException`:
+All error types extend `ConsentException`. `ConfigNotPublished` and `HttpError` are subclasses of `NetworkError`, so existing `NetworkError` checks keep matching them; check the specific types first.
 
 ```java
 @Override
 public void onFailure(ConsentException error) {
     if (error instanceof ConsentException.NotInitialized) {
         Log.e("Consent", "SDK not initialized");
+    } else if (error instanceof ConsentException.ConfigNotPublished) {
+        Log.e("Consent", "Consent configuration not published: " + error.getMessage());
+    } else if (error instanceof ConsentException.HttpError) {
+        Log.e("Consent", "HTTP error " + ((ConsentException.HttpError) error).getStatusCode());
     } else if (error instanceof ConsentException.NetworkError) {
         Log.e("Consent", "Network error: " + error.getMessage());
     } else if (error instanceof ConsentException.InvalidConfiguration) {

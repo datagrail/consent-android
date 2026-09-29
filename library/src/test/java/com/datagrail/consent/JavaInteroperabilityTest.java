@@ -117,6 +117,18 @@ public class JavaInteroperabilityTest {
         assertTrue("Message should contain test error", capturedError.get().getMessage().contains("Test error"));
     }
 
+    @Test
+    public void testHttpErrorIsNetworkErrorFromJava() {
+        ConsentException.HttpError explicitMessage = new ConsentException.HttpError(404, "HTTP 404");
+        ConsentException.HttpError defaultMessage = new ConsentException.HttpError(404);
+
+        assertTrue("HttpError should be a NetworkError", explicitMessage instanceof ConsentException.NetworkError);
+        assertEquals(404, explicitMessage.getStatusCode());
+        assertEquals(404, defaultMessage.getStatusCode());
+        assertEquals(explicitMessage.getMessage(), defaultMessage.getMessage());
+        assertTrue("404 should be a client error", defaultMessage.isClientError());
+    }
+
     // MARK: - PreferencesCallback Interface Tests
 
     @Test

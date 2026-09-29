@@ -150,4 +150,56 @@ class NetworkClientSecurityTest {
             assertTrue("Total delay ($totalTime) should be >= 1400", totalTime >= 1400)
             assertTrue("Total delay ($totalTime) should be <= 1750", totalTime <= 1750)
         }
+
+    // MARK: - Retry predicate
+
+    @Test
+    fun `retryWithBackoff stops after one attempt when shouldRetry returns false`() =
+        runTest {
+            var callCount = 0
+            val thrown = RuntimeException("definite")
+            try {
+                networkClient.retryWithBackoff(maxAttempts = 5, baseDelayMs = 100, shouldRetry = { false }) {
+                    callCount++
+                    throw thrown
+                }
+                fail("Expected exception")
+            } catch (e: RuntimeException) {
+                assertSame(thrown, e)
+            }
+            assertEquals(1, callCount)
+            assertEquals(0, currentTime)
+        }
+
+    @Test
+    fun `retryWithBackoff with isRetryable retries 503 up to maxAttempts`() =
+        runTest {
+            assertEquals(5, attemptsBeforeGivingUp(ConsentException.HttpError(503)))
+        }
+
+    @Test
+    fun `retryWithBackoff with isRetryable retries 429 up to maxAttempts`() =
+        runTest {
+            assertEquals(5, attemptsBeforeGivingUp(ConsentException.HttpError(429)))
+        }
+
+    @Test
+    fun `retryWithBackoff with isRetryable does not retry 404`() =
+        runTest {
+            assertEquals(1, attemptsBeforeGivingUp(ConsentException.HttpError(404)))
+        }
+
+    private suspend fun attemptsBeforeGivingUp(error: ConsentException.HttpError): Int {
+        var callCount = 0
+        try {
+            networkClient.retryWithBackoff(maxAttempts = 5, baseDelayMs = 100, shouldRetry = ConsentException::isRetryable) {
+                callCount++
+                throw error
+            }
+            fail("Expected HttpError")
+        } catch (e: ConsentException.HttpError) {
+            assertSame(error, e)
+        }
+        return callCount
+    }
 }

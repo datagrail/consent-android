@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Config fetch no longer retries definite 4xx responses; 408 and 429 still retry (TRUST-2744)
+
+### Added
+
+- `ConsentException.HttpError` (with `statusCode` and `isClientError`), `ConsentException.ConfigNotPublished`, and `BuildConfig.SCHEMA_VERSION`. Both exceptions subclass `NetworkError`, so existing `NetworkError` handling still matches them (TRUST-2744)
+
 ### Changed
 
 - Align `rejectAll()` with the banner's definition of "essential": a category is now kept enabled after reject-all when `alwaysOn` is true or its `gtm_key` contains "essential", via the shared `ConsentConfig.essentialCategoryKeys()`. A category with `alwaysOn = false` whose `gtm_key` contains "essential" now stays enabled instead of being disabled (no change where essential categories are marked `alwaysOn`) (TRUST-1843)
