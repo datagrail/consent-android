@@ -249,8 +249,8 @@ class ConsentServiceSecurityTest {
                 "URL should contain os_version param with an empty (test-env) value, got: $capturedUrl",
                 capturedUrl.contains("os_version=&schema_version="),
             )
-            // schema_version is a build-time constant (this SDK's models are written against v1
-            // of the wire format), not derived from the fetched config.
+            // schema_version comes from the vendored consent_schema proto's package at build time
+            // (BuildConfig.SCHEMA_VERSION); asserted as a literal so the test doesn't compute it too.
             assertTrue(
                 "URL should contain schema_version=v1, got: $capturedUrl",
                 capturedUrl.contains("schema_version=v1&policy_uuid="),
