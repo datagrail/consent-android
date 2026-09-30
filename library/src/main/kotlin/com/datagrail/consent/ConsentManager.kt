@@ -13,6 +13,8 @@ import com.datagrail.consent.models.essentialCategoryKeys
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -32,6 +34,14 @@ internal class ConsentManager(
     // its preferences). Each logout/reset supersedes any in-flight setUserIdentifier, which then
     // aborts its remaining storage mutations. Mirrors the initGeneration guard in DataGrailConsent.
     private val identityOperationGeneration = AtomicInteger(0)
+
+    // Serializes setUserIdentifier calls against EACH OTHER. The generation token above only lets a
+    // logout/reset supersede an in-flight login; two overlapping setUserIdentifier calls (a fast
+    // account switch, a retry overlapping a still-in-flight call) would otherwise each read the
+    // bound hash and local choice from the same stale snapshot and interleave their writes at the
+    // network suspension points, leaving the device bound to one identity while holding the other's
+    // adopted/replaced preferences. The lock (fair, FIFO) makes them run to completion in call order.
+    private val setUserIdentifierMutex = Mutex()
 
     // MARK: - Configuration
 
@@ -465,12 +475,28 @@ internal class ConsentManager(
         getSignature: SignatureProvider? = null,
         onRehydrated: ((ConsentPreferences) -> Unit)? = null,
     ) {
-        val config = requireUniversalConsentReady()
-
-        // Token for this transition. A clearUserIdentifier()/reset() that lands while the reads and
-        // writes below are suspended bumps this, so the checks after each suspension abort before
-        // rewriting local state or rebinding — a logout is never silently undone by a stale login.
+        // Token for this transition, captured BEFORE queueing on the lock: a clearUserIdentifier()/
+        // reset() that lands while this call waits behind another setUserIdentifier, or while the
+        // reads and writes below are suspended, bumps it, so the checks after each suspension abort
+        // before rewriting local state or rebinding — a logout is never silently undone by a stale
+        // login, including one that was still queued when the logout happened.
         val opGeneration = identityOperationGeneration.get()
+        setUserIdentifierMutex.withLock {
+            setUserIdentifierLocked(identifier, apiKey, trackingSignal, getSignature, onRehydrated, opGeneration)
+        }
+    }
+
+    private suspend fun setUserIdentifierLocked(
+        identifier: String,
+        apiKey: String,
+        trackingSignal: TrackingSignal,
+        getSignature: SignatureProvider?,
+        onRehydrated: ((ConsentPreferences) -> Unit)?,
+        opGeneration: Int,
+    ) {
+        // Superseded by a logout/reset while queued behind another setUserIdentifier.
+        if (identityOperationGeneration.get() != opGeneration) return
+        val config = requireUniversalConsentReady()
 
         // The same hash the service computes for the read/write (it also rejects an identifier that
         // is empty after normalization, before any request). Only the hash is ever persisted.

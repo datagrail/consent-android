@@ -4,7 +4,11 @@ import com.datagrail.consent.models.*
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -13,12 +17,16 @@ import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.doReturn
+import org.mockito.kotlin.doSuspendableAnswer
 import org.mockito.kotlin.eq
+import org.mockito.kotlin.inOrder
 import org.mockito.kotlin.isNull
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoInteractions
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.wheneverBlocking
 
 /**
  * Tests for ConsentManager state management and category detection
@@ -1345,6 +1353,71 @@ class ConsentManagerTests {
 
             verify(mockConsentService).saveUniversalConsent(any(), any(), any(), any(), any(), any())
             verify(mockStorage).clearBoundUserHash()
+            verify(mockStorage, never()).saveBoundUserHash(any())
+        }
+
+    /**
+     * Two overlapping setUserIdentifier calls (a fast account switch) must not interleave: the
+     * second waits for the first to finish instead of reading the bound hash/local choice from the
+     * same stale snapshot, so the bindings land in call order and the last call wins.
+     */
+    @Test
+    fun `overlapping setUserIdentifier calls run one at a time in call order`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            val aliceReadGate = CompletableDeferred<Unit>()
+            wheneverBlocking {
+                mockConsentService.getUniversalConsent(any(), eq("alice@example.com"), any())
+            } doSuspendableAnswer {
+                aliceReadGate.await()
+                null
+            }
+            wheneverBlocking {
+                mockConsentService.getUniversalConsent(any(), eq("bob@example.com"), any())
+            } doReturn foundRecord()
+
+            launch { sut.setUserIdentifier("alice@example.com", "dg_key") }
+            runCurrent()
+            launch { sut.setUserIdentifier("bob@example.com", "dg_key") }
+            runCurrent()
+
+            // Alice is suspended on her read; Bob is queued and has not read anything yet.
+            verify(mockConsentService, never()).getUniversalConsent(any(), eq("bob@example.com"), any())
+
+            aliceReadGate.complete(Unit)
+            advanceUntilIdle()
+
+            val order = inOrder(mockStorage, mockConsentService)
+            order.verify(mockStorage).saveBoundUserHash(hashFor("alice@example.com"))
+            order.verify(mockConsentService).getUniversalConsent(any(), eq("bob@example.com"), any())
+            order.verify(mockStorage).saveBoundUserHash(hashFor("bob@example.com"))
+        }
+
+    /**
+     * A logout that lands while a setUserIdentifier is still QUEUED behind another one supersedes
+     * it too: once the lock frees, the queued call does nothing rather than binding after logout.
+     */
+    @Test
+    fun `logout while a setUserIdentifier is queued aborts the queued call`() =
+        runTest {
+            sut.currentConfig = twoCategoryUniversalConfig()
+            val aliceReadGate = CompletableDeferred<Unit>()
+            wheneverBlocking {
+                mockConsentService.getUniversalConsent(any(), eq("alice@example.com"), any())
+            } doSuspendableAnswer {
+                aliceReadGate.await()
+                null
+            }
+
+            launch { sut.setUserIdentifier("alice@example.com", "dg_key") }
+            runCurrent()
+            launch { sut.setUserIdentifier("bob@example.com", "dg_key") }
+            runCurrent()
+            sut.clearUserIdentifier()
+            aliceReadGate.complete(Unit)
+            advanceUntilIdle()
+
+            verify(mockConsentService, never()).getUniversalConsent(any(), eq("bob@example.com"), any())
             verify(mockStorage, never()).saveBoundUserHash(any())
         }
 
