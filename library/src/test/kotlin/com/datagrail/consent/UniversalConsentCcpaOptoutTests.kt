@@ -137,6 +137,37 @@ class UniversalConsentCcpaOptoutTests {
             verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
         }
 
+    @Test
+    fun `write-through aborts when a logout lands before the POST`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey) // binds the identity; one login write
+            assertEquals(listOf(false), writtenCcpa())
+
+            // Simulate clearUserIdentifier() landing after setCcpaOptout's synchronous checks pass but
+            // before it issues the write-through: the last read before the POST triggers the logout
+            // (one-shot — clearUserIdentifier itself reads preferences again), which bumps
+            // identityOperationGeneration and unbinds. The generation guard must then skip the POST so
+            // a stale opt-out never lands against the identity the device just left.
+            var logoutTriggered = false
+            whenever(mockStorage.loadPreferences()).doAnswer {
+                val current = storedPreferences
+                if (!logoutTriggered) {
+                    logoutTriggered = true
+                    sut.clearUserIdentifier()
+                }
+                current
+            }
+
+            sut.setCcpaOptout(true)
+
+            // Still only the login write — no stale CCPA write-through — and the logout left the flag
+            // neutral.
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
+            assertFalse(sut.getCcpaOptout())
+        }
+
     // MARK: - Wire field
 
     @Test
@@ -184,6 +215,23 @@ class UniversalConsentCcpaOptoutTests {
             storedBoundHash = hashFor(userA)
             storedCcpaOptout = true
             recordIs(record(ccpaOptout = false))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `re-sync adopts a signal-only record's flag with no local choice and no write`() =
+        runTest {
+            // Re-sync (bound to the same identity) against a signal-only record: ccpa_optout set but
+            // no consent_preferences, e.g. a web DNSMPI opt-out made before any category choice. The
+            // record is authoritative for the flag and must replace the local value, matching the
+            // LOGIN signal-only path — even though there are no raw preferences to write back.
+            storedBoundHash = hashFor(userA)
+            storedCcpaOptout = false
+            recordIs(UniversalConsentRecord(status = "found", ccpaOptout = true))
 
             sut.setUserIdentifier(userA, apiKey)
 

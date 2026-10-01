@@ -373,6 +373,21 @@ internal class ConsentManager(
         // locally, the raw one to hand back for the write.
         val record = consentService.getUniversalConsent(config, identifier, apiKey) ?: return null
         val rawCookieOptions = record.consentPreferences?.cookieOptions
+
+        // Adopt the record's CCPA choice the moment a record is found — BEFORE the empty-preferences
+        // early return below. A signal-only record (ccpa_optout set, no consent_preferences, e.g. a
+        // web DNSMPI opt-out made before any category choice) still carries an authoritative opt-out
+        // that must replace the local flag, matching the LOGIN path (adoptOnLogin's signal-only
+        // branch) and this function's documented invariant ("a found record's ccpa_optout replaces
+        // the local flag"). The early return only governs whether there are raw category preferences
+        // to hand back for the WRITE; it must not suppress the opt-out adopt. Still gated: outside a
+        // login (the adoptCcpaOptout flag) and only with syncOptout on, since with the gate off the
+        // SDK never puts the choice on the record and adopting it would erase a local-only
+        // setCcpaOptout(true). Same rule as the web/iOS/React Native SDKs.
+        if (adoptCcpaOptout && config.universalConsent?.syncOptout == true) {
+            storage.saveCcpaOptout(record.ccpaOptout)
+        }
+
         if (rawCookieOptions.isNullOrEmpty()) return null
 
         // The RAW preferences are handed back for the WRITE, so they carry the record's OWN
@@ -409,12 +424,8 @@ internal class ConsentManager(
         // this app is running, which is what needsConsent() compares against; carrying over a stale
         // version from the writing device would re-prompt immediately and undo the rehydration.
         storage.saveConfigVersion(config.version)
-        // Outside a login, adopt the record's CCPA choice only with the syncOptout gate on: with the
-        // gate off the SDK never puts the choice on the record (it always says false), so adopting it
-        // would erase a local-only setCcpaOptout(true). Same rule as the web/iOS/React Native SDKs.
-        if (adoptCcpaOptout && config.universalConsent?.syncOptout == true) {
-            storage.saveCcpaOptout(record.ccpaOptout)
-        }
+        // (The record's CCPA choice was already adopted above, before the empty-preferences early
+        // return, so a signal-only record is covered too.)
         return raw
     }
 
@@ -747,6 +758,14 @@ internal class ConsentManager(
      * is kept.
      */
     suspend fun setCcpaOptout(optedOut: Boolean) {
+        // Token for this write, captured up front. A clearUserIdentifier()/reset() that lands between
+        // here and the write-through below bumps it, so the POST aborts rather than landing an opt-out
+        // against an identity the device just left — the same stale-write corruption guard
+        // (TRUST-2491/TRUST-2902) every other identity-scoped write in this file carries. The
+        // bound-hash check below already rejects a logout that completed before these reads; this
+        // adds the generation dimension (and covers a reset()+re-login to the same hash, where the
+        // bound hash matches again but the captured session is stale).
+        val opGeneration = identityOperationGeneration.get()
         storage.saveCcpaOptout(optedOut)
         val config = currentConfig ?: return
         val universalConsent = config.universalConsent ?: return
@@ -754,6 +773,9 @@ internal class ConsentManager(
         val session = universalConsentSession ?: return
         if (session.userHash != storage.loadBoundUserHash()) return
         val localChoice = storage.loadPreferences() ?: return
+        // A logout/reset landed while this call was being prepared: don't write through to the
+        // now-unbound (or re-bound) identity.
+        if (identityOperationGeneration.get() != opGeneration) return
         consentService.saveUniversalConsent(
             config = config,
             identifier = session.identifier,

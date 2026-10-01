@@ -560,7 +560,7 @@ class DataGrailConsent private constructor() {
         // Persist synchronously so getCcpaOptout() reflects the choice immediately; the
         // write-through (if any) then runs on the SDK scope like the other universal consent calls.
         manager?.saveCcpaOptout(optedOut)
-        launchUniversalConsentOperation(callback) { mgr, _ -> mgr.setCcpaOptout(optedOut) }
+        launchUniversalConsentOperation(callback, readSignal = false) { mgr, _ -> mgr.setCcpaOptout(optedOut) }
     }
 
     /**
@@ -824,6 +824,7 @@ class DataGrailConsent private constructor() {
      */
     private fun <T> launchUniversalConsentOperation(
         callback: (Result<T>) -> Unit,
+        readSignal: Boolean = true,
         block: suspend (manager: ConsentManager, trackingSignal: TrackingSignal) -> T,
     ) {
         val mgr = manager
@@ -836,7 +837,12 @@ class DataGrailConsent private constructor() {
 
         scope.launch {
             try {
-                val trackingSignal = readTrackingSignal(context)
+                // Only the paths that apply the device signal (setUserIdentifier/fetch/rehydrate) pay
+                // the up-to-3s tracking-signal binder read. setCcpaOptout ignores the signal entirely,
+                // so reading it there would add latency to every opt-out toggle for a value never used
+                // (and widen the window a logout can race the write-through in). NOT_DETERMINED is the
+                // same neutral value a timed-out read yields.
+                val trackingSignal = if (readSignal) readTrackingSignal(context) else TrackingSignal.NOT_DETERMINED
                 callback(Result.success(block(mgr, trackingSignal)))
             } catch (e: CancellationException) {
                 // Never swallow cancellation — let it propagate so the coroutine unwinds normally
