@@ -395,10 +395,12 @@ internal class ConsentManager(
         val record = consentService.getUniversalConsent(config, identifier, apiKey) ?: return null
         // ABSENT consent_preferences is signal-only, a miss. A PRESENT block is an answered choice
         // even when its cookieOptions map is empty (essential-only): TRUST-2961 — only a null block,
-        // not an empty map, is "no choice". cookieOptions is non-null once the block is present, so
-        // the empty-map case falls through and rehydrates (isCustomised is forced true locally
-        // below, which is what stops the banner re-prompting a user who already answered elsewhere).
-        val rawCookieOptions = record.consentPreferences?.cookieOptions
+        // not an empty map, is "no choice". The predicate is the block itself (not cookieOptions,
+        // which is a non-null Map defaulting to {} and so can only be null when the block is null),
+        // the SAME check the login `when` branch uses, so the two absent-vs-present-empty call sites
+        // read as one check. The empty-map case falls through and rehydrates (isCustomised is forced
+        // true locally below, which is what stops the banner re-prompting a user who already answered
+        // elsewhere).
 
         // Adopt the record's CCPA choice the moment a record is found — BEFORE the empty-preferences
         // early return below. A signal-only record (ccpa_optout set, no consent_preferences, e.g. a
@@ -414,7 +416,8 @@ internal class ConsentManager(
             storage.saveCcpaOptout(record.ccpaOptout)
         }
 
-        if (rawCookieOptions == null) return null
+        val prefs = record.consentPreferences ?: return null
+        val rawCookieOptions = prefs.cookieOptions
 
         // The RAW preferences are handed back for the WRITE, so they carry the record's OWN
         // isCustomised flag verbatim. setUserIdentifier POSTs this value straight back as the
@@ -424,7 +427,7 @@ internal class ConsentManager(
         // must not leak onto the wire.
         val raw =
             ConsentPreferences(
-                isCustomised = record.consentPreferences?.isCustomised ?: false,
+                isCustomised = prefs.isCustomised,
                 cookieOptions = rawCookieOptions.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
             )
 
@@ -487,9 +490,11 @@ internal class ConsentManager(
      *   (never merges): each category it carries takes its signal-reconciled value, every other
      *   category takes the config default (the same neutral value [clearUserIdentifier] gives it,
      *   never the prior local value), and essential stays on — see [adoptOnLogin]. A found record
-     *   with NO choice (signal-only / null preferences, or an empty cookieOptions map, which this
-     *   model cannot tell apart) returns local state to NEUTRAL if anything is stored, else is a
-     *   no-op. On a genuine MISS only an explicit local choice is written (attached to the new
+     *   with NO choice — an ABSENT (null) consent_preferences block, signal-only — returns local
+     *   state to NEUTRAL if anything is stored, else is a no-op. A PRESENT block whose cookieOptions
+     *   map is empty is NOT no-choice: it is an answered essential-only choice and is adopted via the
+     *   else branch (TRUST-2961); the null-vs-present distinction the decode preserves is what tells
+     *   the two apart. On a genuine MISS only an explicit local choice is written (attached to the new
      *   identity). Otherwise nothing is written; if a different identity was bound and local state
      *   exists, it returns to NEUTRAL (the same local operation as [clearUserIdentifier], minus
      *   clearing the binding) so that user's state does not linger.
@@ -691,21 +696,41 @@ internal class ConsentManager(
     /**
      * LOGIN adopt (TRUST-2902 rev 2.1): REPLACE local state with a found record, never merge.
      *
-     * Each category the record carries takes the record's value; every category it does not mention
-     * takes the config default ([defaultPreferences] — the same neutral value [clearUserIdentifier]
-     * leaves it at; a config category outside the initial set is absent there and reads false, its
-     * default), never the prior local value. The layered map then goes through the shared
-     * [reconciledCookieOptions], so a stored `gpc` or this device's signal suppresses backfilled
-     * non-essential defaults as well, and essential keys stay on. Stored isCustomised=true and the
-     * running config version, exactly as the existing rehydrate adopt path does.
+     * For a PARTIAL answer, each category the record carries takes the record's value; every category
+     * it does not mention takes the config default ([defaultPreferences] — the same neutral value
+     * [clearUserIdentifier] leaves it at; a config category outside the initial set is absent there and
+     * reads false, its default), never the prior local value. A PRESENT but EMPTY cookieOptions map is
+     * an answered essential-only choice (TRUST-2961), NOT a partial answer: it is reconciled raw with
+     * no config-default layering, so only essential keys backfill on and every non-essential category
+     * reads off — even one that is default-on in initialCategories — which is the SAME derivation the
+     * rehydrate/re-sync path applies to the identical shape (the two must not disagree about what
+     * "essential-only" means). The resulting map then goes through the shared [reconciledCookieOptions],
+     * so a stored `gpc` or this device's signal suppresses backfilled non-essential defaults as well,
+     * and essential keys stay on. Stored isCustomised=true and the running config version, exactly as
+     * the existing rehydrate adopt path does.
      */
     private fun adoptOnLogin(
         record: UniversalConsentRecord,
         trackingSignal: TrackingSignal,
         config: ConsentConfig,
     ) {
-        val neutral = defaultPreferences(config).cookieOptions.associate { it.gtmKey to it.isEnabled }
-        val layered = neutral + (record.consentPreferences?.cookieOptions ?: emptyMap())
+        val recordCookieOptions = record.consentPreferences?.cookieOptions ?: emptyMap()
+        // A PRESENT but EMPTY cookieOptions map is an answered essential-only choice (TRUST-2961), not
+        // a partial answer to layer config defaults under. Reconcile the raw empty map directly — the
+        // SAME derivation the rehydrate/re-sync path uses for this shape — so SignalReconciliation
+        // backfills only the essential keys and every non-essential category reads off. Layering
+        // defaultPreferences here would re-enable any non-essential category that is default-on in
+        // initialCategories.initial (a normal opt-out/default-on config), silently re-consenting the
+        // user to it and making LOGIN disagree with REHYDRATE about the identical empty-map record.
+        val layered =
+            if (recordCookieOptions.isEmpty()) {
+                recordCookieOptions
+            } else {
+                // A PARTIAL answer: each category the record carries wins; every category it does not
+                // mention takes the config default (TRUST-2902 login-replace semantics).
+                val neutral = defaultPreferences(config).cookieOptions.associate { it.gtmKey to it.isEnabled }
+                neutral + recordCookieOptions
+            }
         val reconciled = reconciledCookieOptions(record, trackingSignal, config, layered)
         storage.savePreferences(
             ConsentPreferences(

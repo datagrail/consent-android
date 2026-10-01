@@ -1126,6 +1126,51 @@ class ConsentManagerTests {
             verify(mockStorage).saveBoundUserHash(hashFor("bob@example.com"))
         }
 
+    /**
+     * TRUST-2961 (review follow-up): a present-but-empty record is essential-only, so the LOGIN adopt
+     * path must leave EVERY non-essential category off — including one that is default-on in
+     * `initialCategories.initial` (a normal opt-out/default-on config). adoptOnLogin must NOT layer
+     * config defaults for an empty map; doing so would re-enable the default-on marketing category,
+     * silently re-consenting the user and disagreeing with the rehydrate/re-sync path for the
+     * identical empty-map shape. The config here puts a non-essential (`alwaysOn = false`) category in
+     * `initial`, which `twoCategoryUniversalConfig()` alone cannot express, so the earlier adopt test
+     * never exercised it.
+     */
+    @Test
+    fun `login adopting a present but empty record leaves a default-on non-essential category off`() =
+        runTest {
+            sut.currentConfig =
+                twoCategoryUniversalConfig().let { base ->
+                    base.copy(
+                        initialCategories =
+                            base.initialCategories.copy(
+                                initial = listOf("category_essential", "category_marketing"),
+                            ),
+                    )
+                }
+            bindDeviceTo("alice@example.com")
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
+                UniversalConsentRecord(
+                    status = "found",
+                    consentPreferences = UniversalConsentPreferences(isCustomised = true, cookieOptions = emptyMap()),
+                ),
+            )
+
+            sut.setUserIdentifier("bob@example.com", "dg_key", getSignature = signatureProvider())
+
+            // Adopted as-is, never posted back.
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            val storedCaptor = argumentCaptor<ConsentPreferences>()
+            verify(mockStorage).savePreferences(storedCaptor.capture())
+            val stored = storedCaptor.firstValue
+            assertTrue("essential is always on", stored.isCategoryEnabled("category_essential"))
+            assertFalse(
+                "a non-essential category that is default-on in initialCategories is still off for an " +
+                    "essential-only record",
+                stored.isCategoryEnabled("category_marketing"),
+            )
+        }
+
     /** (2) LOGIN + record exists + no local choice: adopted, nothing written, device binds. */
     @Test
     fun `login with a found record and no local choice adopts it and binds`() =
