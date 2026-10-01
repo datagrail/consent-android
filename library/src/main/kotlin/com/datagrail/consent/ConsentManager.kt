@@ -677,7 +677,7 @@ internal class ConsentManager(
         // Bind only after the call succeeds: a failed read or write throws above and leaves the
         // binding untouched, so a retry is still recognised as a login.
         storage.saveBoundUserHash(userHash)
-        universalConsentSession = UniversalConsentSession(userHash, identifier, resolvedApiKey, getSignature)
+        universalConsentSession = UniversalConsentSession(userHash, identifier, apiKey, getSignature)
     }
 
     /**
@@ -756,11 +756,17 @@ internal class ConsentManager(
      * (the signature provider cannot be persisted) so [setCcpaOptout] can write through for the
      * bound user. After a process restart the setter stays local until the host calls
      * [setUserIdentifier] again.
+     *
+     * [explicitApiKey] is the key the host PASSED to [setUserIdentifier] (null when it relied on
+     * `config.json`), NOT the resolved value: [setCcpaOptout] re-resolves it against the live config
+     * on every write (TRUST-2603) so a key rotated server-side via `config.json` is picked up without
+     * a client release — exactly like every other Universal Consent call path. Caching the resolved
+     * key here would pin a stale key for the life of the process.
      */
     private data class UniversalConsentSession(
         val userHash: String,
         val identifier: String,
-        val apiKey: String,
+        val explicitApiKey: String?,
         val getSignature: SignatureProvider?,
     )
 
@@ -798,6 +804,11 @@ internal class ConsentManager(
         // A logout/reset landed while this call was being prepared: don't write through to the
         // now-unbound (or re-bound) identity.
         if (identityOperationGeneration.get() != opGeneration) return
+        // Re-resolve the API key against the LIVE config at write time (TRUST-2603): an explicit key
+        // the host passed to setUserIdentifier still wins, but when it relied on config.json a key
+        // rotated server-side is picked up here instead of reusing the value captured at bind time.
+        // Throws ValidationError if neither source has a key now, exactly like the other call paths.
+        val apiKey = resolveUniversalConsentApiKey(config, session.explicitApiKey)
         consentService.saveUniversalConsent(
             config = config,
             identifier = session.identifier,
@@ -806,7 +817,7 @@ internal class ConsentManager(
                     isCustomised = localChoice.isCustomised,
                     cookieOptions = localChoice.cookieOptions.associate { it.gtmKey to it.isEnabled },
                 ),
-            apiKey = session.apiKey,
+            apiKey = apiKey,
             ccpaOptout = optedOut,
             getSignature = session.getSignature,
         )

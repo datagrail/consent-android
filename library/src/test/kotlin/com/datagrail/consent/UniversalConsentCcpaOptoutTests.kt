@@ -239,6 +239,57 @@ class UniversalConsentCcpaOptoutTests {
             assertTrue(sut.getCcpaOptout())
         }
 
+    @Test
+    fun `write-through re-resolves a rotated config_json apiKey, not the one bound at setUserIdentifier`() =
+        runTest {
+            // Host relies on config.json for the key (passes null); it binds under key_v1.
+            sut.currentConfig =
+                config(syncOptout = true).copy(
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = true, apiKey = "key_v1"),
+                )
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey = null)
+
+            // The edge key rotates server-side via config.json — no client release, no new login.
+            sut.currentConfig =
+                sut.currentConfig!!.copy(
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = true, apiKey = "key_v2"),
+                )
+
+            sut.setCcpaOptout(true)
+
+            // The opt-out write re-resolves against the live config and uses the CURRENT key, not the
+            // stale one captured at bind time (TRUST-2603 review on #65).
+            val keyCaptor = argumentCaptor<String>()
+            verify(mockConsentService, times(2))
+                .saveUniversalConsent(any(), any(), any(), keyCaptor.capture(), any(), anyOrNull())
+            assertEquals("key_v1", keyCaptor.firstValue)
+            assertEquals("key_v2", keyCaptor.secondValue)
+        }
+
+    @Test
+    fun `write-through keeps honoring an explicit apiKey passed at setUserIdentifier`() =
+        runTest {
+            // Host passed an explicit key; an explicit value always wins over config.json, so a later
+            // config.json key must NOT override it on the opt-out write.
+            sut.currentConfig =
+                config(syncOptout = true).copy(
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = true, apiKey = "config_key"),
+                )
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey = "explicit_key")
+
+            sut.setCcpaOptout(true)
+
+            val keyCaptor = argumentCaptor<String>()
+            verify(mockConsentService, times(2))
+                .saveUniversalConsent(any(), any(), any(), keyCaptor.capture(), any(), anyOrNull())
+            assertEquals("explicit_key", keyCaptor.firstValue)
+            assertEquals("explicit_key", keyCaptor.secondValue)
+        }
+
     // MARK: - Login (TRUST-2902 rule)
 
     @Test
