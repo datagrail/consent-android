@@ -690,13 +690,16 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param getSignature Java-friendly signature provider (calls the customer's backend).
      * @param callback Callback interface for success/failure.
      */
     fun setUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         getSignature: SignatureProviderCallback,
         callback: ConsentCallback,
     ) {
@@ -760,14 +763,17 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param getSignature Suspend provider that signs the SDK-built payload and returns
      *   { signature, keyId }.
      * @param callback Callback with the result.
      */
     fun setUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         getSignature: SignatureProvider,
         callback: (Result<Unit>) -> Unit,
     ) {
@@ -786,12 +792,15 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param callback Callback with the result.
      */
     fun setUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: (Result<Unit>) -> Unit,
     ) {
         launchSetUserIdentifier(identifier, apiKey, getSignature = null, callback = callback)
@@ -806,12 +815,15 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param callback Callback interface for success/failure.
      */
     fun setUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: ConsentCallback,
     ) {
         setUserIdentifier(identifier, apiKey) { result -> adaptResult(result, callback) }
@@ -875,7 +887,7 @@ class DataGrailConsent private constructor() {
      */
     private fun launchSetUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         getSignature: SignatureProvider?,
         callback: (Result<Unit>) -> Unit,
     ) {
@@ -899,12 +911,15 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
      *   before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param callback Callback with the record (null if no record exists) or a failure.
      */
     fun fetchUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: (Result<UniversalConsentRecord?>) -> Unit,
     ) {
         launchUniversalConsentOperation(callback) { mgr, trackingSignal ->
@@ -920,12 +935,15 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
      *   before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param callback Callback interface for success (record, possibly null) / failure.
      */
     fun fetchUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: UniversalConsentCallback,
     ) {
         fetchUniversalConsent(identifier, apiKey) { result ->
@@ -960,13 +978,16 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase) before
      *   hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param callback Callback with true when category preferences were rehydrated from a stored
      *   record (see above: a signal-only record returns false but may still adopt its `ccpa_optout`).
      */
     fun rehydrateFromUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: (Result<Boolean>) -> Unit,
     ) {
         launchUniversalConsentOperation(callback) { mgr, trackingSignal ->
@@ -988,12 +1009,15 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase) before
      *   hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param callback Callback interface for success (rehydrated true/false) / failure.
      */
     fun rehydrateFromUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: RehydrateCallback,
     ) {
         rehydrateFromUniversalConsent(identifier, apiKey) { result ->

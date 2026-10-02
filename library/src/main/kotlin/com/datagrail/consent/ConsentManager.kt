@@ -247,6 +247,22 @@ internal class ConsentManager(
     }
 
     /**
+     * Resolve the edge API key for a Universal Consent call (TRUST-2603): an explicit value passed
+     * by the host wins (existing integrations behave exactly as before); otherwise fall back to
+     * `universalConsent.apiKey` from config.json, which lets the key rotate server-side with no
+     * client release. An empty string counts as absent at either source. Throws
+     * [ConsentException.ValidationError] when neither is present, so the write is never attempted
+     * with a key the edge cannot resolve.
+     */
+    private fun resolveUniversalConsentApiKey(config: ConsentConfig, explicit: String?): String {
+        val resolved = explicit?.takeIf { it.isNotEmpty() }
+            ?: config.universalConsent?.apiKey?.takeIf { it.isNotEmpty() }
+        return resolved ?: throw ConsentException.ValidationError(
+            "A Universal Consent API key is required: pass apiKey or set universalConsent.apiKey in config.json",
+        )
+    }
+
+    /**
      * The single source of truth for signal reconciliation on a fetched record.
      *
      * Both [fetchUniversalConsent] (which hands the reconciled record back to a caller) and
@@ -300,11 +316,12 @@ internal class ConsentManager(
      */
     suspend fun fetchUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
     ): UniversalConsentRecord? {
         val config = requireUniversalConsentReady()
-        val record = consentService.getUniversalConsent(config, identifier, apiKey) ?: return null
+        val resolvedApiKey = resolveUniversalConsentApiKey(config, apiKey)
+        val record = consentService.getUniversalConsent(config, identifier, resolvedApiKey) ?: return null
 
         val prefs = record.consentPreferences ?: return record
         return record.copy(
@@ -327,16 +344,20 @@ internal class ConsentManager(
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase) before
      *   hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's edge API key, or `null` to use `universalConsent.apiKey` from config.json (TRUST-2603); an explicit value wins.
      * @param trackingSignal This device's live signal. Read from the OS by the caller (the public
      *   API does this for you) so this method never blocks on a binder call.
      * @return true when local state was rehydrated from a stored record, false on a miss.
      */
     suspend fun rehydrateFromUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
-    ): Boolean = rehydrateReturningRawPreferences(identifier, apiKey, trackingSignal) != null
+    ): Boolean {
+        val config = requireUniversalConsentReady()
+        val resolvedApiKey = resolveUniversalConsentApiKey(config, apiKey)
+        return rehydrateReturningRawPreferences(identifier, resolvedApiKey, trackingSignal, config) != null
+    }
 
     /**
      * Rehydrate, and hand back the RAW preferences from the stored record.
@@ -372,7 +393,14 @@ internal class ConsentManager(
         // already-reconciled record. Both views are needed here: the reconciled one to persist
         // locally, the raw one to hand back for the write.
         val record = consentService.getUniversalConsent(config, identifier, apiKey) ?: return null
-        val rawCookieOptions = record.consentPreferences?.cookieOptions
+        // ABSENT consent_preferences is signal-only, a miss. A PRESENT block is an answered choice
+        // even when its cookieOptions map is empty (essential-only): TRUST-2961 — only a null block,
+        // not an empty map, is "no choice". The predicate is the block itself (not cookieOptions,
+        // which is a non-null Map defaulting to {} and so can only be null when the block is null),
+        // the SAME check the login `when` branch uses, so the two absent-vs-present-empty call sites
+        // read as one check. The empty-map case falls through and rehydrates (isCustomised is forced
+        // true locally below, which is what stops the banner re-prompting a user who already answered
+        // elsewhere).
 
         // Adopt the record's CCPA choice the moment a record is found — BEFORE the empty-preferences
         // early return below. A signal-only record (ccpa_optout set, no consent_preferences, e.g. a
@@ -388,7 +416,8 @@ internal class ConsentManager(
             storage.saveCcpaOptout(record.ccpaOptout)
         }
 
-        if (rawCookieOptions.isNullOrEmpty()) return null
+        val prefs = record.consentPreferences ?: return null
+        val rawCookieOptions = prefs.cookieOptions
 
         // The RAW preferences are handed back for the WRITE, so they carry the record's OWN
         // isCustomised flag verbatim. setUserIdentifier POSTs this value straight back as the
@@ -398,7 +427,7 @@ internal class ConsentManager(
         // must not leak onto the wire.
         val raw =
             ConsentPreferences(
-                isCustomised = record.consentPreferences?.isCustomised ?: false,
+                isCustomised = prefs.isCustomised,
                 cookieOptions = rawCookieOptions.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
             )
 
@@ -461,9 +490,11 @@ internal class ConsentManager(
      *   (never merges): each category it carries takes its signal-reconciled value, every other
      *   category takes the config default (the same neutral value [clearUserIdentifier] gives it,
      *   never the prior local value), and essential stays on — see [adoptOnLogin]. A found record
-     *   with NO choice (signal-only / null preferences, or an empty cookieOptions map, which this
-     *   model cannot tell apart) returns local state to NEUTRAL if anything is stored, else is a
-     *   no-op. On a genuine MISS only an explicit local choice is written (attached to the new
+     *   with NO choice — an ABSENT (null) consent_preferences block, signal-only — returns local
+     *   state to NEUTRAL if anything is stored, else is a no-op. A PRESENT block whose cookieOptions
+     *   map is empty is NOT no-choice: it is an answered essential-only choice and is adopted via the
+     *   else branch (TRUST-2961); the null-vs-present distinction the decode preserves is what tells
+     *   the two apart. On a genuine MISS only an explicit local choice is written (attached to the new
      *   identity). Otherwise nothing is written; if a different identity was bound and local state
      *   exists, it returns to NEUTRAL (the same local operation as [clearUserIdentifier], minus
      *   clearing the binding) so that user's state does not linger.
@@ -492,7 +523,7 @@ internal class ConsentManager(
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
      *   before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's edge API key, or `null` to use `universalConsent.apiKey` from config.json (TRUST-2603); an explicit value wins.
      * @param trackingSignal This device's live signal, applied only to the LOCAL read/rehydration.
      *   Read from the OS by the public adapter; defaults to [TrackingSignal.NOT_DETERMINED].
      * @param getSignature Customer-provided signature provider (calls their backend), or null for
@@ -503,7 +534,7 @@ internal class ConsentManager(
      */
     suspend fun setUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
         getSignature: SignatureProvider? = null,
         onRehydrated: ((ConsentPreferences) -> Unit)? = null,
@@ -521,7 +552,7 @@ internal class ConsentManager(
 
     private suspend fun setUserIdentifierLocked(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         trackingSignal: TrackingSignal,
         getSignature: SignatureProvider?,
         onRehydrated: ((ConsentPreferences) -> Unit)?,
@@ -530,6 +561,7 @@ internal class ConsentManager(
         // Superseded by a logout/reset while queued behind another setUserIdentifier.
         if (identityOperationGeneration.get() != opGeneration) return
         val config = requireUniversalConsentReady()
+        val resolvedApiKey = resolveUniversalConsentApiKey(config, apiKey)
 
         // The same hash the service computes for the read/write (it also rejects an identifier that
         // is empty after normalization, before any request). Only the hash is ever persisted.
@@ -570,7 +602,7 @@ internal class ConsentManager(
                 val rawFromRecord =
                     rehydrateReturningRawPreferences(
                         identifier,
-                        apiKey,
+                        resolvedApiKey,
                         trackingSignal,
                         config,
                         adoptCcpaOptout = localChoice == null,
@@ -591,7 +623,7 @@ internal class ConsentManager(
             } else {
                 // LOGIN. Reads the record directly so a found record without a choice is told apart
                 // from a genuine miss (rehydrate folds the two together).
-                val record = consentService.getUniversalConsent(config, identifier, apiKey)
+                val record = consentService.getUniversalConsent(config, identifier, resolvedApiKey)
                 // A logout landed during the read: leave its neutral state in place rather than
                 // adopting/replacing local state for an identity the device is no longer bound to.
                 if (identityOperationGeneration.get() != opGeneration) return
@@ -620,9 +652,12 @@ internal class ConsentManager(
                         }
                         explicitChoice
                     }
-                    record.consentPreferences?.cookieOptions.isNullOrEmpty() -> {
-                        // FOUND with no choice: drop local state (neutral) if anything is stored.
-                        // The CCPA flag already took the record's value above and keeps it.
+                    record.consentPreferences == null -> {
+                        // FOUND but consent_preferences ABSENT — signal-only, the user made no
+                        // choice (TRUST-2961: a PRESENT block with an empty cookieOptions map is an
+                        // answered essential-only choice and is adopted in the else branch below,
+                        // NOT treated as neutral here). Drop local state (neutral) if anything is
+                        // stored. The CCPA flag already took the record's value above and keeps it.
                         if (localChoice != null) {
                             returnToNeutral(onRehydrated, clearCcpaOptout = false)
                         }
@@ -648,7 +683,7 @@ internal class ConsentManager(
                 config = config,
                 identifier = identifier,
                 preferences = universalPrefs,
-                apiKey = apiKey,
+                apiKey = resolvedApiKey,
                 // The user's explicit DNSMPI choice from setCcpaOptout, RAW. NEVER derived from the
                 // tracking signal or any category: the ad-tracking signal is a narrower
                 // ad-personalization signal, and treating one as the other would write a legal
@@ -669,21 +704,41 @@ internal class ConsentManager(
     /**
      * LOGIN adopt (TRUST-2902 rev 2.1): REPLACE local state with a found record, never merge.
      *
-     * Each category the record carries takes the record's value; every category it does not mention
-     * takes the config default ([defaultPreferences] — the same neutral value [clearUserIdentifier]
-     * leaves it at; a config category outside the initial set is absent there and reads false, its
-     * default), never the prior local value. The layered map then goes through the shared
-     * [reconciledCookieOptions], so a stored `gpc` or this device's signal suppresses backfilled
-     * non-essential defaults as well, and essential keys stay on. Stored isCustomised=true and the
-     * running config version, exactly as the existing rehydrate adopt path does.
+     * For a PARTIAL answer, each category the record carries takes the record's value; every category
+     * it does not mention takes the config default ([defaultPreferences] — the same neutral value
+     * [clearUserIdentifier] leaves it at; a config category outside the initial set is absent there and
+     * reads false, its default), never the prior local value. A PRESENT but EMPTY cookieOptions map is
+     * an answered essential-only choice (TRUST-2961), NOT a partial answer: it is reconciled raw with
+     * no config-default layering, so only essential keys backfill on and every non-essential category
+     * reads off — even one that is default-on in initialCategories — which is the SAME derivation the
+     * rehydrate/re-sync path applies to the identical shape (the two must not disagree about what
+     * "essential-only" means). The resulting map then goes through the shared [reconciledCookieOptions],
+     * so a stored `gpc` or this device's signal suppresses backfilled non-essential defaults as well,
+     * and essential keys stay on. Stored isCustomised=true and the running config version, exactly as
+     * the existing rehydrate adopt path does.
      */
     private fun adoptOnLogin(
         record: UniversalConsentRecord,
         trackingSignal: TrackingSignal,
         config: ConsentConfig,
     ) {
-        val neutral = defaultPreferences(config).cookieOptions.associate { it.gtmKey to it.isEnabled }
-        val layered = neutral + (record.consentPreferences?.cookieOptions ?: emptyMap())
+        val recordCookieOptions = record.consentPreferences?.cookieOptions ?: emptyMap()
+        // A PRESENT but EMPTY cookieOptions map is an answered essential-only choice (TRUST-2961), not
+        // a partial answer to layer config defaults under. Reconcile the raw empty map directly — the
+        // SAME derivation the rehydrate/re-sync path uses for this shape — so SignalReconciliation
+        // backfills only the essential keys and every non-essential category reads off. Layering
+        // defaultPreferences here would re-enable any non-essential category that is default-on in
+        // initialCategories.initial (a normal opt-out/default-on config), silently re-consenting the
+        // user to it and making LOGIN disagree with REHYDRATE about the identical empty-map record.
+        val layered =
+            if (recordCookieOptions.isEmpty()) {
+                recordCookieOptions
+            } else {
+                // A PARTIAL answer: each category the record carries wins; every category it does not
+                // mention takes the config default (TRUST-2902 login-replace semantics).
+                val neutral = defaultPreferences(config).cookieOptions.associate { it.gtmKey to it.isEnabled }
+                neutral + recordCookieOptions
+            }
         val reconciled = reconciledCookieOptions(record, trackingSignal, config, layered)
         storage.savePreferences(
             ConsentPreferences(
@@ -742,11 +797,17 @@ internal class ConsentManager(
      * (the signature provider cannot be persisted) so [setCcpaOptout] can write through for the
      * bound user. After a process restart the setter stays local until the host calls
      * [setUserIdentifier] again.
+     *
+     * [explicitApiKey] is the key the host PASSED to [setUserIdentifier] (null when it relied on
+     * `config.json`), NOT the resolved value: [setCcpaOptout] re-resolves it against the live config
+     * on every write (TRUST-2603) so a key rotated server-side via `config.json` is picked up without
+     * a client release — exactly like every other Universal Consent call path. Caching the resolved
+     * key here would pin a stale key for the life of the process.
      */
     private data class UniversalConsentSession(
         val userHash: String,
         val identifier: String,
-        val apiKey: String,
+        val explicitApiKey: String?,
         val getSignature: SignatureProvider?,
     )
 
@@ -807,6 +868,12 @@ internal class ConsentManager(
             // A logout/reset landed while preparing the write (including during the reads above):
             // don't write through to the now-unbound (or re-bound) identity.
             if (identityOperationGeneration.get() != opGeneration) return@withLock
+            // Re-resolve the API key against the LIVE config at write time (TRUST-2603): an explicit
+            // key the host passed to setUserIdentifier still wins, but when it relied on config.json
+            // a key rotated server-side is picked up here instead of reusing the value captured at
+            // bind time. Throws ValidationError if neither source has a key now, exactly like the
+            // other call paths.
+            val apiKey = resolveUniversalConsentApiKey(config, session.explicitApiKey)
             consentService.saveUniversalConsent(
                 config = config,
                 identifier = session.identifier,
@@ -815,7 +882,7 @@ internal class ConsentManager(
                         isCustomised = localChoice.isCustomised,
                         cookieOptions = localChoice.cookieOptions.associate { it.gtmKey to it.isEnabled },
                     ),
-                apiKey = session.apiKey,
+                apiKey = apiKey,
                 // The LATEST stored flag, not the captured parameter: two rapid toggles that complete
                 // out of order then both land the final value instead of reversing the user's intent.
                 ccpaOptout = storage.loadCcpaOptout(),
