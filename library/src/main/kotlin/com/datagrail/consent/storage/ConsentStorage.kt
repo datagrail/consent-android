@@ -33,6 +33,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         private const val KEY_CONFIG_CACHE = "datagrail_consent_config_cache"
         private const val KEY_PENDING_EVENTS = "datagrail_consent_pending_events"
         private const val KEY_BOUND_USER_HASH = "datagrail_consent_bound_user_hash"
+        private const val KEY_CCPA_OPTOUT = "datagrail_consent_ccpa_optout"
 
         /**
          * Create a ConsentStorage backed by EncryptedSharedPreferences
@@ -177,6 +178,31 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
      */
     fun clearBoundUserHash() {
         prefs.edit().remove(KEY_BOUND_USER_HASH).apply()
+    }
+
+    // MARK: - CCPA opt-out (TRUST-2591)
+
+    /**
+     * Persist the user's explicit CCPA/CPRA "Do Not Sell or Share" choice for this device. Never a
+     * derived value: only the public setter, a found-record adopt, and the neutral reset write it.
+     * [clearAll] removes it with everything else.
+     * @param optedOut true when the user opted out of sale/sharing
+     */
+    fun saveCcpaOptout(optedOut: Boolean) {
+        prefs.edit().putBoolean(KEY_CCPA_OPTOUT, optedOut).apply()
+    }
+
+    /**
+     * Load the stored CCPA opt-out choice
+     * @return The stored choice, or false ("not opted out") if none is stored
+     */
+    fun loadCcpaOptout(): Boolean = prefs.getBoolean(KEY_CCPA_OPTOUT, false)
+
+    /**
+     * Remove the stored CCPA opt-out choice, so reads return false. Does not touch any other stored data.
+     */
+    fun clearCcpaOptout() {
+        prefs.edit().remove(KEY_CCPA_OPTOUT).apply()
     }
 
     // MARK: - Unique ID

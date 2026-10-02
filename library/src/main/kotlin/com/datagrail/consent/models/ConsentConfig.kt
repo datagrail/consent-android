@@ -92,13 +92,18 @@ fun ConsentConfig.essentialCategoryKeys(): Set<String> {
 /**
  * Universal Consent feature flags, published under the `universalConsent` config key.
  * @property enabled Whether cross-device universal consent is turned on for this container.
- * @property syncOptout Whether CCPA/US opt-out state should be synced to the universal record.
+ * @property syncOptout Whether the user's CCPA opt-out choice (`DataGrailConsent.setCcpaOptout`)
+ *   is written to the universal record. A per-customer feature gate only, never the value itself.
+ * @property apiKey Edge API key delivered via config.json (TRUST-2603) so it can rotate
+ *   server-side (edge KVS + config republish) with no client release. Optional: a host may still
+ *   pass the key explicitly to the Universal Consent calls, which takes precedence over this value.
  */
 @Serializable
 data class UniversalConsentConfig(
     val enabled: Boolean = false,
     @SerialName("sync_optout")
     val syncOptout: Boolean = false,
+    val apiKey: String? = null,
 )
 
 /**

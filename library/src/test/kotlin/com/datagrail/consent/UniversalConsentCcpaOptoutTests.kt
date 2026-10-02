@@ -1,0 +1,600 @@
+package com.datagrail.consent
+
+import com.datagrail.consent.models.*
+import com.datagrail.consent.network.ConfigService
+import com.datagrail.consent.network.ConsentService
+import com.datagrail.consent.storage.ConsentStorage
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.*
+import org.junit.Before
+import org.junit.Test
+import org.mockito.Mock
+import org.mockito.MockitoAnnotations
+import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.doAnswer
+import org.mockito.kotlin.eq
+import org.mockito.kotlin.never
+import org.mockito.kotlin.times
+import org.mockito.kotlin.verify
+import org.mockito.kotlin.whenever
+
+/**
+ * First-class `ccpa_optout` (TRUST-2591): the user's explicit "Do Not Sell or Share" choice, set by
+ * the host app, never derived from a category or the ad-tracking signal, gated on the wire by
+ * `syncOptout`, and replaced by a found record on login (TRUST-2902 rule). Same rule as the
+ * web/iOS/React Native SDKs.
+ *
+ * Storage is a stateful stub so the flag, preferences and binding round-trip through the manager.
+ */
+class UniversalConsentCcpaOptoutTests {
+    private lateinit var sut: ConsentManager
+
+    @Mock
+    private lateinit var mockStorage: ConsentStorage
+
+    @Mock
+    private lateinit var mockConfigService: ConfigService
+
+    @Mock
+    private lateinit var mockConsentService: ConsentService
+
+    private var storedPreferences: ConsentPreferences? = null
+    private var storedCcpaOptout = false
+    private var storedBoundHash: String? = null
+
+    private val userA = "alice@example.com"
+    private val userB = "bob@example.com"
+    private val apiKey = "dg_key"
+
+    @Before
+    fun setUp() {
+        MockitoAnnotations.openMocks(this)
+        storedPreferences = null
+        storedCcpaOptout = false
+        storedBoundHash = null
+        whenever(mockStorage.savePreferences(any())).doAnswer { storedPreferences = it.getArgument(0) }
+        whenever(mockStorage.loadPreferences()).doAnswer { storedPreferences }
+        whenever(mockStorage.clearPreferences()).doAnswer { storedPreferences = null }
+        whenever(mockStorage.saveCcpaOptout(any())).doAnswer { storedCcpaOptout = it.getArgument(0) }
+        whenever(mockStorage.loadCcpaOptout()).doAnswer { storedCcpaOptout }
+        whenever(mockStorage.clearCcpaOptout()).doAnswer { storedCcpaOptout = false }
+        whenever(mockStorage.saveBoundUserHash(any())).doAnswer { storedBoundHash = it.getArgument(0) }
+        whenever(mockStorage.loadBoundUserHash()).doAnswer { storedBoundHash }
+        whenever(mockStorage.clearBoundUserHash()).doAnswer { storedBoundHash = null }
+        sut = ConsentManager(mockStorage, mockConfigService, mockConsentService)
+        sut.currentConfig = config(syncOptout = true)
+    }
+
+    // MARK: - Setter / getter
+
+    @Test
+    fun `setter persists and the getter reads it back, changing no category`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            assertFalse(sut.getCcpaOptout())
+
+            sut.setCcpaOptout(true)
+
+            assertTrue(sut.getCcpaOptout())
+            assertEquals(choice(marketing = true), storedPreferences)
+            verifyNoWrite()
+
+            sut.setCcpaOptout(false)
+            assertFalse(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `setter writes through for the bound identity with the gate on`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey)
+            assertEquals(listOf(false), writtenCcpa())
+
+            sut.setCcpaOptout(true)
+
+            assertEquals(listOf(false, true), writtenCcpa())
+        }
+
+    @Test
+    fun `setter stays local with the gate off`() =
+        runTest {
+            sut.currentConfig = config(syncOptout = false)
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey)
+
+            sut.setCcpaOptout(true)
+
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `setter stays local when bound but no session in this process`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            storedBoundHash = hashFor(userA)
+
+            sut.setCcpaOptout(true)
+
+            verifyNoWrite()
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `setter stays local after clearUserIdentifier`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey)
+            sut.clearUserIdentifier()
+
+            sut.setCcpaOptout(true)
+
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
+        }
+
+    @Test
+    fun `write-through aborts when a logout lands before the POST`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey) // binds the identity; one login write
+            assertEquals(listOf(false), writtenCcpa())
+
+            // Simulate clearUserIdentifier() landing after setCcpaOptout's synchronous checks pass but
+            // before it issues the write-through: the last read before the POST triggers the logout
+            // (one-shot — clearUserIdentifier itself reads preferences again), which bumps
+            // identityOperationGeneration and unbinds. The generation guard must then skip the POST so
+            // a stale opt-out never lands against the identity the device just left.
+            var logoutTriggered = false
+            whenever(mockStorage.loadPreferences()).doAnswer {
+                val current = storedPreferences
+                if (!logoutTriggered) {
+                    logoutTriggered = true
+                    sut.clearUserIdentifier()
+                }
+                current
+            }
+
+            sut.setCcpaOptout(true)
+
+            // Still only the login write — no stale CCPA write-through — and the logout left the flag
+            // neutral.
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
+            assertFalse(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `setter skips the stale re-persist when a logout landed before the write-through ran`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey) // binds the identity
+
+            // The adapter persists the flag synchronously and captures the generation, THEN launches
+            // the write-through. Simulate a clearUserIdentifier() landing in that gap: it bumps the
+            // generation and clears the flag before the launched coroutine runs with the stale token.
+            val opGeneration = sut.identityOperationGenerationSnapshot()
+            sut.saveCcpaOptout(true) // the adapter's synchronous persist
+            sut.clearUserIdentifier() // logout lands before the launched write-through
+
+            sut.setCcpaOptout(true, opGeneration) // the launched coroutine, carrying the pre-logout token
+
+            // The stale coroutine neither re-persisted the opt-out nor wrote through: the logout's
+            // neutral state stands.
+            assertFalse(sut.getCcpaOptout())
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
+        }
+
+    @Test
+    fun `write-through posts the latest stored flag, not the captured parameter`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey)
+            assertEquals(listOf(false), writtenCcpa())
+
+            // A newer toggle reaches storage after this call persisted its own value but before the
+            // POST reads it back — the write must carry the LATEST stored flag so two rapid toggles
+            // completing out of order cannot reverse the user's intent.
+            var bumped = false
+            whenever(mockStorage.loadPreferences()).doAnswer {
+                if (!bumped) {
+                    bumped = true
+                    storedCcpaOptout = false
+                }
+                storedPreferences
+            }
+
+            sut.setCcpaOptout(true)
+
+            assertEquals(listOf(false, false), writtenCcpa())
+        }
+
+    // MARK: - Wire field
+
+    @Test
+    fun `never derived from marketing rejection or a limited tracking signal`() =
+        runTest {
+            storedPreferences = choice(marketing = false)
+            recordIs(null)
+
+            sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
+
+            assertEquals(listOf(false), writtenCcpa())
+            assertFalse(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `re-sync write-through carries the local flag, not the record's`() =
+        runTest {
+            storedBoundHash = hashFor(userA)
+            storedPreferences = choice(marketing = false)
+            storedCcpaOptout = true
+            recordIs(record(ccpaOptout = false))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertEquals(listOf(true), writtenCcpa())
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `re-sync adopt takes the record value with the gate on`() =
+        runTest {
+            storedBoundHash = hashFor(userA)
+            recordIs(record(ccpaOptout = true))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `re-sync adopt keeps a local-only flag with the gate off`() =
+        runTest {
+            sut.currentConfig = config(syncOptout = false)
+            storedBoundHash = hashFor(userA)
+            storedCcpaOptout = true
+            recordIs(record(ccpaOptout = false))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `re-sync adopts a signal-only record's flag with no local choice and no write`() =
+        runTest {
+            // Re-sync (bound to the same identity) against a signal-only record: ccpa_optout set but
+            // no consent_preferences, e.g. a web DNSMPI opt-out made before any category choice. The
+            // record is authoritative for the flag and must replace the local value, matching the
+            // LOGIN signal-only path — even though there are no raw preferences to write back.
+            storedBoundHash = hashFor(userA)
+            storedCcpaOptout = false
+            recordIs(UniversalConsentRecord(status = "found", ccpaOptout = true))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `write-through re-resolves a rotated config_json apiKey, not the one bound at setUserIdentifier`() =
+        runTest {
+            // Host relies on config.json for the key (passes null); it binds under key_v1.
+            sut.currentConfig =
+                config(syncOptout = true).copy(
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = true, apiKey = "key_v1"),
+                )
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey = null)
+
+            // The edge key rotates server-side via config.json — no client release, no new login.
+            sut.currentConfig =
+                sut.currentConfig!!.copy(
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = true, apiKey = "key_v2"),
+                )
+
+            sut.setCcpaOptout(true)
+
+            // The opt-out write re-resolves against the live config and uses the CURRENT key, not the
+            // stale one captured at bind time (TRUST-2603 review on #65).
+            val keyCaptor = argumentCaptor<String>()
+            verify(mockConsentService, times(2))
+                .saveUniversalConsent(any(), any(), any(), keyCaptor.capture(), any(), anyOrNull())
+            assertEquals("key_v1", keyCaptor.firstValue)
+            assertEquals("key_v2", keyCaptor.secondValue)
+        }
+
+    @Test
+    fun `write-through keeps honoring an explicit apiKey passed at setUserIdentifier`() =
+        runTest {
+            // Host passed an explicit key; an explicit value always wins over config.json, so a later
+            // config.json key must NOT override it on the opt-out write.
+            sut.currentConfig =
+                config(syncOptout = true).copy(
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = true, apiKey = "config_key"),
+                )
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey = "explicit_key")
+
+            sut.setCcpaOptout(true)
+
+            val keyCaptor = argumentCaptor<String>()
+            verify(mockConsentService, times(2))
+                .saveUniversalConsent(any(), any(), any(), keyCaptor.capture(), any(), anyOrNull())
+            assertEquals("explicit_key", keyCaptor.firstValue)
+            assertEquals("explicit_key", keyCaptor.secondValue)
+        }
+
+    // MARK: - Login (TRUST-2902 rule)
+
+    @Test
+    fun `login found record replaces a pre-login flag without writing`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            storedCcpaOptout = true
+            recordIs(record(ccpaOptout = false))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+            assertFalse(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `login found record keeps a local-only flag with the gate off`() =
+        runTest {
+            // With syncOptout off the SDK never writes the choice to the record, so the record's
+            // ccpa_optout is not authoritative; a login must not overwrite a local-only opt-out with
+            // it. Mirrors the re-sync gate-off behaviour.
+            sut.currentConfig = config(syncOptout = false)
+            storedCcpaOptout = true
+            recordIs(record(ccpaOptout = false))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `login found record carrying true is adopted`() =
+        runTest {
+            recordIs(record(ccpaOptout = true))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `login found signal-only record still replaces the flag`() =
+        runTest {
+            storedCcpaOptout = true
+            recordIs(UniversalConsentRecord(status = "found", ccpaOptout = false))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+            assertFalse(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `login miss with an explicit choice attaches the flag`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            storedCcpaOptout = true
+            recordIs(null)
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertEquals(listOf(true), writtenCcpa())
+        }
+
+    @Test
+    fun `login miss with only a setter call writes nothing and keeps the flag`() =
+        runTest {
+            sut.setCcpaOptout(true)
+            recordIs(null)
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+            assertTrue(sut.getCcpaOptout())
+            assertNull(storedPreferences)
+        }
+
+    @Test
+    fun `login miss while bound to another identity clears the flag`() =
+        runTest {
+            storedBoundHash = hashFor(userA)
+            storedCcpaOptout = true
+            recordIs(null)
+
+            sut.setUserIdentifier(userB, apiKey)
+
+            verifyNoWrite()
+            assertFalse(sut.getCcpaOptout())
+        }
+
+    // MARK: - Neutral / reset
+
+    @Test
+    fun `clearUserIdentifier resets the flag`() {
+        storedBoundHash = hashFor(userA)
+        storedCcpaOptout = true
+
+        sut.clearUserIdentifier()
+
+        assertFalse(sut.getCcpaOptout())
+    }
+
+    @Test
+    fun `reset wipes storage, the flag included`() {
+        sut.reset()
+
+        verify(mockStorage).clearAll()
+    }
+
+    // MARK: - Helpers
+
+    private suspend fun recordIs(record: UniversalConsentRecord?) {
+        whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(record)
+    }
+
+    private suspend fun writtenCcpa(): List<Boolean> {
+        val captor = argumentCaptor<Boolean>()
+        verify(mockConsentService, org.mockito.Mockito.atLeastOnce())
+            .saveUniversalConsent(any(), any(), any(), eq(apiKey), captor.capture(), anyOrNull())
+        return captor.allValues
+    }
+
+    private suspend fun verifyNoWrite() {
+        verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
+    }
+
+    private fun hashFor(identifier: String): String {
+        val config = sut.currentConfig!!
+        return ConsentService.computeUserHash(config.dgCustomerId, config.consentProjectId!!, identifier)
+    }
+
+    private fun choice(marketing: Boolean): ConsentPreferences =
+        ConsentPreferences(
+            isCustomised = true,
+            cookieOptions =
+                listOf(
+                    CategoryConsent(gtmKey = "category_essential", isEnabled = true),
+                    CategoryConsent(gtmKey = "category_marketing", isEnabled = marketing),
+                ),
+        )
+
+    private fun record(ccpaOptout: Boolean): UniversalConsentRecord =
+        UniversalConsentRecord(
+            status = "found",
+            consentPreferences =
+                UniversalConsentPreferences(
+                    isCustomised = true,
+                    cookieOptions = mapOf("category_essential" to true, "category_marketing" to true),
+                ),
+            ccpaOptout = ccpaOptout,
+        )
+
+    private fun config(syncOptout: Boolean): ConsentConfig {
+        val categoryElements =
+            listOf("category_essential" to true, "category_marketing" to false).map { (gtmKey, alwaysOn) ->
+                ConsentLayerCategory(
+                    id =
+                        java.util.UUID
+                            .randomUUID()
+                            .toString(),
+                    consentCategoryId =
+                        java.util.UUID
+                            .randomUUID()
+                            .toString(),
+                    order = 1,
+                    hidden = false,
+                    primitive = "dg-category-essential",
+                    alwaysOn = alwaysOn,
+                    gtmKey = gtmKey,
+                    uuids = emptyList(),
+                    cookiePatterns = emptyList(),
+                    translations = emptyMap(),
+                    showTrackingDetailsLink = false,
+                )
+            }
+        val element =
+            ConsentLayerElement(
+                id =
+                    java.util.UUID
+                        .randomUUID()
+                        .toString(),
+                order = 1,
+                type = "ConsentLayerCategoryElement",
+                style = null,
+                buttonAction = null,
+                targetConsentLayer = null,
+                categories = emptyList(),
+                translations = null,
+                links = null,
+                consentLayerCategories = categoryElements,
+                showTrackingDetailsLink = false,
+                consentLayerCategoriesConfigId = null,
+                trackingDetailsLinkTranslations = null,
+            )
+        val layer =
+            ConsentLayer(
+                id =
+                    java.util.UUID
+                        .randomUUID()
+                        .toString(),
+                name = "Main Layer",
+                position = "bottom",
+                showCloseButton = true,
+                bannerApiId = "main",
+                elements = listOf(element),
+            )
+        val layout =
+            Layout(
+                id =
+                    java.util.UUID
+                        .randomUUID()
+                        .toString(),
+                name = "Default",
+                description = null,
+                status = "published",
+                defaultLayout = true,
+                collapsedOnMobile = false,
+                firstLayerId = layer.id,
+                consentLayers = mapOf(layer.id to layer),
+            )
+        return ConsentConfig(
+            version = "config-version-current",
+            consentContainerVersionId =
+                java.util.UUID
+                    .randomUUID()
+                    .toString(),
+            dgCustomerId = "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
+            p = System.currentTimeMillis(),
+            dch = "categorize",
+            dc = "dg-category-essential",
+            privacyDomain = "consent.datagrail.io",
+            plugins =
+                Plugins(
+                    scriptControl = true,
+                    allCookieSubdomains = true,
+                    cookieBlocking = true,
+                    localStorageBlocking = true,
+                    syncOTConsent = false,
+                ),
+            testMode = false,
+            ignoreDoNotTrack = false,
+            trackingDetailsUrl = "https://example.com/tracking",
+            consentMode = "optin",
+            showBanner = true,
+            consentPolicy = ConsentPolicy(name = "GDPR", default = true),
+            gppUsNat = false,
+            initialCategories =
+                InitialCategories(
+                    respectGpc = false,
+                    respectDnt = false,
+                    respectOptout = false,
+                    initial = listOf("category_essential"),
+                    gpc = emptyList(),
+                    optout = emptyList(),
+                ),
+            layout = layout,
+            consentProjectId = "proj_abc123",
+            universalConsent = UniversalConsentConfig(enabled = true, syncOptout = syncOptout),
+        )
+    }
+}

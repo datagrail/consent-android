@@ -502,8 +502,8 @@ class DataGrailConsent private constructor() {
 
     /**
      * Reset all consent data. Destructive: wipes every stored value (preferences, unique id, config
-     * cache, pending events, identity binding). To log a user out without wiping the device, use
-     * [clearUserIdentifier].
+     * cache, pending events, identity binding, CCPA opt-out flag). To log a user out without wiping
+     * the device, use [clearUserIdentifier].
      */
     fun reset() {
         manager?.reset()
@@ -515,8 +515,9 @@ class DataGrailConsent private constructor() {
      * Clears the identity binding recorded by [setUserIdentifier] and removes the stored explicit
      * consent choice, so reads return the config's defaults exactly as a fresh install on this
      * device would see: [needsConsent]/[shouldDisplayBanner] report the banner should show again and
-     * [hasUserConsent] is false. The consent-changed listener fires with the now-effective default
-     * preferences so you can re-gate your SDKs.
+     * [hasUserConsent] is false. The CCPA opt-out flag ([getCcpaOptout]) is cleared to false. The
+     * consent-changed listener fires with the now-effective default preferences so you can re-gate
+     * your SDKs.
      *
      * Non-destructive, unlike [reset]: makes no network call, does NOT delete or modify the user's
      * server-side universal consent record, and does not clear the device unique id, config cache,
@@ -528,6 +529,81 @@ class DataGrailConsent private constructor() {
      */
     fun clearUserIdentifier() {
         manager?.clearUserIdentifier { prefs -> onConsentChangedCallback?.invoke(prefs) }
+    }
+
+    /**
+     * Record the user's explicit CCPA/CPRA "Do Not Sell or Share My Personal Information" (DNSMPI)
+     * choice for this device (TRUST-2591).
+     *
+     * Call this from your app's own DNSMPI control. On Android the host app is the ONLY source of
+     * this value: there is no OS or browser do-not-sell signal on a native device, and the SDK does
+     * not auto-detect one (it does not read the deprecated IAB `IABUSPrivacy_String` key, the device
+     * ad-tracking signal, or anything else). The SDK never derives it from a category choice either.
+     *
+     * The choice is persisted locally and changes no category preference; the consent-changed
+     * listener does not fire. It is written to the user's universal consent record as `ccpa_optout`
+     * only when universal consent is enabled, the container's `universalConsent.sync_optout` flag is
+     * on, [setUserIdentifier] has succeeded in this process for the bound identity, and the user has
+     * an explicit consent choice stored. Otherwise it is kept locally and sent with the next
+     * universal consent write. A ccpa-only change does not count as an explicit consent choice, so
+     * on a login with no existing record it is not written on its own. A login that finds a record
+     * replaces this value with the record's; [clearUserIdentifier] clears it to false; [reset] wipes
+     * it.
+     *
+     * @param optedOut true when the user opted out of the sale/sharing of their personal information.
+     * @param callback Result of the (possible) write-through; the local flag is kept on failure.
+     */
+    fun setCcpaOptout(
+        optedOut: Boolean,
+        callback: (Result<Unit>) -> Unit,
+    ) {
+        // Persist synchronously so getCcpaOptout() reflects the choice immediately; the
+        // write-through (if any) then runs on the SDK scope like the other universal consent calls.
+        manager?.saveCcpaOptout(optedOut)
+        // Capture the identity-operation generation NOW, before the write-through is launched. A
+        // clearUserIdentifier()/reset() can land between this call and the launched coroutine running;
+        // passing the pre-launch generation lets setCcpaOptout detect it and skip BOTH the local
+        // re-persist and the POST, so a logout isn't silently undone by the trailing write-through.
+        val opGeneration = manager?.identityOperationGenerationSnapshot()
+        launchUniversalConsentOperation(callback, readSignal = false) { mgr, _ ->
+            mgr.setCcpaOptout(optedOut, opGeneration ?: mgr.identityOperationGenerationSnapshot())
+        }
+    }
+
+    /**
+     * Java-friendly [setCcpaOptout].
+     *
+     * @param optedOut true when the user opted out of the sale/sharing of their personal information.
+     * @param callback Callback interface for success/failure of the (possible) write-through.
+     */
+    fun setCcpaOptout(
+        optedOut: Boolean,
+        callback: ConsentCallback,
+    ) {
+        setCcpaOptout(optedOut) { result -> adaptResult(result, callback) }
+    }
+
+    /**
+     * [setCcpaOptout] without a callback; a write-through failure is logged.
+     *
+     * @param optedOut true when the user opted out of the sale/sharing of their personal information.
+     */
+    fun setCcpaOptout(optedOut: Boolean) {
+        setCcpaOptout(optedOut) { result ->
+            result.exceptionOrNull()?.let { ConsentLogger.w("setCcpaOptout write-through failed: ${it.message}") }
+        }
+    }
+
+    /**
+     * The user's CCPA/CPRA "Do Not Sell or Share" choice as last recorded on this device by
+     * [setCcpaOptout] or adopted from a found universal consent record (TRUST-2591).
+     *
+     * @return true when the user opted out; false when they did not or nothing is recorded.
+     * @throws ConsentException.NotInitialized if SDK not initialized
+     */
+    fun getCcpaOptout(): Boolean {
+        val mgr = manager ?: throw ConsentException.NotInitialized()
+        return mgr.getCcpaOptout()
     }
 
     /**
@@ -614,13 +690,16 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param getSignature Java-friendly signature provider (calls the customer's backend).
      * @param callback Callback interface for success/failure.
      */
     fun setUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         getSignature: SignatureProviderCallback,
         callback: ConsentCallback,
     ) {
@@ -656,6 +735,12 @@ class DataGrailConsent private constructor() {
      *   defaults are never seeded.
      * "Nothing written" still reports success.
      *
+     * CCPA opt-out (TRUST-2591): every write carries this device's [getCcpaOptout] flag as
+     * `ccpa_optout` when the container's `universalConsent.sync_optout` flag is on (otherwise
+     * `false`). A login that finds a record sets the local flag to the record's value; a re-sync that
+     * writes the local choice through keeps the local flag. A ccpa-only change never triggers a write
+     * on its own.
+     *
      * What the SDK cannot detect: a logout it is not told about (call [clearUserIdentifier] on
      * logout); whether a pre-login choice was made by the person now logging in or by a previous
      * user of a shared device (an explicit choice on an unbound device is attached on a no-record
@@ -678,14 +763,17 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param getSignature Suspend provider that signs the SDK-built payload and returns
      *   { signature, keyId }.
      * @param callback Callback with the result.
      */
     fun setUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         getSignature: SignatureProvider,
         callback: (Result<Unit>) -> Unit,
     ) {
@@ -704,12 +792,15 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param callback Callback with the result.
      */
     fun setUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: (Result<Unit>) -> Unit,
     ) {
         launchSetUserIdentifier(identifier, apiKey, getSignature = null, callback = callback)
@@ -724,12 +815,15 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier (e.g. email). Normalized (Unicode NFC → trim →
      *   lowercase) before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param callback Callback interface for success/failure.
      */
     fun setUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: ConsentCallback,
     ) {
         setUserIdentifier(identifier, apiKey) { result -> adaptResult(result, callback) }
@@ -749,6 +843,7 @@ class DataGrailConsent private constructor() {
      */
     private fun <T> launchUniversalConsentOperation(
         callback: (Result<T>) -> Unit,
+        readSignal: Boolean = true,
         block: suspend (manager: ConsentManager, trackingSignal: TrackingSignal) -> T,
     ) {
         val mgr = manager
@@ -761,7 +856,12 @@ class DataGrailConsent private constructor() {
 
         scope.launch {
             try {
-                val trackingSignal = readTrackingSignal(context)
+                // Only the paths that apply the device signal (setUserIdentifier/fetch/rehydrate) pay
+                // the up-to-3s tracking-signal binder read. setCcpaOptout ignores the signal entirely,
+                // so reading it there would add latency to every opt-out toggle for a value never used
+                // (and widen the window a logout can race the write-through in). NOT_DETERMINED is the
+                // same neutral value a timed-out read yields.
+                val trackingSignal = if (readSignal) readTrackingSignal(context) else TrackingSignal.NOT_DETERMINED
                 callback(Result.success(block(mgr, trackingSignal)))
             } catch (e: CancellationException) {
                 // Never swallow cancellation — let it propagate so the coroutine unwinds normally
@@ -787,7 +887,7 @@ class DataGrailConsent private constructor() {
      */
     private fun launchSetUserIdentifier(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         getSignature: SignatureProvider?,
         callback: (Result<Unit>) -> Unit,
     ) {
@@ -811,12 +911,15 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
      *   before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param callback Callback with the record (null if no record exists) or a failure.
      */
     fun fetchUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: (Result<UniversalConsentRecord?>) -> Unit,
     ) {
         launchUniversalConsentOperation(callback) { mgr, trackingSignal ->
@@ -832,12 +935,15 @@ class DataGrailConsent private constructor() {
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase)
      *   before hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param callback Callback interface for success (record, possibly null) / failure.
      */
     fun fetchUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: UniversalConsentCallback,
     ) {
         fetchUniversalConsent(identifier, apiKey) { result ->
@@ -863,14 +969,25 @@ class DataGrailConsent private constructor() {
      * A read miss leaves local state untouched and writes nothing — "no record" is the absence of
      * a signal, not a denial, so the banner still shows.
      *
+     * The returned flag reports whether CATEGORY preferences were rehydrated. A found record that
+     * carries no category choice (a signal-only record, e.g. a `ccpa_optout` set on the web before
+     * any category was chosen) returns false — the banner must still show, as no categories were
+     * restored — yet, when `universalConsent.syncOptout` is on, that record's `ccpa_optout` is still
+     * adopted into the local flag ([getCcpaOptout]). So a false return does not guarantee the CCPA
+     * flag was untouched; it guarantees only that no category preferences were applied.
+     *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase) before
      *   hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
-     * @param callback Callback with true when local state was rehydrated from a stored record.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
+     * @param callback Callback with true when category preferences were rehydrated from a stored
+     *   record (see above: a signal-only record returns false but may still adopt its `ccpa_optout`).
      */
     fun rehydrateFromUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: (Result<Boolean>) -> Unit,
     ) {
         launchUniversalConsentOperation(callback) { mgr, trackingSignal ->
@@ -886,16 +1003,21 @@ class DataGrailConsent private constructor() {
      * Rehydrate local consent state from the DataGrail Universal Consent store (Java-friendly).
      *
      * Thin adapter over the Kotlin lambda overload. [RehydrateCallback.onSuccess] receives false
-     * when no record existed for the user, in which case local state is untouched.
+     * when no category preferences were rehydrated — a genuine miss (local state untouched), or a
+     * found signal-only record that carries no category choice (its `ccpa_optout` may still have
+     * been adopted when `universalConsent.syncOptout` is on; see the Kotlin overload).
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase) before
      *   hashing, per the canonical cross-SDK contract.
-     * @param apiKey The customer's DataGrail API key.
+     * @param apiKey The customer's DataGrail edge API key. Optional (TRUST-2603): pass `null` to
+     *   fall back to `universalConsent.apiKey` from config.json, which lets the key rotate
+     *   server-side with no client release. An explicit value takes precedence; the call fails with
+     *   a ValidationError if neither is present.
      * @param callback Callback interface for success (rehydrated true/false) / failure.
      */
     fun rehydrateFromUniversalConsent(
         identifier: String,
-        apiKey: String,
+        apiKey: String?,
         callback: RehydrateCallback,
     ) {
         rehydrateFromUniversalConsent(identifier, apiKey) { result ->
