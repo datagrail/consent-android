@@ -595,13 +595,21 @@ internal class ConsentManager(
                 // A logout landed during the read: leave its neutral state in place rather than
                 // adopting/replacing local state for an identity the device is no longer bound to.
                 if (identityOperationGeneration.get() != opGeneration) return
-                if (record != null) {
-                    // The record is authoritative for the stored CCPA choice; a pre-login local
-                    // value is dropped exactly like the categories.
-                    storage.saveCcpaOptout(record.ccpaOptout)
-                } else if (boundToOther) {
-                    // The previous identity's flag must not carry over to this one.
-                    storage.clearCcpaOptout()
+                // Only adopt/clear the CCPA flag on login when syncOptout is on — the same gate the
+                // rehydrate path applies. With the gate OFF the SDK never writes the choice to the
+                // record, so the record's ccpa_optout is not authoritative; adopting it (or clearing
+                // on a login away from another identity) would silently erase a local-only
+                // setCcpaOptout the user made. With the gate off the flag stays device-local, exactly
+                // as the re-sync path leaves it.
+                if (config.universalConsent?.syncOptout == true) {
+                    if (record != null) {
+                        // The record is authoritative for the stored CCPA choice; a pre-login local
+                        // value is dropped exactly like the categories.
+                        storage.saveCcpaOptout(record.ccpaOptout)
+                    } else if (boundToOther) {
+                        // The previous identity's flag must not carry over to this one.
+                        storage.clearCcpaOptout()
+                    }
                 }
                 when {
                     record == null -> {
@@ -757,37 +765,63 @@ internal class ConsentManager(
      * stays local and rides the next universal consent write. A failed write throws; the local flag
      * is kept.
      */
-    suspend fun setCcpaOptout(optedOut: Boolean) {
-        // Token for this write, captured up front. A clearUserIdentifier()/reset() that lands between
-        // here and the write-through below bumps it, so the POST aborts rather than landing an opt-out
-        // against an identity the device just left — the same stale-write corruption guard
-        // (TRUST-2491/TRUST-2902) every other identity-scoped write in this file carries. The
-        // bound-hash check below already rejects a logout that completed before these reads; this
-        // adds the generation dimension (and covers a reset()+re-login to the same hash, where the
-        // bound hash matches again but the captured session is stale).
-        val opGeneration = identityOperationGeneration.get()
+    /**
+     * Snapshot of the identity-operation generation. The public adapter captures this SYNCHRONOUSLY,
+     * before it launches [setCcpaOptout]'s write-through on a coroutine scope, so a
+     * clearUserIdentifier()/reset() that lands between the host's call and the launched coroutine
+     * actually running is detected — otherwise the coroutine would re-persist the opt-out the logout
+     * just cleared (TRUST-2591).
+     */
+    internal fun identityOperationGenerationSnapshot(): Int = identityOperationGeneration.get()
+
+    suspend fun setCcpaOptout(
+        optedOut: Boolean,
+        opGeneration: Int = identityOperationGeneration.get(),
+    ) {
+        // Token for this write. The public adapter persists the flag synchronously and then LAUNCHES
+        // this coroutine, so a clearUserIdentifier()/reset() can land before it even starts; the
+        // adapter captures the generation up front and passes it here so a logout the launch raced is
+        // seen. If it changed, the logout already returned the device to neutral and cleared the flag,
+        // so bail BEFORE re-persisting it locally — re-saving here would resurrect an opt-out on a
+        // logged-out device. Direct callers (and the unit tests) capture the generation at entry via
+        // the default argument. Same stale-write corruption guard (TRUST-2491/TRUST-2902) every other
+        // identity-scoped operation in this file carries.
+        if (identityOperationGeneration.get() != opGeneration) return
         storage.saveCcpaOptout(optedOut)
         val config = currentConfig ?: return
         val universalConsent = config.universalConsent ?: return
         if (!universalConsent.enabled || !universalConsent.syncOptout) return
         val session = universalConsentSession ?: return
-        if (session.userHash != storage.loadBoundUserHash()) return
-        val localChoice = storage.loadPreferences() ?: return
-        // A logout/reset landed while this call was being prepared: don't write through to the
-        // now-unbound (or re-bound) identity.
-        if (identityOperationGeneration.get() != opGeneration) return
-        consentService.saveUniversalConsent(
-            config = config,
-            identifier = session.identifier,
-            preferences =
-                UniversalConsentPreferences(
-                    isCustomised = localChoice.isCustomised,
-                    cookieOptions = localChoice.cookieOptions.associate { it.gtmKey to it.isEnabled },
-                ),
-            apiKey = session.apiKey,
-            ccpaOptout = optedOut,
-            getSignature = session.getSignature,
-        )
+        // Serialize the write-through with the identity operations (setUserIdentifier/logout) that
+        // take this same mutex. Without it a setUserIdentifier that rebinds to a different identity
+        // could land between the checks and the suspended POST, and two rapid toggles could complete
+        // out of order and leave the server with the older flag. Under the lock we re-read the
+        // binding, the generation and the stored flag so the write reflects the current identity and
+        // the LATEST value, and completion order can never reverse the user's intent.
+        setUserIdentifierMutex.withLock {
+            if (identityOperationGeneration.get() != opGeneration) return@withLock
+            // The bound hash moved (a logout, or a login to another identity) — the captured session
+            // is no longer the bound one, so don't POST to it.
+            if (session.userHash != storage.loadBoundUserHash()) return@withLock
+            val localChoice = storage.loadPreferences() ?: return@withLock
+            // A logout/reset landed while preparing the write (including during the reads above):
+            // don't write through to the now-unbound (or re-bound) identity.
+            if (identityOperationGeneration.get() != opGeneration) return@withLock
+            consentService.saveUniversalConsent(
+                config = config,
+                identifier = session.identifier,
+                preferences =
+                    UniversalConsentPreferences(
+                        isCustomised = localChoice.isCustomised,
+                        cookieOptions = localChoice.cookieOptions.associate { it.gtmKey to it.isEnabled },
+                    ),
+                apiKey = session.apiKey,
+                // The LATEST stored flag, not the captured parameter: two rapid toggles that complete
+                // out of order then both land the final value instead of reversing the user's intent.
+                ccpaOptout = storage.loadCcpaOptout(),
+                getSignature = session.getSignature,
+            )
+        }
     }
 
     /** Persist the CCPA opt-out flag locally only (the adapter's synchronous half of [setCcpaOptout]). */

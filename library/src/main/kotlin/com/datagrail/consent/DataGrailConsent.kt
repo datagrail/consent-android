@@ -560,7 +560,14 @@ class DataGrailConsent private constructor() {
         // Persist synchronously so getCcpaOptout() reflects the choice immediately; the
         // write-through (if any) then runs on the SDK scope like the other universal consent calls.
         manager?.saveCcpaOptout(optedOut)
-        launchUniversalConsentOperation(callback, readSignal = false) { mgr, _ -> mgr.setCcpaOptout(optedOut) }
+        // Capture the identity-operation generation NOW, before the write-through is launched. A
+        // clearUserIdentifier()/reset() can land between this call and the launched coroutine running;
+        // passing the pre-launch generation lets setCcpaOptout detect it and skip BOTH the local
+        // re-persist and the POST, so a logout isn't silently undone by the trailing write-through.
+        val opGeneration = manager?.identityOperationGenerationSnapshot()
+        launchUniversalConsentOperation(callback, readSignal = false) { mgr, _ ->
+            mgr.setCcpaOptout(optedOut, opGeneration ?: mgr.identityOperationGenerationSnapshot())
+        }
     }
 
     /**
@@ -944,10 +951,18 @@ class DataGrailConsent private constructor() {
      * A read miss leaves local state untouched and writes nothing — "no record" is the absence of
      * a signal, not a denial, so the banner still shows.
      *
+     * The returned flag reports whether CATEGORY preferences were rehydrated. A found record that
+     * carries no category choice (a signal-only record, e.g. a `ccpa_optout` set on the web before
+     * any category was chosen) returns false — the banner must still show, as no categories were
+     * restored — yet, when `universalConsent.syncOptout` is on, that record's `ccpa_optout` is still
+     * adopted into the local flag ([getCcpaOptout]). So a false return does not guarantee the CCPA
+     * flag was untouched; it guarantees only that no category preferences were applied.
+     *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase) before
      *   hashing, per the canonical cross-SDK contract.
      * @param apiKey The customer's DataGrail API key.
-     * @param callback Callback with true when local state was rehydrated from a stored record.
+     * @param callback Callback with true when category preferences were rehydrated from a stored
+     *   record (see above: a signal-only record returns false but may still adopt its `ccpa_optout`).
      */
     fun rehydrateFromUniversalConsent(
         identifier: String,
@@ -967,7 +982,9 @@ class DataGrailConsent private constructor() {
      * Rehydrate local consent state from the DataGrail Universal Consent store (Java-friendly).
      *
      * Thin adapter over the Kotlin lambda overload. [RehydrateCallback.onSuccess] receives false
-     * when no record existed for the user, in which case local state is untouched.
+     * when no category preferences were rehydrated — a genuine miss (local state untouched), or a
+     * found signal-only record that carries no category choice (its `ccpa_optout` may still have
+     * been adopted when `universalConsent.syncOptout` is on; see the Kotlin overload).
      *
      * @param identifier The user identifier. Normalized (Unicode NFC → trim → lowercase) before
      *   hashing, per the canonical cross-SDK contract.

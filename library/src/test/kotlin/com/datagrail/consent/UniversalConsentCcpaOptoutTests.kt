@@ -168,6 +168,53 @@ class UniversalConsentCcpaOptoutTests {
             assertFalse(sut.getCcpaOptout())
         }
 
+    @Test
+    fun `setter skips the stale re-persist when a logout landed before the write-through ran`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey) // binds the identity
+
+            // The adapter persists the flag synchronously and captures the generation, THEN launches
+            // the write-through. Simulate a clearUserIdentifier() landing in that gap: it bumps the
+            // generation and clears the flag before the launched coroutine runs with the stale token.
+            val opGeneration = sut.identityOperationGenerationSnapshot()
+            sut.saveCcpaOptout(true) // the adapter's synchronous persist
+            sut.clearUserIdentifier() // logout lands before the launched write-through
+
+            sut.setCcpaOptout(true, opGeneration) // the launched coroutine, carrying the pre-logout token
+
+            // The stale coroutine neither re-persisted the opt-out nor wrote through: the logout's
+            // neutral state stands.
+            assertFalse(sut.getCcpaOptout())
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
+        }
+
+    @Test
+    fun `write-through posts the latest stored flag, not the captured parameter`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey)
+            assertEquals(listOf(false), writtenCcpa())
+
+            // A newer toggle reaches storage after this call persisted its own value but before the
+            // POST reads it back — the write must carry the LATEST stored flag so two rapid toggles
+            // completing out of order cannot reverse the user's intent.
+            var bumped = false
+            whenever(mockStorage.loadPreferences()).doAnswer {
+                if (!bumped) {
+                    bumped = true
+                    storedCcpaOptout = false
+                }
+                storedPreferences
+            }
+
+            sut.setCcpaOptout(true)
+
+            assertEquals(listOf(false, false), writtenCcpa())
+        }
+
     // MARK: - Wire field
 
     @Test
@@ -252,6 +299,21 @@ class UniversalConsentCcpaOptoutTests {
 
             verifyNoWrite()
             assertFalse(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `login found record keeps a local-only flag with the gate off`() =
+        runTest {
+            // With syncOptout off the SDK never writes the choice to the record, so the record's
+            // ccpa_optout is not authoritative; a login must not overwrite a local-only opt-out with
+            // it. Mirrors the re-sync gate-off behaviour.
+            sut.currentConfig = config(syncOptout = false)
+            storedCcpaOptout = true
+            recordIs(record(ccpaOptout = false))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertTrue(sut.getCcpaOptout())
         }
 
     @Test
