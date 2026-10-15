@@ -8,6 +8,7 @@ import androidx.security.crypto.MasterKeys
 import com.datagrail.consent.models.ConsentConfig
 import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.ConsentPreferences
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -35,6 +36,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         private const val KEY_BOUND_USER_HASH = "datagrail_consent_bound_user_hash"
         private const val KEY_CCPA_OPTOUT = "datagrail_consent_ccpa_optout"
         private const val KEY_CCPA_WRITE_PENDING = "datagrail_consent_ccpa_write_pending"
+        private const val KEY_SYNC_STATE = "datagrail_consent_sync_state"
 
         /**
          * Create a ConsentStorage backed by EncryptedSharedPreferences
@@ -175,10 +177,44 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
     }
 
     /**
-     * Remove the identity binding (logout). Does not touch any other stored data.
+     * Remove the identity binding (logout), and the sync state that belongs to it. Does not touch
+     * any other stored data.
      */
     fun clearBoundUserHash() {
-        prefs.edit().remove(KEY_BOUND_USER_HASH).apply()
+        prefs
+            .edit()
+            .remove(KEY_BOUND_USER_HASH)
+            .remove(KEY_SYNC_STATE)
+            .apply()
+    }
+
+    /**
+     * Persist what the last successful universal consent sync left for the bound identity, so a
+     * re-sync after a process restart can still tell whether the user changed anything since.
+     * Holds consent maps and the user hash only, never the raw identifier.
+     */
+    fun saveSyncState(state: UniversalConsentSyncState) {
+        try {
+            prefs.edit().putString(KEY_SYNC_STATE, json.encodeToString(state)).apply()
+        } catch (e: Exception) {
+            // Without it the next re-sync treats the stored choice as a change and writes it.
+            clearSyncState()
+        }
+    }
+
+    /** The persisted sync state, or null when none is stored. */
+    fun loadSyncState(): UniversalConsentSyncState? {
+        val jsonString = prefs.getString(KEY_SYNC_STATE, null) ?: return null
+        return try {
+            json.decodeFromString<UniversalConsentSyncState>(jsonString)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Forget the persisted sync state: the next re-sync treats the stored choice as a user change. */
+    fun clearSyncState() {
+        prefs.edit().remove(KEY_SYNC_STATE).apply()
     }
 
     // MARK: - CCPA opt-out (TRUST-2591)
@@ -349,3 +385,22 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         prefs.edit().clear().apply()
     }
 }
+
+/**
+ * What the last successful universal consent sync left on this device (TRUST-2902), persisted next
+ * to the bound user hash so it survives a process restart.
+ *
+ * @property userHash The bound identity this state belongs to. It is ignored for any other identity.
+ * @property syncedLocal The stored local choice right after the sync. After an adopt this is the
+ *   SIGNAL-RECONCILED view (GPC, the device ad-tracking signal or the record's ccpa_optout can force
+ *   categories off), so it must never be written back as though the user chose it. Null when nothing
+ *   was stored.
+ * @property syncedRaw The RAW choice the record held after the sync: what it wrote, or the record it
+ *   adopted. Null on a miss with nothing written, or a signal-only record.
+ */
+@Serializable
+internal data class UniversalConsentSyncState(
+    val userHash: String,
+    val syncedLocal: ConsentPreferences?,
+    val syncedRaw: ConsentPreferences?,
+)

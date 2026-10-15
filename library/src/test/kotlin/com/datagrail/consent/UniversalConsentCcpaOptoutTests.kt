@@ -4,6 +4,7 @@ import com.datagrail.consent.models.*
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
+import com.datagrail.consent.storage.UniversalConsentSyncState
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -47,6 +48,7 @@ class UniversalConsentCcpaOptoutTests {
     private var storedCcpaOptout = false
     private var storedBoundHash: String? = null
     private var storedCcpaWritePending = false
+    private var storedSyncState: UniversalConsentSyncState? = null
 
     private val userA = "alice@example.com"
     private val userB = "bob@example.com"
@@ -59,6 +61,10 @@ class UniversalConsentCcpaOptoutTests {
         storedCcpaOptout = false
         storedBoundHash = null
         storedCcpaWritePending = false
+        storedSyncState = null
+        whenever(mockStorage.saveSyncState(any())).doAnswer { storedSyncState = it.getArgument(0) }
+        whenever(mockStorage.loadSyncState()).doAnswer { storedSyncState }
+        whenever(mockStorage.clearSyncState()).doAnswer { storedSyncState = null }
         whenever(mockStorage.saveCcpaWritePending(any())).doAnswer { storedCcpaWritePending = it.getArgument(0) }
         whenever(mockStorage.loadCcpaWritePending()).doAnswer { storedCcpaWritePending }
         whenever(mockStorage.savePreferences(any())).doAnswer { storedPreferences = it.getArgument(0) }
@@ -69,7 +75,10 @@ class UniversalConsentCcpaOptoutTests {
         whenever(mockStorage.clearCcpaOptout()).doAnswer { storedCcpaOptout = false }
         whenever(mockStorage.saveBoundUserHash(any())).doAnswer { storedBoundHash = it.getArgument(0) }
         whenever(mockStorage.loadBoundUserHash()).doAnswer { storedBoundHash }
-        whenever(mockStorage.clearBoundUserHash()).doAnswer { storedBoundHash = null }
+        whenever(mockStorage.clearBoundUserHash()).doAnswer {
+            storedBoundHash = null
+            storedSyncState = null
+        }
         sut = ConsentManager(mockStorage, mockConfigService, mockConsentService)
         sut.currentConfig = config(syncOptout = true)
     }
@@ -577,8 +586,8 @@ class UniversalConsentCcpaOptoutTests {
             resync.join()
             setter.join()
 
-            // The login seed and the re-sync's own write; no write-through from the setter.
-            verify(mockConsentService, times(2)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
+            // Only the login seed: the unchanged re-sync writes nothing, and the setter doesn't write through.
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
         }
 
     // MARK: - Raw choice on the write-through (TRUST-3074)
@@ -629,7 +638,7 @@ class UniversalConsentCcpaOptoutTests {
         }
 
     @Test
-    fun `same-identity re-sync with nothing changed writes the raw choice, not the suppressed view`() =
+    fun `same-identity re-sync with nothing changed writes nothing, not the suppressed view`() =
         runTest {
             recordIs(record(ccpaOptout = false))
             sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
@@ -637,9 +646,9 @@ class UniversalConsentCcpaOptoutTests {
 
             sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
 
-            // Android's re-sync writes any local choice through; it must be the record's raw choice.
-            val written = writtenPreferences().single()
-            assertEquals(true, written.cookieOptions["category_marketing"])
+            // Nothing changed on this device, so the record is adopted and nothing is re-sent.
+            verifyNoWrite()
+            assertEquals(choice(marketing = false), storedPreferences)
         }
 
     // MARK: - Neutral / reset
@@ -711,112 +720,5 @@ class UniversalConsentCcpaOptoutTests {
             ccpaOptout = ccpaOptout,
         )
 
-    private fun config(syncOptout: Boolean): ConsentConfig {
-        val categoryElements =
-            listOf("category_essential" to true, "category_marketing" to false).map { (gtmKey, alwaysOn) ->
-                ConsentLayerCategory(
-                    id =
-                        java.util.UUID
-                            .randomUUID()
-                            .toString(),
-                    consentCategoryId =
-                        java.util.UUID
-                            .randomUUID()
-                            .toString(),
-                    order = 1,
-                    hidden = false,
-                    primitive = "dg-category-essential",
-                    alwaysOn = alwaysOn,
-                    gtmKey = gtmKey,
-                    uuids = emptyList(),
-                    cookiePatterns = emptyList(),
-                    translations = emptyMap(),
-                    showTrackingDetailsLink = false,
-                )
-            }
-        val element =
-            ConsentLayerElement(
-                id =
-                    java.util.UUID
-                        .randomUUID()
-                        .toString(),
-                order = 1,
-                type = "ConsentLayerCategoryElement",
-                style = null,
-                buttonAction = null,
-                targetConsentLayer = null,
-                categories = emptyList(),
-                translations = null,
-                links = null,
-                consentLayerCategories = categoryElements,
-                showTrackingDetailsLink = false,
-                consentLayerCategoriesConfigId = null,
-                trackingDetailsLinkTranslations = null,
-            )
-        val layer =
-            ConsentLayer(
-                id =
-                    java.util.UUID
-                        .randomUUID()
-                        .toString(),
-                name = "Main Layer",
-                position = "bottom",
-                showCloseButton = true,
-                bannerApiId = "main",
-                elements = listOf(element),
-            )
-        val layout =
-            Layout(
-                id =
-                    java.util.UUID
-                        .randomUUID()
-                        .toString(),
-                name = "Default",
-                description = null,
-                status = "published",
-                defaultLayout = true,
-                collapsedOnMobile = false,
-                firstLayerId = layer.id,
-                consentLayers = mapOf(layer.id to layer),
-            )
-        return ConsentConfig(
-            version = "config-version-current",
-            consentContainerVersionId =
-                java.util.UUID
-                    .randomUUID()
-                    .toString(),
-            dgCustomerId = "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
-            p = System.currentTimeMillis(),
-            dch = "categorize",
-            dc = "dg-category-essential",
-            privacyDomain = "consent.datagrail.io",
-            plugins =
-                Plugins(
-                    scriptControl = true,
-                    allCookieSubdomains = true,
-                    cookieBlocking = true,
-                    localStorageBlocking = true,
-                    syncOTConsent = false,
-                ),
-            testMode = false,
-            ignoreDoNotTrack = false,
-            trackingDetailsUrl = "https://example.com/tracking",
-            consentMode = "optin",
-            showBanner = true,
-            consentPolicy = ConsentPolicy(name = "GDPR", default = true),
-            gppUsNat = false,
-            initialCategories =
-                InitialCategories(
-                    respectGpc = false,
-                    respectDnt = false,
-                    respectOptout = false,
-                    initial = listOf("category_essential"),
-                    gpc = emptyList(),
-                    optout = emptyList(),
-                ),
-            layout = layout,
-            consentProjectId = "proj_abc123",
-            universalConsent = UniversalConsentConfig(enabled = true, syncOptout = syncOptout),
-        )
-    }
+    private fun config(syncOptout: Boolean): ConsentConfig = universalConsentTestConfig(syncOptout)
 }

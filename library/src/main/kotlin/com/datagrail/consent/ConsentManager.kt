@@ -13,6 +13,7 @@ import com.datagrail.consent.models.essentialCategoryKeys
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
+import com.datagrail.consent.storage.UniversalConsentSyncState
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicInteger
@@ -49,12 +50,19 @@ internal class ConsentManager(
     // alone instead of adopting or clearing over it (TRUST-2591).
     private val ccpaChoiceRevision = AtomicInteger(0)
 
-    // Bumped on every user consent choice saved through savePreferences. A UC session's syncedRaw is
-    // only valid while this still holds the value it had when that sync started: once the user saves
-    // a choice of their own, the setCcpaOptout write-through sends it rather than the record's raw
-    // choice (TRUST-3074). A counter rather than clearing the field on the session, so a save that
-    // races a login or logout can never write a stale session back.
+    // Bumped on every user consent choice saved through savePreferences, which also clears the
+    // persisted sync state. A sync captures it with the stored view it records as synced, before any
+    // write, and records nothing if it moved by the time the sync binds: a save made while the write
+    // was in flight is still a user change the next re-sync writes (TRUST-2902, TRUST-3074).
     private val preferencesSaveRevision = AtomicInteger(0)
+
+    init {
+        // The persisted sync state only describes the identity it was recorded for.
+        val state = storage.loadSyncState()
+        if (state != null && state.userHash != storage.loadBoundUserHash()) {
+            storage.clearSyncState()
+        }
+    }
 
     // MARK: - Configuration
 
@@ -167,8 +175,10 @@ internal class ConsentManager(
             // Save locally
             storage.savePreferences(preferences)
             storage.saveConfigVersion(config.version)
-            // The user's own choice now replaces what the last sync left (TRUST-3074).
+            // The user's own choice now replaces what the last sync left: the next re-sync writes it,
+            // and a setCcpaOptout write-through sends it rather than the record's raw choice.
             preferencesSaveRevision.incrementAndGet()
+            storage.clearSyncState()
 
             // Send to backend
             consentService.savePreferences(preferences, config)
@@ -519,10 +529,7 @@ internal class ConsentManager(
      * keeps any ATT/GPC-suppressed view out of the write body: the store holds raw choices and the
      * server never merges, so suppressing before a write would persist this device's transient
      * signal for every device on this identifier. Suppression stays a read-time view (see
-     * [SignalReconciliation]). A capture taken after an earlier sync in this process adopted a record
-     * is itself the reconciled view, so while it is unchanged since that sync a re-sync writes the
-     * raw choice the sync bound instead (TRUST-3074, see [UniversalConsentSession.rawChoice]). After a
-     * process restart that session is gone and the stored view is written as captured.
+     * [SignalReconciliation]).
      *
      * LOGIN vs RE-SYNC (TRUST-2902). The device persists the user hash (never the raw identifier) of
      * the identity it is bound to; it is set only here, only after the call succeeds, and cleared by
@@ -545,9 +552,14 @@ internal class ConsentManager(
      *   identity). Otherwise nothing is written; if a different identity was bound and local state
      *   exists, it returns to NEUTRAL (the same local operation as [clearUserIdentifier], minus
      *   clearing the binding) so that user's state does not linger.
-     * - RE-SYNC (bound to this identity): a found record is adopted, and a local choice is written
-     *   through (sync-on-change) as before. On a miss only an explicit local choice is written;
-     *   config defaults are never seeded.
+     * - RE-SYNC (bound to this identity): sync-on-change, decided on-device. With NO local change
+     *   since the last sync (storage still holds what that sync left and no [savePreferences] since,
+     *   as recorded in the persisted [UniversalConsentSyncState]) a found record is adopted and
+     *   NOTHING is written, found, missing or signal-only alike: the edge stamps every write with its
+     *   write time, so re-sending an unchanged choice would beat a newer one another device made.
+     *   That state is persisted, so this holds after a process restart too, and a signal-suppressed
+     *   view is never written back. After a local change the stored choice is written through; on a
+     *   miss only an explicit local choice is written; config defaults are never seeded.
      * "Nothing written" still returns normally. The SDK cannot tell whether a pre-login choice was
      * made by the person now logging in or a previous user of a shared device (an explicit choice
      * on an unbound device is attached on a no-record login by design), does no heuristic
@@ -561,9 +573,9 @@ internal class ConsentManager(
      * record clears it whatever the gate (it was that user's). Neither happens over a setter call
      * that landed while the read was in flight. A RE-SYNC that writes the local choice through keeps the
      * local flag (it is what the record now holds); one that only adopts takes the record's value
-     * when `syncOptout` is on (with the gate off the record never carries the choice). A
-     * ccpa-only local change is not an explicit category choice, so on its own it never triggers a
-     * write.
+     * when `syncOptout` is on (with the gate off the record never carries the choice) unless a bound
+     * choice is still pending. A ccpa-only local change is not an explicit category choice, so on its
+     * own it never triggers a write.
      *
      * The raw identifier is kept in memory only, in the session [setCcpaOptout] writes through
      * with, and is cleared by [clearUserIdentifier] and [reset]; only its hash is persisted.
@@ -636,9 +648,9 @@ internal class ConsentManager(
         // the capture above: nothing below adopts or clears over it, and a write carries it.
         val ccpaRevisionAtEntry = ccpaChoiceRevision.get()
         val ccpaChangedMidFlight = { ccpaChoiceRevision.get() != ccpaRevisionAtEntry }
-        // A user choice saved while this call is suspended means the stored view at bind time is not
-        // what this sync left, so the session gets no syncedRaw (TRUST-3074).
-        val saveRevisionAtEntry = preferencesSaveRevision.get()
+        // The user changed nothing on this device since the last sync for this identity: the record
+        // is adopted and nothing is written (TRUST-2902).
+        val unchangedSinceSync = isResync && unchangedSinceSync(localChoice, userHash)
         // The RAW choice the record holds once this call is done: what it wrote, or the record's own
         // choice it adopted. Null when neither (a miss with nothing written, a signal-only record).
         var syncedRaw: ConsentPreferences? = null
@@ -652,31 +664,20 @@ internal class ConsentManager(
         // against elsewhere via essentialCategories(config)/reconciledCookieOptions).
         val toWrite: ConsentPreferences? =
             if (isResync) {
-                // After a login or rehydrate adopt the stored choice is the SIGNAL-RECONCILED view
-                // (GPC or device ad-tracking suppression applied), not the user's own. While it is
-                // still exactly what the last sync in this process left, the user's choice is the
-                // raw one that sync bound, so that is what a write here carries (TRUST-3074).
-                val resyncChoice =
-                    localChoice?.let { stored ->
-                        universalConsentSession
-                            ?.takeIf { it.userHash == userHash }
-                            ?.rawChoice(stored, preferencesSaveRevision.get())
-                            ?: stored
-                    }
-                // RE-SYNC: unchanged. Rehydrate adopts any found record (a record without a choice
-                // counts as a miss here, as before); a local choice is written through
-                // (sync-on-change), and a found record with no local change is adopted without a
-                // POST. On a miss only an explicit local choice is written; defaults are never seeded.
-                // A found record is written over whenever a local choice exists, so the local CCPA
-                // flag takes the record's value only when nothing will be written back (and, as in
-                // rehydrate, only with the syncOptout gate on).
+                // With no local change since the last sync, the stored choice is that sync's view
+                // (after an adopt, the SIGNAL-RECONCILED one), not something the user chose, so it is
+                // never written. Otherwise the user changed it and it is written through.
+                val resyncChoice = localChoice?.takeUnless { unchangedSinceSync }
+                // RE-SYNC. Rehydrate adopts any found record (a record without a choice counts as a
+                // miss here, as before). The local CCPA flag takes the record's value only when
+                // nothing will be written back (and, as in rehydrate, only with the syncOptout gate on).
                 val rawFromRecord =
                     rehydrateReturningRawPreferences(
                         identifier,
                         resolvedApiKey,
                         trackingSignal,
                         config,
-                        adoptCcpaOptout = localChoice == null,
+                        adoptCcpaOptout = resyncChoice == null,
                         opGeneration = opGeneration,
                         ccpaRevision = ccpaRevisionAtEntry,
                     )
@@ -690,8 +691,12 @@ internal class ConsentManager(
                 if (rawFromRecord != null) {
                     getCategories()?.let { onRehydrated?.invoke(it) }
                 }
-                // Nothing to write: the record's raw choice (if any) is what was just adopted.
-                if (resyncChoice == null) syncedRaw = rawFromRecord
+                // Nothing to write: the record's raw choice (if any) is what was just adopted. An
+                // unchanged re-sync that read none (a miss, a signal-only record) keeps the raw choice
+                // the last sync recorded, since local state is still the view built from it.
+                if (resyncChoice == null) {
+                    syncedRaw = rawFromRecord ?: syncState(userHash)?.syncedRaw?.takeIf { unchangedSinceSync }
+                }
                 resyncChoice
             } else {
                 // LOGIN. Reads the record directly so a found record without a choice is told apart
@@ -700,6 +705,8 @@ internal class ConsentManager(
                 // A logout landed during the read: leave its neutral state in place rather than
                 // adopting/replacing local state for an identity the device is no longer bound to.
                 if (identityOperationGeneration.get() != opGeneration) return
+                // The other identity's sync state never describes this one.
+                if (boundToOther) storage.clearSyncState()
                 val ccpaChanged = ccpaChangedMidFlight()
                 if (!ccpaChanged) {
                     // A login replaces local state, so a pending marker from before it is dropped.
@@ -751,6 +758,10 @@ internal class ConsentManager(
                 }
             }
 
+        // What this sync leaves, captured BEFORE any write is dispatched, so a save made while the
+        // write is in flight still reads as a user change on the next re-sync.
+        val syncedLocal = storage.loadPreferences()
+        val saveRevisionBeforeWrite = preferencesSaveRevision.get()
         if (toWrite != null) {
             syncedRaw = toWrite
             val writtenCcpa = if (ccpaChangedMidFlight()) storage.loadCcpaOptout() else localCcpaOptout
@@ -784,16 +795,48 @@ internal class ConsentManager(
         // Bind only after the call succeeds: a failed read or write throws above and leaves the
         // binding untouched, so a retry is still recognised as a login.
         storage.saveBoundUserHash(userHash)
+        if (preferencesSaveRevision.get() == saveRevisionBeforeWrite) {
+            storage.saveSyncState(UniversalConsentSyncState(userHash, syncedLocal, syncedRaw))
+        } else {
+            // The user saved a choice since the capture: a change the next re-sync must write.
+            storage.clearSyncState()
+        }
         universalConsentSession =
             UniversalConsentSession(
                 userHash = userHash,
                 identifier = identifier,
                 explicitApiKey = apiKey,
                 getSignature = getSignature,
-                syncedLocal = storage.loadPreferences(),
-                syncedRaw = syncedRaw?.takeIf { preferencesSaveRevision.get() == saveRevisionAtEntry },
-                saveRevision = saveRevisionAtEntry,
             )
+    }
+
+    /** The persisted sync state for [userHash], or null when none is stored for it. */
+    private fun syncState(userHash: String): UniversalConsentSyncState? =
+        storage.loadSyncState()?.takeIf { it.userHash == userHash }
+
+    /**
+     * Whether the user changed nothing on this device since the last sync for [userHash]: storage
+     * still holds exactly what that sync left and no save happened since (a save clears the state).
+     */
+    private fun unchangedSinceSync(
+        stored: ConsentPreferences?,
+        userHash: String,
+    ): Boolean {
+        val syncedLocal = syncState(userHash)?.syncedLocal ?: return false
+        return stored != null && stored == syncedLocal
+    }
+
+    /**
+     * The choice a [setCcpaOptout] write-through sends. While local state is still what the last sync
+     * left, that is the record's RAW choice, so a suppressed view never overwrites the user's real
+     * opt-ins for every device. Once the user has changed local state since, it is sent as stored.
+     */
+    private fun rawChoice(
+        stored: ConsentPreferences,
+        userHash: String,
+    ): ConsentPreferences {
+        if (!unchangedSinceSync(stored, userHash)) return stored
+        return syncState(userHash)?.syncedRaw ?: stored
     }
 
     /**
@@ -900,37 +943,15 @@ internal class ConsentManager(
      * a client release — exactly like every other Universal Consent call path. Caching the resolved
      * key here would pin a stale key for the life of the process.
      *
-     * [syncedLocal] is the stored choice right after the sync bound. After an adopt that is the
-     * SIGNAL-RECONCILED view (GPC or the device ad-tracking signal can force categories off), which
-     * must never be written back as though the user chose it. [syncedRaw] is the RAW choice the
-     * record held when the sync bound: what the sync wrote, or the record it adopted; null on a miss
-     * with nothing written, or a signal-only record. [saveRevision] is the user-save revision the
-     * sync started at; a later [savePreferences] moves it on, which retires [syncedRaw] (TRUST-3074).
+     * What that sync left (the synced stored and raw choices) is persisted instead, see
+     * [UniversalConsentSyncState].
      */
     private data class UniversalConsentSession(
         val userHash: String,
         val identifier: String,
         val explicitApiKey: String?,
         val getSignature: SignatureProvider?,
-        val syncedLocal: ConsentPreferences?,
-        val syncedRaw: ConsentPreferences?,
-        val saveRevision: Int,
     ) {
-        /**
-         * The choice a write for this identity sends ([setCcpaOptout]'s write-through, or a re-sync).
-         * While the stored choice is still exactly what the sync left and the user has saved nothing
-         * since, that is the record's RAW choice, so a suppressed view never overwrites the user's
-         * real opt-ins for every device. Otherwise the user has saved a choice since (or local state
-         * otherwise changed) and it is sent as stored.
-         */
-        fun rawChoice(
-            stored: ConsentPreferences,
-            currentSaveRevision: Int,
-        ): ConsentPreferences {
-            val raw = syncedRaw ?: return stored
-            return if (currentSaveRevision == saveRevision && stored == syncedLocal) raw else stored
-        }
-
         // Never let the identifier or an explicit API key reach a log through string interpolation.
         override fun toString(): String = "UniversalConsentSession(userHash=$userHash)"
     }
@@ -960,7 +981,7 @@ internal class ConsentManager(
      * is kept. Until the choice reaches the record, a re-sync or rehydrate does not replace it with
      * the record's value ([ConsentStorage.loadCcpaWritePending]). While the stored choice is still the
      * possibly-suppressed view the last sync left, the RAW choice is the record's own (see
-     * [UniversalConsentSession.rawChoice]), never that view itself (TRUST-3074).
+     * [rawChoice]), never that view itself (TRUST-3074).
      */
     suspend fun setCcpaOptout(
         optedOut: Boolean,
@@ -996,7 +1017,7 @@ internal class ConsentManager(
             // is no longer the bound one, so don't POST to it.
             if (session.userHash != storage.loadBoundUserHash()) return@withLock
             val localChoice =
-                storage.loadPreferences()?.let { session.rawChoice(it, preferencesSaveRevision.get()) }
+                storage.loadPreferences()?.let { rawChoice(it, session.userHash) }
                     ?: return@withLock
             // A logout/reset landed while preparing the write (including during the reads above):
             // don't write through to the now-unbound (or re-bound) identity.

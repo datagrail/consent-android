@@ -165,12 +165,31 @@ class ConsentStorageTest {
     }
 
     @Test
-    fun testClearBoundUserHashRemovesOnlyTheBinding() {
+    fun testClearBoundUserHashRemovesOnlyTheBindingAndItsSyncState() {
         storage.clearBoundUserHash()
 
         Mockito.verify(mockEditor).remove("datagrail_consent_bound_user_hash")
+        Mockito.verify(mockEditor).remove("datagrail_consent_sync_state")
         Mockito.verify(mockEditor, Mockito.never()).clear()
         Mockito.verify(mockEditor, Mockito.never()).remove("datagrail_consent_preferences")
+    }
+
+    @Test
+    fun testSyncStateRoundTripsThroughSharedPreferences() {
+        val state =
+            UniversalConsentSyncState(
+                userHash = "abc123",
+                syncedLocal = ConsentPreferences(true, listOf(CategoryConsent("category_marketing", false))),
+                syncedRaw = ConsentPreferences(true, listOf(CategoryConsent("category_marketing", true))),
+            )
+        val written = org.mockito.kotlin.argumentCaptor<String>()
+
+        storage.saveSyncState(state)
+
+        Mockito.verify(mockEditor).putString(Mockito.eq("datagrail_consent_sync_state"), written.capture())
+        whenever(mockSharedPreferences.getString("datagrail_consent_sync_state", null))
+            .thenReturn(written.firstValue)
+        assertEquals(state, storage.loadSyncState())
     }
 
     @Test

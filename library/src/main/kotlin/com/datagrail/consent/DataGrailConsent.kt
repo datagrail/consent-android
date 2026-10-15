@@ -732,9 +732,13 @@ class DataGrailConsent private constructor() {
      *   [savePreferences], [acceptAll] or [rejectAll] while not bound to someone else) is written to
      *   the new identity. Otherwise nothing is written; if the device was bound to a different
      *   identity its local state returns to the defaults so that user's consent does not carry over.
-     * - RE-SYNC (already bound to this identity): a found record is adopted, and a local choice is
-     *   written through as before. With no record, only an explicit local choice is written; config
-     *   defaults are never seeded.
+     * - RE-SYNC (already bound to this identity) with no local change since the last sync: the
+     *   record is adopted and nothing is written, also after a process restart (the SDK persists what
+     *   the last sync left: consent maps and the identity hash, never the identifier). A device signal
+     *   is never a change, so a view GPC or the ad-tracking signal suppressed is never written. After
+     *   a local change (any [savePreferences], [acceptAll] or [rejectAll], including one made while a
+     *   sync was in flight) that choice is written; with no record, only an explicit local choice is
+     *   written. Config defaults are never seeded.
      * "Nothing written" still reports success.
      *
      * CCPA opt-out (TRUST-2591): every write carries this device's [getCcpaOptout] flag as
