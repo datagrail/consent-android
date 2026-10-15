@@ -546,9 +546,10 @@ class DataGrailConsent private constructor() {
      * on, [setUserIdentifier] has succeeded in this process for the bound identity, and the user has
      * an explicit consent choice stored. Otherwise it is kept locally and sent with the next
      * universal consent write. A ccpa-only change does not count as an explicit consent choice, so
-     * on a login with no existing record it is not written on its own. A login that finds a record
-     * replaces this value with the record's; [clearUserIdentifier] clears it to false; [reset] wipes
-     * it.
+     * on a login with no existing record it is not written on its own. With `sync_optout` on, a
+     * login or re-sync that finds a record replaces this value with the record's, except while a
+     * choice made while signed in has not reached the record yet; [clearUserIdentifier] clears it to
+     * false; [reset] wipes it.
      *
      * @param optedOut true when the user opted out of the sale/sharing of their personal information.
      * @param callback Result of the (possible) write-through; the local flag is kept on failure.
@@ -737,9 +738,9 @@ class DataGrailConsent private constructor() {
      *
      * CCPA opt-out (TRUST-2591): every write carries this device's [getCcpaOptout] flag as
      * `ccpa_optout` when the container's `universalConsent.sync_optout` flag is on (otherwise
-     * `false`). A login that finds a record sets the local flag to the record's value; a re-sync that
-     * writes the local choice through keeps the local flag. A ccpa-only change never triggers a write
-     * on its own.
+     * `false`). With `sync_optout` on, a login that finds a record sets the local flag to the
+     * record's value; a re-sync that writes the local choice through keeps the local flag. A
+     * ccpa-only change never triggers a write on its own.
      *
      * What the SDK cannot detect: a logout it is not told about (call [clearUserIdentifier] on
      * logout); whether a pre-login choice was made by the person now logging in or by a previous
@@ -747,8 +748,10 @@ class DataGrailConsent private constructor() {
      * login by design); and two people sharing one account. It does no heuristic shared-device or
      * shared-account detection.
      *
-     * The raw identifier is NOT retained as state — later calls such as [fetchUniversalConsent] and
-     * [rehydrateFromUniversalConsent] require it to be passed again.
+     * The raw identifier is kept in memory only, for the [setCcpaOptout] write-through, and is
+     * cleared by [clearUserIdentifier] and [reset]; it is never persisted (only its hash is). Later
+     * calls such as [fetchUniversalConsent] and [rehydrateFromUniversalConsent] still require it to
+     * be passed again.
      *
      * The SDK does NOT hold or compute the HMAC secret. It builds the canonical string-to-sign
      * (with its own per-write timestamp and nonce) and invokes the customer-provided

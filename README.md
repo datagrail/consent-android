@@ -111,7 +111,7 @@ if (DataGrailConsent.getInstance().isCategoryEnabled("category_marketing")) {
 | `onConsentChanged(listener)` | Listen for consent changes |
 | `reset()` | Clear all stored consent data |
 | `setCcpaOptout(optedOut[, callback])` | Record the user's explicit CCPA/CPRA "Do Not Sell or Share My Personal Information" choice. Android has no native DNSMPI signal, so call this from your app's own control. Stored on the device and changes no category. Written to the universal consent record as `ccpa_optout` when `universalConsent.sync_optout` is on and the user is signed in via `setUserIdentifier`. Never derived from a category or the ad-tracking signal. |
-| `getCcpaOptout() -> Boolean` | The stored choice (`false` when never set). A login that finds a stored record takes the record's value; `clearUserIdentifier()` resets it to `false`. |
+| `getCcpaOptout() -> Boolean` | The stored choice (`false` when never set). With `universalConsent.sync_optout` on, a login or re-sync that finds a stored record takes the record's value, unless a choice made while signed in has not reached the record yet. `clearUserIdentifier()` resets it to `false`. |
 
 ## Requirements
 
