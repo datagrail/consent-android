@@ -34,6 +34,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         private const val KEY_PENDING_EVENTS = "datagrail_consent_pending_events"
         private const val KEY_BOUND_USER_HASH = "datagrail_consent_bound_user_hash"
         private const val KEY_CCPA_OPTOUT = "datagrail_consent_ccpa_optout"
+        private const val KEY_CCPA_WRITE_PENDING = "datagrail_consent_ccpa_write_pending"
 
         /**
          * Create a ConsentStorage backed by EncryptedSharedPreferences
@@ -204,6 +205,23 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
     fun clearCcpaOptout() {
         prefs.edit().remove(KEY_CCPA_OPTOUT).apply()
     }
+
+    /**
+     * Mark (or clear) that a CCPA choice made while bound has not reached the Universal Consent record
+     * yet: the setter had no category choice to write with, or its write failed. While set, a found
+     * record's `ccpa_optout` must not replace the local flag on a re-sync or rehydrate, or the device
+     * would silently lose its own unsent choice.
+     */
+    fun saveCcpaWritePending(pending: Boolean) {
+        if (pending) {
+            prefs.edit().putBoolean(KEY_CCPA_WRITE_PENDING, true).apply()
+        } else {
+            prefs.edit().remove(KEY_CCPA_WRITE_PENDING).apply()
+        }
+    }
+
+    /** Whether a bound CCPA choice is still waiting to reach the record; false when none is stored. */
+    fun loadCcpaWritePending(): Boolean = prefs.getBoolean(KEY_CCPA_WRITE_PENDING, false)
 
     // MARK: - Unique ID
 

@@ -4,6 +4,8 @@ import com.datagrail.consent.models.*
 import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -14,6 +16,7 @@ import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.doAnswer
+import org.mockito.kotlin.doSuspendableAnswer
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
 import org.mockito.kotlin.times
@@ -43,6 +46,7 @@ class UniversalConsentCcpaOptoutTests {
     private var storedPreferences: ConsentPreferences? = null
     private var storedCcpaOptout = false
     private var storedBoundHash: String? = null
+    private var storedCcpaWritePending = false
 
     private val userA = "alice@example.com"
     private val userB = "bob@example.com"
@@ -54,6 +58,9 @@ class UniversalConsentCcpaOptoutTests {
         storedPreferences = null
         storedCcpaOptout = false
         storedBoundHash = null
+        storedCcpaWritePending = false
+        whenever(mockStorage.saveCcpaWritePending(any())).doAnswer { storedCcpaWritePending = it.getArgument(0) }
+        whenever(mockStorage.loadCcpaWritePending()).doAnswer { storedCcpaWritePending }
         whenever(mockStorage.savePreferences(any())).doAnswer { storedPreferences = it.getArgument(0) }
         whenever(mockStorage.loadPreferences()).doAnswer { storedPreferences }
         whenever(mockStorage.clearPreferences()).doAnswer { storedPreferences = null }
@@ -425,6 +432,128 @@ class UniversalConsentCcpaOptoutTests {
 
             verifyNoWrite()
             assertFalse(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `login miss while bound to another identity clears the flag with the gate off too`() =
+        runTest {
+            sut.currentConfig = config(syncOptout = false)
+            storedBoundHash = hashFor(userA)
+            storedCcpaOptout = true
+            recordIs(null)
+
+            sut.setUserIdentifier(userB, apiKey)
+
+            assertFalse("the previous identity's flag never carries over", sut.getCcpaOptout())
+        }
+
+    // MARK: - A choice that has not reached the record yet
+
+    @Test
+    fun `an unsent bound choice is not replaced by the record on a re-sync with no category choice`() =
+        runTest {
+            storedBoundHash = hashFor(userA)
+            recordIs(record(ccpaOptout = false))
+            sut.setUserIdentifier(userA, apiKey)
+            storedPreferences = null
+
+            sut.setCcpaOptout(true)
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `an unsent bound choice is not replaced by rehydrateFromUniversalConsent`() =
+        runTest {
+            storedBoundHash = hashFor(userA)
+            sut.setCcpaOptout(true)
+            recordIs(record(ccpaOptout = false))
+
+            sut.rehydrateFromUniversalConsent(userA, apiKey)
+
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `a failed write-through keeps the choice pending, and a later successful write clears it`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey)
+            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull()))
+                .doAnswer { throw ConsentException.NetworkError("offline") }
+
+            try {
+                sut.setCcpaOptout(true)
+                fail("expected the write-through to fail")
+            } catch (expected: ConsentException.NetworkError) {
+                // The local flag is kept and stays pending.
+            }
+            assertTrue(storedCcpaWritePending)
+
+            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull()))
+                .thenReturn(Unit)
+            sut.setCcpaOptout(true)
+            assertFalse(storedCcpaWritePending)
+        }
+
+    // MARK: - Interleaving with an in-flight login / rehydrate
+
+    @Test
+    fun `a setter call during a login read is not overwritten by the found record`() =
+        runTest {
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).doAnswer {
+                // The adapter's synchronous half of setCcpaOptout, landing while the GET is outstanding.
+                sut.saveCcpaOptout(true)
+                record(ccpaOptout = false)
+            }
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `a logout during rehydrateFromUniversalConsent does not restore the previous user's state`() =
+        runTest {
+            storedBoundHash = hashFor(userA)
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).doAnswer {
+                sut.clearUserIdentifier()
+                record(ccpaOptout = true)
+            }
+
+            val rehydrated = sut.rehydrateFromUniversalConsent(userA, apiKey)
+
+            assertFalse(rehydrated)
+            assertFalse(sut.getCcpaOptout())
+            assertNull(storedPreferences)
+        }
+
+    @Test
+    fun `write-through re-reads the gate under the lock`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey)
+            val readGate = CompletableDeferred<Unit>()
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).doSuspendableAnswer {
+                readGate.await()
+                null
+            }
+            // A re-sync holds the lock across its read; the setter passes its fast path and waits.
+            val resync = launch { sut.setUserIdentifier(userA, apiKey) }
+            val setter = launch { sut.setCcpaOptout(true) }
+            testScheduler.runCurrent()
+            // A config reload turns the gate off while the setter is queued.
+            sut.currentConfig = config(syncOptout = false)
+            readGate.complete(Unit)
+            resync.join()
+            setter.join()
+
+            // The login seed and the re-sync's own write; no write-through from the setter.
+            verify(mockConsentService, times(2)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
         }
 
     // MARK: - Neutral / reset
