@@ -12,6 +12,7 @@ import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
 import org.mockito.kotlin.doAnswer
+import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
@@ -123,13 +124,14 @@ class UniversalConsentRehydrateTests {
         }
 
     /**
-     * A found record whose cookieOptions map is empty carries no category state to apply. Saving
-     * it would store preferences with nothing in them, and because
-     * [ConsentPreferences.isCategoryEnabled] defaults an unknown key to false, that reads back as
-     * a blanket opt-out the user never made — while also suppressing the banner.
+     * TRUST-2961: a found record whose consent_preferences block is PRESENT but carries an empty
+     * cookieOptions map is an ANSWERED essential-only choice — the user accepted only always-on
+     * categories. It must rehydrate (essential backfilled on, everything else off) and suppress the
+     * banner, exactly as iOS and web already do. Collapsing it into a "no choice" miss would
+     * re-prompt a user who already answered elsewhere.
      */
     @Test
-    fun `a found record with no cookie options writes nothing`() =
+    fun `a found record with a present but empty cookie options map rehydrates essential-only`() =
         runTest {
             sut.currentConfig = universalConfig()
             whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
@@ -137,6 +139,34 @@ class UniversalConsentRehydrateTests {
                     status = "found",
                     consentPreferences = UniversalConsentPreferences(isCustomised = true, cookieOptions = emptyMap()),
                 ),
+            )
+
+            assertTrue(
+                "a present consent_preferences block is an answered choice and must rehydrate",
+                sut.rehydrateFromUniversalConsent("user@example.com", "dg_key", TrackingSignal.AUTHORIZED),
+            )
+
+            // Essential stays on via the reconcile backfill; a non-essential category the empty map
+            // never mentioned reads off — the essential-only state the user actually chose.
+            assertTrue("essential is always on", sut.isCategoryEnabled("category_essential"))
+            assertFalse("marketing was not consented", sut.isCategoryEnabled("category_marketing"))
+            // The answered choice is persisted, so the banner does not re-prompt.
+            assertNotNull("preferences persisted", mockStorage.loadPreferences())
+            assertTrue("stored choice marked customised", mockStorage.loadPreferences()!!.isCustomised)
+            assertFalse("banner suppressed after rehydration", sut.needsConsent())
+        }
+
+    /**
+     * TRUST-2961 boundary: an ABSENT consent_preferences block (null, not an empty map) is
+     * signal-only — the user made no choice. This is the only "no choice" shape, and it is still a
+     * miss: nothing persists and the banner stays up to collect the answer.
+     */
+    @Test
+    fun `a found record with absent consent preferences writes nothing`() =
+        runTest {
+            sut.currentConfig = universalConfig()
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
+                UniversalConsentRecord(status = "found", consentPreferences = null),
             )
 
             assertFalse(sut.rehydrateFromUniversalConsent("user@example.com", "dg_key", TrackingSignal.AUTHORIZED))
@@ -311,6 +341,49 @@ class UniversalConsentRehydrateTests {
                     CategoryConsent(gtmKey = "category_marketing", isEnabled = marketing),
                 ),
         )
+
+    // MARK: - API key delivery via config.json (TRUST-2603)
+
+    @Test
+    fun `falls back to universalConsent apiKey from config when none is passed`() =
+        runTest {
+            sut.currentConfig = baseUniversalConfig().copy(
+                universalConsent = UniversalConsentConfig(enabled = true, apiKey = "config_key"),
+            )
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(null)
+
+            sut.fetchUniversalConsent("user@example.com", null, TrackingSignal.AUTHORIZED)
+
+            verify(mockConsentService).getUniversalConsent(any(), any(), eq("config_key"))
+        }
+
+    @Test
+    fun `prefers an explicit apiKey over the config value`() =
+        runTest {
+            sut.currentConfig = baseUniversalConfig().copy(
+                universalConsent = UniversalConsentConfig(enabled = true, apiKey = "config_key"),
+            )
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(null)
+
+            sut.fetchUniversalConsent("user@example.com", "explicit_key", TrackingSignal.AUTHORIZED)
+
+            verify(mockConsentService).getUniversalConsent(any(), any(), eq("explicit_key"))
+        }
+
+    @Test
+    fun `throws ValidationError when neither an explicit key nor a config key is present`() =
+        runTest {
+            sut.currentConfig = baseUniversalConfig().copy(
+                universalConsent = UniversalConsentConfig(enabled = true, apiKey = null),
+            )
+
+            assertThrows(ConsentException.ValidationError::class.java) {
+                kotlinx.coroutines.runBlocking {
+                    sut.fetchUniversalConsent("user@example.com", null, TrackingSignal.AUTHORIZED)
+                }
+            }
+            verify(mockConsentService, never()).getUniversalConsent(any(), any(), any())
+        }
 
     private fun universalConfig(): ConsentConfig = baseUniversalConfig()
 

@@ -339,6 +339,30 @@ class ConsentConfigParserTest {
     }
 
     @Test
+    fun `universalConsent apiKey decodes from the served camelCase key and snake_case is not recognized`() {
+        // Lock the config.json wire contract for the TRUST-2603 key (review on #65). The served
+        // payload uses camelCase `apiKey`, matching the camelCase `universalConsent` parent key and
+        // the sibling consent-banner/react/ios SDKs; only `sync_optout` is snake_case inside this
+        // object. Decoding uses the same ignoreUnknownKeys config as production, so without this test
+        // a renamed/mis-cased key would silently decode to null with no CI signal.
+        val served =
+            json.decodeFromString<UniversalConsentConfig>(
+                """{"enabled":true,"sync_optout":true,"apiKey":"dg_live_key"}""",
+            )
+        assertTrue(served.enabled)
+        assertTrue(served.syncOptout)
+        assertEquals("dg_live_key", served.apiKey)
+
+        // A snake_case `api_key` is NOT bound — it is ignored and the field stays null. This documents
+        // the exact mismatch the review flagged: the dgapp serializer MUST emit camelCase `apiKey`.
+        val snakeCase =
+            json.decodeFromString<UniversalConsentConfig>(
+                """{"enabled":true,"api_key":"dg_live_key"}""",
+            )
+        assertNull(snakeCase.apiKey)
+    }
+
+    @Test
     fun `test parse GDPR config`() {
         val resource = requireNotNull(javaClass.classLoader?.getResource("config-gdpr.json")) {
             "Resource config-gdpr.json not found on classpath"
