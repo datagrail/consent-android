@@ -546,10 +546,11 @@ class DataGrailConsent private constructor() {
      * on, [setUserIdentifier] has succeeded in this process for the bound identity, and the user has
      * an explicit consent choice stored. Otherwise it is kept locally and sent with the next
      * universal consent write. A ccpa-only change does not count as an explicit consent choice, so
-     * on a login with no existing record it is not written on its own. With `sync_optout` on, a
-     * login or re-sync that finds a record replaces this value with the record's, except while a
-     * choice made while signed in has not reached the record yet; [clearUserIdentifier] clears it to
-     * false; [reset] wipes it.
+     * on a login with no existing record it is not written on its own. A login that finds a record
+     * replaces this value with the record's whatever `sync_optout` says (as on web and iOS). With
+     * `sync_optout` on, a re-sync that finds a record does too, except while a choice made while
+     * signed in has not reached the record yet. [clearUserIdentifier] clears it to false; [reset]
+     * wipes it.
      *
      * @param optedOut true when the user opted out of the sale/sharing of their personal information.
      * @param callback Result of the (possible) write-through; the local flag is kept on failure.
@@ -738,8 +739,8 @@ class DataGrailConsent private constructor() {
      *
      * CCPA opt-out (TRUST-2591): every write carries this device's [getCcpaOptout] flag as
      * `ccpa_optout` when the container's `universalConsent.sync_optout` flag is on (otherwise
-     * `false`). With `sync_optout` on, a login that finds a record sets the local flag to the
-     * record's value; a re-sync that writes the local choice through keeps the local flag. A
+     * `false`). A login that finds a record sets the local flag to the record's value whatever
+     * `sync_optout` says, as on web and iOS; a re-sync that writes the local choice through keeps the local flag. A
      * ccpa-only change never triggers a write on its own.
      *
      * What the SDK cannot detect: a logout it is not told about (call [clearUserIdentifier] on

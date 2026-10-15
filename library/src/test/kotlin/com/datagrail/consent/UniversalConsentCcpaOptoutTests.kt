@@ -26,8 +26,8 @@ import org.mockito.kotlin.whenever
 /**
  * First-class `ccpa_optout` (TRUST-2591): the user's explicit "Do Not Sell or Share" choice, set by
  * the host app, never derived from a category or the ad-tracking signal, gated on the wire by
- * `syncOptout`, and replaced by a found record on login (TRUST-2902 rule). Same rule as the
- * web/iOS/React Native SDKs.
+ * `syncOptout`, and replaced by a found record on login whatever the gate (TRUST-2902 rule); a
+ * re-sync adopt is gated. Same rule as the web/iOS/React Native SDKs.
  *
  * Storage is a stateful stub so the flag, preferences and binding round-trip through the manager.
  */
@@ -360,18 +360,43 @@ class UniversalConsentCcpaOptoutTests {
         }
 
     @Test
-    fun `login found record keeps a local-only flag with the gate off`() =
+    fun `login found record replaces a pre-login flag with the gate off too`() =
         runTest {
-            // With syncOptout off the SDK never writes the choice to the record, so the record's
-            // ccpa_optout is not authoritative; a login must not overwrite a local-only opt-out with
-            // it. Mirrors the re-sync gate-off behaviour.
+            // A login is a full record-wins reset, so the record's ccpa_optout is adopted whatever
+            // the syncOptout gate, the same as the web and iOS SDKs. Only the re-sync adopt is gated.
             sut.currentConfig = config(syncOptout = false)
+            storedPreferences = choice(marketing = true)
             storedCcpaOptout = true
             recordIs(record(ccpaOptout = false))
 
             sut.setUserIdentifier(userA, apiKey)
 
+            verifyNoWrite()
+            assertFalse(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `login found record carrying true is adopted with the gate off`() =
+        runTest {
+            sut.currentConfig = config(syncOptout = false)
+            recordIs(record(ccpaOptout = true))
+
+            sut.setUserIdentifier(userA, apiKey)
+
             assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `login found signal-only record replaces the flag with the gate off`() =
+        runTest {
+            sut.currentConfig = config(syncOptout = false)
+            storedCcpaOptout = true
+            recordIs(UniversalConsentRecord(status = "found", ccpaOptout = false))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+            assertFalse(sut.getCcpaOptout())
         }
 
     @Test

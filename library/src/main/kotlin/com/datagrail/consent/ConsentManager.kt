@@ -432,10 +432,11 @@ internal class ConsentManager(
         // that must replace the local flag, matching the LOGIN path (adoptOnLogin's signal-only
         // branch) and this function's documented invariant ("a found record's ccpa_optout replaces
         // the local flag"). The early return only governs whether there are raw category preferences
-        // to hand back for the WRITE; it must not suppress the opt-out adopt. Still gated: outside a
-        // login (the adoptCcpaOptout flag) and only with syncOptout on, since with the gate off the
-        // SDK never puts the choice on the record and adopting it would erase a local-only
-        // setCcpaOptout(true). Same rule as the web/iOS/React Native SDKs.
+        // to hand back for the WRITE; it must not suppress the opt-out adopt. This is the RE-SYNC (and
+        // standalone rehydrate) adopt, so it is gated: on the adoptCcpaOptout flag and on syncOptout,
+        // since with the gate off the SDK never puts the choice on the record and adopting it would
+        // erase a local-only setCcpaOptout(true). The LOGIN adopt in setUserIdentifier is ungated.
+        // Same rule as the web/iOS/React Native SDKs.
         // A bound choice that never reached the record (no category choice to write with, or a failed
         // write), or one made during this read, is newer than the record's value and is kept.
         val keepsLocalCcpa =
@@ -536,9 +537,9 @@ internal class ConsentManager(
      *
      * CCPA opt-out (TRUST-2591). Any write carries the RAW local [getCcpaOptout] flag, captured
      * before any adopt (or the newer value when the host set it while this call was suspended); the
-     * service writes it only when `universalConsent.syncOptout` is on. With the gate on, a LOGIN
-     * that finds a record (with or without a category choice) sets the local flag to the record's
-     * `ccpa_optout`, dropping a pre-login local value; a LOGIN away from a different identity with no
+     * service writes it only when `universalConsent.syncOptout` is on. A LOGIN that finds a record
+     * (with or without a category choice) sets the local flag to the record's `ccpa_optout` whatever
+     * the gate, dropping a pre-login local value, as the web and iOS SDKs do; a LOGIN away from a different identity with no
      * record clears it whatever the gate (it was that user's). Neither happens over a setter call
      * that landed while the read was in flight. A RE-SYNC that writes the local choice through keeps the
      * local flag (it is what the record now holds); one that only adopts takes the record's value
@@ -670,13 +671,14 @@ internal class ConsentManager(
                     storage.saveCcpaWritePending(false)
                 }
                 if (record != null) {
-                    // Adopt the record's CCPA flag on login only when syncOptout is on — the same
-                    // gate the rehydrate path applies. With the gate OFF the SDK never writes the
-                    // choice to the record, so the record's ccpa_optout is not authoritative;
-                    // adopting it would silently erase a local-only setCcpaOptout the user made.
-                    // With the gate on the record is authoritative and a pre-login local value is
-                    // dropped exactly like the categories.
-                    if (config.universalConsent?.syncOptout == true && !ccpaChanged) {
+                    // A LOGIN that finds a record (with or without a category choice) adopts the
+                    // record's CCPA flag whatever the syncOptout gate, the same as the web and iOS
+                    // SDKs: a login is a full record-wins reset, so a pre-login local value is
+                    // dropped exactly like the categories (with the gate off the record holds
+                    // false, the same neutral clearUserIdentifier() leaves). Only a RE-SYNC adopt
+                    // is gated (see rehydrateReturningRawPreferences). A setter call made while
+                    // the read was in flight is newer than the record and is kept.
+                    if (!ccpaChanged) {
                         storage.saveCcpaOptout(record.ccpaOptout)
                     }
                 } else if (boundToOther && !ccpaChanged) {
