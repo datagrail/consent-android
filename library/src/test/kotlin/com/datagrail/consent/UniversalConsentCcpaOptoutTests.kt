@@ -581,6 +581,67 @@ class UniversalConsentCcpaOptoutTests {
             verify(mockConsentService, times(2)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
         }
 
+    // MARK: - Raw choice on the write-through (TRUST-3074)
+
+    @Test
+    fun `write-through after a login adopt under a denied signal sends the record's raw opt-in`() =
+        runTest {
+            recordIs(record(ccpaOptout = false))
+            sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
+            // Local state is the suppressed view; the record still holds marketing=true.
+            assertEquals(choice(marketing = false), storedPreferences)
+
+            sut.setCcpaOptout(true)
+
+            val written = writtenPreferences().single()
+            assertEquals(true, written.cookieOptions["category_marketing"])
+            assertEquals(listOf(true), writtenCcpa())
+        }
+
+    @Test
+    fun `write-through after adopting an opted-out record sends its raw opt-ins, not all-off`() =
+        runTest {
+            // A web DNSMPI opt-out: ccpa_optout plus the record's stored gpc, which suppresses locally.
+            recordIs(record(ccpaOptout = true).copy(gpc = true))
+            sut.setUserIdentifier(userA, apiKey)
+            assertTrue(sut.getCcpaOptout())
+            assertEquals(choice(marketing = false), storedPreferences)
+
+            sut.setCcpaOptout(false)
+
+            val written = writtenPreferences().single()
+            assertEquals(true, written.cookieOptions["category_marketing"])
+            assertEquals(listOf(false), writtenCcpa())
+        }
+
+    @Test
+    fun `write-through after a user save sends the saved choice`() =
+        runTest {
+            recordIs(record(ccpaOptout = false))
+            sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
+            // The user saves the same values the suppressed view shows: still their own choice now.
+            sut.savePreferences(choice(marketing = false)) {}
+
+            sut.setCcpaOptout(true)
+
+            val written = writtenPreferences().single()
+            assertEquals(false, written.cookieOptions["category_marketing"])
+        }
+
+    @Test
+    fun `same-identity re-sync with nothing changed writes the raw choice, not the suppressed view`() =
+        runTest {
+            recordIs(record(ccpaOptout = false))
+            sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
+            verifyNoWrite()
+
+            sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
+
+            // Android's re-sync writes any local choice through; it must be the record's raw choice.
+            val written = writtenPreferences().single()
+            assertEquals(true, written.cookieOptions["category_marketing"])
+        }
+
     // MARK: - Neutral / reset
 
     @Test
@@ -610,6 +671,13 @@ class UniversalConsentCcpaOptoutTests {
         val captor = argumentCaptor<Boolean>()
         verify(mockConsentService, org.mockito.Mockito.atLeastOnce())
             .saveUniversalConsent(any(), any(), any(), eq(apiKey), captor.capture(), anyOrNull())
+        return captor.allValues
+    }
+
+    private suspend fun writtenPreferences(): List<UniversalConsentPreferences> {
+        val captor = argumentCaptor<UniversalConsentPreferences>()
+        verify(mockConsentService, org.mockito.Mockito.atLeastOnce())
+            .saveUniversalConsent(any(), any(), captor.capture(), eq(apiKey), any(), anyOrNull())
         return captor.allValues
     }
 
