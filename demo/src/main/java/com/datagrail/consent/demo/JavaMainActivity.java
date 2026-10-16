@@ -131,7 +131,9 @@ public class JavaMainActivity extends AppCompatActivity {
                     updateStatus("❌ Init Failed: " + error.getMessage());
 
                     // Log error type
-                    if (error instanceof ConsentException.NetworkError) {
+                    if (error instanceof ConsentException.ConfigNotPublished) {
+                        log("WARNING", "Consent configuration not published - publish it or check config URL");
+                    } else if (error instanceof ConsentException.NetworkError) {
                         log("WARNING", "Network error - check connectivity");
                     } else if (error instanceof ConsentException.InvalidConfiguration) {
                         log("WARNING", "Invalid configuration - check config URL");

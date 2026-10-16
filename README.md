@@ -13,7 +13,7 @@ Add the dependency to your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("io.datagrail:consent:1.5.0")
+    implementation("io.datagrail:consent:1.7.0")
 }
 ```
 
@@ -118,6 +118,19 @@ if (DataGrailConsent.getInstance().isCategoryEnabled("category_marketing")) {
 - Calling code: Kotlin 1.9+ or Java 8+ source compatibility
 - AndroidX
 
+## Schema Compatibility
+
+Each SDK release targets one consent schema version, which it reports to the backend as telemetry:
+
+| SDK version | Consent schema |
+|-------------|----------------|
+| 1.0.0 – 1.7.x | `v1` |
+| Unreleased | `v1` |
+
+The SDK reports its schema version to the backend as telemetry; it does not currently reject a configuration published for a different schema version (version-based rejection is planned). If the configuration is not published at the config URL (the fetch is rejected with a 4xx other than 408 or 429) and nothing is cached, initialization fails with `ConsentException.ConfigNotPublished` without retrying.
+
+Read the versions at runtime from `com.datagrail.consent.BuildConfig.SCHEMA_VERSION` and `BuildConfig.LIBRARY_VERSION`.
+
 ## Java Support
 
 The SDK is written in Kotlin but provides **full Java interoperability** through dedicated callback interfaces. Java developers can use all SDK features with clear success/failure callbacks instead of Kotlin's `Result` type.
@@ -188,6 +201,8 @@ If you have ProGuard/R8 enabled, add these rules:
 ## Demo App
 
 A complete demo app is included in [`demo/`](demo/) showcasing SDK initialization, banner display, accept/reject flows, and consent change callbacks.
+
+The demo opens on a **Config URL Tester**: paste the pre-signed *View config* link from the Mobile tab to preview a test config with the SDK's banner. See [`demo/README.md`](demo/README.md#validating-a-test-config-from-the-mobile-tab).
 
 ```bash
 ./gradlew :demo:assembleDebug :demo:installDebug

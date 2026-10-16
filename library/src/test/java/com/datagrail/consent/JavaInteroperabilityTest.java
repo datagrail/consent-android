@@ -117,6 +117,18 @@ public class JavaInteroperabilityTest {
         assertTrue("Message should contain test error", capturedError.get().getMessage().contains("Test error"));
     }
 
+    @Test
+    public void testHttpErrorIsNetworkErrorFromJava() {
+        ConsentException.HttpError explicitMessage = new ConsentException.HttpError(404, "HTTP 404");
+        ConsentException.HttpError defaultMessage = new ConsentException.HttpError(404);
+
+        assertTrue("HttpError should be a NetworkError", explicitMessage instanceof ConsentException.NetworkError);
+        assertEquals(404, explicitMessage.getStatusCode());
+        assertEquals(404, defaultMessage.getStatusCode());
+        assertEquals(explicitMessage.getMessage(), defaultMessage.getMessage());
+        assertTrue("404 should be a client error", defaultMessage.isClientError());
+    }
+
     // MARK: - PreferencesCallback Interface Tests
 
     @Test
@@ -172,6 +184,51 @@ public class JavaInteroperabilityTest {
         assertEquals("First param should be Context", android.content.Context.class, paramTypes[0]);
         assertEquals("Second param should be String", String.class, paramTypes[1]);
         assertEquals("Third param should be ConsentCallback", ConsentCallback.class, paramTypes[2]);
+    }
+
+    @Test
+    public void testUnsignedSetUserIdentifierOverloadAccessible() throws NoSuchMethodException {
+        // The Java-friendly API-key-only overload setUserIdentifier(String, String, ConsentCallback)
+        // must exist and resolve unambiguously from Java — this is the limited-mode entry point of
+        // the shared cross-SDK contract (getSignature omitted => no signature headers).
+        java.lang.reflect.Method method = DataGrailConsent.class.getMethod(
+                "setUserIdentifier", String.class, String.class, ConsentCallback.class);
+        assertNotNull("setUserIdentifier(String, String, ConsentCallback) should be accessible from Java", method);
+
+        Class<?>[] paramTypes = method.getParameterTypes();
+        assertEquals("Should have 3 parameters", 3, paramTypes.length);
+        assertEquals("Third param should be ConsentCallback", ConsentCallback.class, paramTypes[2]);
+    }
+
+    @Test
+    public void testClearUserIdentifierAccessibleAndSafeWhenNotInitialized() throws NoSuchMethodException {
+        // TRUST-2902 logout is reachable from Java and, like reset(), a no-op before initialize.
+        assertNotNull(DataGrailConsent.class.getMethod("clearUserIdentifier"));
+        sdk.clearUserIdentifier();
+    }
+
+    @Test
+    public void testUnsignedSetUserIdentifierCallsFailureWhenNotInitialized() {
+        final AtomicReference<ConsentException> errorRef = new AtomicReference<>();
+
+        ConsentCallback callback = new ConsentCallback() {
+            @Override
+            public void onSuccess() {
+                fail("Should not succeed when not initialized");
+            }
+
+            @Override
+            public void onFailure(ConsentException error) {
+                errorRef.set(error);
+            }
+        };
+
+        // Calling the unsigned overload from Java proves it is reachable and unambiguous; when the
+        // SDK is not initialized it delivers NotInitialized through the callback synchronously.
+        sdk.setUserIdentifier("user@example.com", "dg_key", callback);
+
+        assertNotNull("Expected ConsentException when SDK is not initialized", errorRef.get());
+        assertTrue("Should be NotInitialized", errorRef.get() instanceof ConsentException.NotInitialized);
     }
 
     @Test

@@ -47,7 +47,7 @@ Two Gradle modules: `library` (the SDK) and `demo` (sample app that depends on `
 - Async operations use `CoroutineScope(Dispatchers.Main)` with suspend functions in the manager/service layer
 - Config is fetched from a remote HTTPS URL and deserialized with kotlinx.serialization
 - Consent state is versioned — banner re-shows when remote config `version` changes
-- Failed API calls are queued for retry via `ConsentService`
+- Failed API calls are queued for retry via `ConsentService` — with one deliberate exception: universal-consent writes (`saveUniversalConsent`) are identity-scoped and are NOT queued. A replayed write could overwrite a newer cross-device record the SDK cannot merge; conflict/replay reconciliation is the edge's job (TRUST-2592). On failure they throw and the caller re-reads-then-writes on retry.
 
 ## Testing
 

@@ -104,16 +104,15 @@ class BannerDialogAccessibilityTests {
 
     @Test
     fun testEssentialCategoryToggleContentDescription_IndicatesAlwaysEnabled() {
-        // Essential (always-on) categories should indicate they're always enabled
+        // Essential (always-on) categories render a label instead of a toggle, so their
+        // content description omits the Enabled/Disabled status segment.
         val categoryName = "Essential"
-        val isEnabled = true
-        val statusText = if (isEnabled) "Enabled" else "Disabled"
-        val isAlwaysOn = true
-
-        var contentDescription = "$categoryName consent - $statusText"
-        if (isAlwaysOn) {
-            contentDescription = "$contentDescription - Always enabled, required for functionality"
-        }
+        val contentDescription =
+            buildCategoryContentDescription(
+                categoryName = categoryName,
+                isEnabled = true,
+                isAlwaysOn = true,
+            )
 
         assertTrue(
             "Essential category should indicate always enabled",
@@ -122,6 +121,10 @@ class BannerDialogAccessibilityTests {
         assertTrue(
             "Essential category should explain why",
             contentDescription.contains("required for functionality"),
+        )
+        assertTrue(
+            "Essential category should not include a toggle Enabled/Disabled state segment",
+            !contentDescription.contains(" - Enabled") && !contentDescription.contains(" - Disabled"),
         )
     }
 
@@ -141,6 +144,41 @@ class BannerDialogAccessibilityTests {
         assertTrue(
             "Non-essential category should NOT indicate always enabled",
             !contentDescription.contains("Always enabled"),
+        )
+    }
+
+    // MARK: - Always-On Label Tests
+
+    @Test
+    fun testAlwaysOnLabel_UsesEssentialLabelTranslationWhenPresent() {
+        // Always-on categories show the configured essentialLabel translation when provided
+        val result = buildAlwaysOnLabel(essentialLabel = "Siempre activado")
+
+        assertEquals(
+            "Should use the configured essentialLabel translation",
+            "Siempre activado",
+            result,
+        )
+    }
+
+    @Test
+    fun testAlwaysOnLabel_FallsBackToDefaultWhenTranslationMissing() {
+        // When no essentialLabel translation is configured, fall back to the literal default
+        assertEquals(
+            "Should fall back to 'Always On' when translation is null",
+            "Always On",
+            buildAlwaysOnLabel(essentialLabel = null),
+        )
+    }
+
+    @Test
+    fun testAlwaysOnLabel_UsesTranslationVerbatimWhenNonNull() {
+        // Fallback is null-only (?:), so a non-null (even empty) translation is used verbatim
+        // rather than falling back to the default. Pins the actual coalescing behavior.
+        assertEquals(
+            "A non-null translation is used as-is, no fallback",
+            "",
+            buildAlwaysOnLabel(essentialLabel = ""),
         )
     }
 
@@ -185,8 +223,10 @@ class BannerDialogAccessibilityTests {
                 isAlwaysOn = true,
             )
 
+        // Always-on categories render a label rather than a toggle, so the description does
+        // not include the Enabled/Disabled status segment.
         assertEquals(
-            "Essential consent - Enabled - Always enabled, required for functionality",
+            "Essential consent - Always enabled, required for functionality",
             result,
         )
     }
@@ -273,12 +313,25 @@ class BannerDialogAccessibilityTests {
         isEnabled: Boolean,
         isAlwaysOn: Boolean,
     ): String {
-        val statusText = if (isEnabled) "Enabled" else "Disabled"
-        var contentDescription = "$categoryName consent - $statusText"
+        // Always-on categories render a label instead of a toggle (see
+        // BannerDialog.createSingleCategoryToggle), so their description reads
+        // "<name> consent - Always enabled, required for functionality" with no
+        // Enabled/Disabled status segment. Toggle categories keep the status segment.
         if (isAlwaysOn) {
-            contentDescription = "$contentDescription - Always enabled, required for functionality"
+            return "$categoryName consent - Always enabled, required for functionality"
         }
-        return contentDescription
+        val statusText = if (isEnabled) "Enabled" else "Disabled"
+        return "$categoryName consent - $statusText"
+    }
+
+    /**
+     * Resolves the label shown for an always-on category.
+     * This mirrors the fallback in BannerDialog.createSingleCategoryToggle()
+     * (`categoryTranslation?.essentialLabel ?: "Always On"`) — a null-only coalesce, so a
+     * non-null translation (including an empty string) is used verbatim.
+     */
+    private fun buildAlwaysOnLabel(essentialLabel: String?): String {
+        return essentialLabel ?: "Always On"
     }
 
     /**

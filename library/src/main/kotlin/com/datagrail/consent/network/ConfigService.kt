@@ -14,6 +14,7 @@ internal class ConfigService(
     private val networkClient: NetworkClient,
     private val storage: ConsentStorage,
 ) {
+    // The demo's ConfigUrlLoader mirrors these decode settings; keep the two in sync.
     private val json =
         Json {
             ignoreUnknownKeys = true
@@ -47,7 +48,11 @@ internal class ConfigService(
         } catch (e: ConsentException.NetworkError) {
             // If network fails, try cached config
             storage.loadConfigCache()
-                ?: throw e
+                ?: throw if (e is ConsentException.HttpError && e.isClientError) {
+                    ConsentException.ConfigNotPublished(statusCode = e.statusCode, cause = e)
+                } else {
+                    e
+                }
         } catch (e: ConsentException.ValidationError) {
             throw e
         } catch (e: Exception) {
@@ -64,7 +69,8 @@ internal class ConfigService(
      * @throws ConsentException if all retries fail
      */
     suspend fun fetchConfigWithRetry(url: String): ConsentConfig {
-        return networkClient.retryWithBackoff {
+        // A definite 4xx or ConfigNotPublished gives up at once; 408, 429, 5xx and transport failures retry.
+        return networkClient.retryWithBackoff(shouldRetry = ConsentException::isRetryable) {
             fetchConfig(url)
         }
     }

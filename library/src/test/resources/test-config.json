@@ -73,6 +73,43 @@
               }
             },
             "categories": []
+          },
+          {
+            "id": "b1a2c3d4-e5f6-7890-abcd-ef1234567890",
+            "order": 2,
+            "button_action": "custom",
+            "type": "ConsentLayerButtonElement",
+            "target_consent_layer": null,
+            "translations": {
+              "en": {
+                "id": "a9b8c7d6-e5f4-3210-fedc-ba9876543210",
+                "locale": "en",
+                "value": "Do Not Sell or Share My Info"
+              }
+            },
+            "categories": [
+              {
+                "id": "5be5f52d-bcdb-4937-957f-740cab4d302f",
+                "consent_category_id": "936160e0-06fd-4de7-8b13-1ac51c6f0125",
+                "order": 1,
+                "hidden": false,
+                "primitive": "dg-category-essential",
+                "always_on": true,
+                "gtm_key": "dg-category-essential",
+                "uuids": [],
+                "cookie_patterns": [],
+                "translations": {
+                  "en": {
+                    "id": "63528d02-2251-4b9d-8665-c9c921829e85",
+                    "locale": "en",
+                    "name": "Essential",
+                    "description": "Essential cookies",
+                    "essential_label": "Always On"
+                  }
+                },
+                "show_tracking_details_link": false
+              }
+            ]
           }
         ]
       },
