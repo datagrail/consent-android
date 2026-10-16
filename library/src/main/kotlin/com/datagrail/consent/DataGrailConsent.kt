@@ -57,6 +57,9 @@ class DataGrailConsent private constructor() {
     @Volatile
     private var configUrl: String? = null
 
+    @Volatile
+    private var apiKey: String? = null
+
     // Application context, retained from initialize() so the SDK can read the device's live
     // ad-tracking signal on the caller's behalf. Application context only — never an Activity,
     // which would leak.
@@ -176,7 +179,7 @@ class DataGrailConsent private constructor() {
         configUrl: String,
         callback: ConsentCallback,
     ) {
-        initialize(context, configUrl) { result -> adaptResult(result, callback) }
+        initialize(context, configUrl, null) { result -> adaptResult(result, callback) }
     }
 
     /**
@@ -188,6 +191,38 @@ class DataGrailConsent private constructor() {
     fun initialize(
         context: Context,
         configUrl: String,
+        callback: (Result<Unit>) -> Unit,
+    ) {
+        initialize(context, configUrl, null, callback)
+    }
+
+    /**
+     * Initialize the DataGrail Consent SDK with optional API key for CTV pairing (Java-friendly)
+     * @param context Android application context
+     * @param configUrl URL to fetch consent configuration from
+     * @param apiKey Optional API key for reading consent via Universal Consent API (CTV pairing)
+     * @param callback Callback interface for success/failure
+     */
+    fun initialize(
+        context: Context,
+        configUrl: String,
+        apiKey: String?,
+        callback: ConsentCallback,
+    ) {
+        initialize(context, configUrl, apiKey) { result -> adaptResult(result, callback) }
+    }
+
+    /**
+     * Initialize the DataGrail Consent SDK with optional API key for CTV pairing (Kotlin-friendly)
+     * @param context Android application context
+     * @param configUrl URL to fetch consent configuration from
+     * @param apiKey Optional API key for reading consent via Universal Consent API (CTV pairing)
+     * @param callback Callback with result
+     */
+    fun initialize(
+        context: Context,
+        configUrl: String,
+        apiKey: String?,
         callback: (Result<Unit>) -> Unit,
     ) {
         // Validate URL format and scheme
@@ -283,6 +318,7 @@ class DataGrailConsent private constructor() {
             // this is still the current init — so a failed init never leaves a stale configUrl.
             this@DataGrailConsent.manager = manager
             this@DataGrailConsent.configUrl = configUrl
+            this@DataGrailConsent.apiKey = apiKey
             // applicationContext, not the caller's context: an Activity held here would leak for
             // the process lifetime, and the ad-id lookup only needs an application context.
             this@DataGrailConsent.appContext = context.applicationContext
@@ -1023,31 +1059,153 @@ class DataGrailConsent private constructor() {
         // Use getCategories() to get effective preferences (saved or default from initialCategories)
         val prefs = mgr.getCategories()
 
-        // Create and show dialog
-        val dialog =
-            com.datagrail.consent.ui.BannerDialog.newInstance(
+        // Detect if this is a TV device and route accordingly
+        val isTvDevice = com.datagrail.consent.utils.DeviceCapabilities.isTv(activity)
+
+        if (isTvDevice) {
+            // Show TV-optimized banner (always full-screen, D-pad navigation)
+            val tvDialog =
+                com.datagrail.consent.ui.BannerDialogTV.newInstance(
+                    config = cfg,
+                    preferences = prefs,
+                ) { updatedPreferences ->
+                    if (updatedPreferences != null) {
+                        // Save preferences if user made changes
+                        savePreferences(updatedPreferences) { result ->
+                            result.fold(
+                                onSuccess = { callback?.invoke(updatedPreferences) },
+                                onFailure = {
+                                    // Still report success even if network call fails,
+                                    // since preferences are saved locally
+                                    callback?.invoke(updatedPreferences)
+                                },
+                            )
+                        }
+                    } else {
+                        callback?.invoke(null)
+                    }
+                }
+
+            tvDialog.show(activity.supportFragmentManager, "ConsentBannerDialogTV")
+        } else {
+            // Show standard mobile banner
+            val dialog =
+                com.datagrail.consent.ui.BannerDialog.newInstance(
+                    config = cfg,
+                    preferences = prefs,
+                    displayStyle = style,
+                    textStyleConfig = textStyleConfig,
+                ) { updatedPreferences ->
+                    if (updatedPreferences != null) {
+                        // Save preferences if user made changes
+                        savePreferences(updatedPreferences) { result ->
+                            result.fold(
+                                onSuccess = { callback?.invoke(updatedPreferences) },
+                                onFailure = {
+                                    // Still report success even if network call fails,
+                                    // since preferences are saved locally
+                                    callback?.invoke(updatedPreferences)
+                                },
+                            )
+                        }
+                    } else {
+                        callback?.invoke(null)
+                    }
+                }
+
+            dialog.show(activity.supportFragmentManager, "ConsentBannerDialog")
+        }
+    }
+
+    // MARK: - CTV QR Pairing
+
+    /**
+     * Show the Android TV consent banner with QR code pairing (Java-friendly)
+     * Only available on Android TV devices. Displays a QR code that users scan with their phone
+     * to manage granular consent preferences. Polls for remote consent updates.
+     *
+     * @param activity The activity to show the dialog on
+     * @param publicBaseUrl Base URL for the phone consent page (e.g., "https://example.com")
+     * @param configUrl The consent config URL (for QR querystring)
+     * @param userIdentifier Optional user identifier for the pairing hash (defaults to ANDROID_ID)
+     * @param callback Callback interface for banner result
+     */
+    fun showBannerWithQRPairing(
+        activity: androidx.fragment.app.FragmentActivity,
+        publicBaseUrl: String,
+        configUrl: String,
+        userIdentifier: String?,
+        callback: PreferencesCallback,
+    ) {
+        showBannerWithQRPairing(activity, publicBaseUrl, configUrl, userIdentifier) { preferences ->
+            if (preferences != null) {
+                callback.onPreferencesSaved(preferences)
+            } else {
+                callback.onDismissed()
+            }
+        }
+    }
+
+    /**
+     * Show the Android TV consent banner with QR code pairing (Kotlin-friendly)
+     * Only available on Android TV devices. Displays a QR code that users scan with their phone
+     * to manage granular consent preferences. Polls for remote consent updates.
+     *
+     * @param activity The activity to show the dialog on
+     * @param publicBaseUrl Base URL for the phone consent page (e.g., "https://example.com")
+     * @param configUrl The consent config URL (for QR querystring)
+     * @param userIdentifier Optional user identifier for the pairing hash (defaults to ANDROID_ID)
+     * @param callback Called when the dialog is dismissed with updated preferences (null if dismissed/timeout)
+     */
+    fun showBannerWithQRPairing(
+        activity: androidx.fragment.app.FragmentActivity,
+        publicBaseUrl: String,
+        configUrl: String,
+        userIdentifier: String? = null,
+        apiBaseUrl: String? = null,
+        callback: ((ConsentPreferences?) -> Unit)? = null,
+    ) {
+        val mgr = manager
+        if (mgr == null) {
+            callback?.invoke(null)
+            return
+        }
+
+        val cfg = mgr.currentConfig
+        if (cfg == null) {
+            callback?.invoke(null)
+            return
+        }
+
+        // This API is only for TV devices
+        if (!com.datagrail.consent.utils.DeviceCapabilities.isTv(activity)) {
+            ConsentLogger.e("showBannerWithQRPairing is only available on Android TV devices")
+            callback?.invoke(null)
+            return
+        }
+
+        // Show the TV banner with QR pairing
+        val prefs = mgr.getCategories()
+        val tvDialog =
+            com.datagrail.consent.ui.BannerDialogTV.newInstanceWithQRPairing(
                 config = cfg,
                 preferences = prefs,
-                displayStyle = style,
-                textStyleConfig = textStyleConfig,
+                publicBaseUrl = publicBaseUrl,
+                configUrl = configUrl,
+                userIdentifier = userIdentifier,
+                apiKey = apiKey,
+                apiBaseUrl = apiBaseUrl,
             ) { updatedPreferences ->
                 if (updatedPreferences != null) {
-                    // Save preferences if user made changes
-                    savePreferences(updatedPreferences) { result ->
-                        result.fold(
-                            onSuccess = { callback?.invoke(updatedPreferences) },
-                            onFailure = {
-                                // Still report success even if network call fails,
-                                // since preferences are saved locally
-                                callback?.invoke(updatedPreferences)
-                            },
-                        )
-                    }
+                    // Adopt remote preferences without re-POSTing
+                    mgr.adoptRemotePreferences(updatedPreferences)
+                    onConsentChangedCallback?.invoke(updatedPreferences)
+                    callback?.invoke(updatedPreferences)
                 } else {
                     callback?.invoke(null)
                 }
             }
 
-        dialog.show(activity.supportFragmentManager, "ConsentBannerDialog")
+        tvDialog.show(activity.supportFragmentManager, "ConsentBannerDialogTVQR")
     }
 }
