@@ -549,7 +549,7 @@ class DataGrailConsent private constructor() {
      * on a login with no existing record it is not written on its own. A login that finds a record
      * replaces this value with the record's whatever `sync_optout` says (as on web and iOS). With
      * `sync_optout` on, a re-sync that finds a record does too, except while a choice made while
-     * signed in has not reached the record yet. [clearUserIdentifier] clears it to false; [reset]
+     * signed in (or during a login) has not reached the record yet. [clearUserIdentifier] clears it to false; [reset]
      * wipes it.
      *
      * @param optedOut true when the user opted out of the sale/sharing of their personal information.
@@ -976,6 +976,10 @@ class DataGrailConsent private constructor() {
      *
      * A read miss leaves local state untouched and writes nothing — "no record" is the absence of
      * a signal, not a denial, so the banner still shows.
+     *
+     * For the signed-in user it also records what it stored as the last sync, as [setUserIdentifier]
+     * does, so a later re-sync or [setCcpaOptout] never writes the GPC/ad-tracking-suppressed view
+     * over the user's cross-device opt-ins.
      *
      * The returned flag reports whether CATEGORY preferences were rehydrated. A found record that
      * carries no category choice (a signal-only record, e.g. a `ccpa_optout` set on the web before

@@ -186,6 +186,129 @@ class UniversalConsentResyncTests {
             assertEquals(false, written.last().cookieOptions["category_marketing"])
         }
 
+    // MARK: - Standalone rehydrate
+
+    @Test
+    fun `standalone rehydrate under a denied signal is not written by the next re-sync`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertTrue(sut.rehydrateFromUniversalConsent(userA, apiKey, TrackingSignal.DENIED))
+            assertEquals("local state holds the suppressed view", choice(marketing = false), storedPreferences)
+            sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
+
+            verifyNoWrite()
+            sut.setCcpaOptout(true)
+            assertEquals(
+                "the record's raw opt-in",
+                true,
+                writtenPreferences().single().cookieOptions["category_marketing"],
+            )
+        }
+
+    @Test
+    fun `standalone rehydrate of a GPC record is not written by the next re-sync after a relaunch`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+
+            // Another device recorded GPC since; the raw opt-in is unchanged.
+            recordIs(record(marketing = true, gpc = true))
+            assertTrue(sut.rehydrateFromUniversalConsent(userA, apiKey))
+            assertEquals(choice(marketing = false), storedPreferences)
+            val state = requireNotNull(storedSyncState)
+            assertEquals("what the rehydrate stored", storedPreferences, state.syncedLocal)
+            val rawOptions = requireNotNull(state.syncedRaw).cookieOptions
+            val rawMarketing = rawOptions.single { it.gtmKey == "category_marketing" }
+            assertTrue("the record's raw opt-in", rawMarketing.isEnabled)
+
+            relaunch()
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+        }
+
+    @Test
+    fun `standalone rehydrate for another identity clears the sync state`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertTrue(sut.rehydrateFromUniversalConsent(userB, apiKey))
+
+            assertNull("the stored view is no longer what user A's sync left", storedSyncState)
+            assertEquals(hashFor(userA), storedBoundHash)
+        }
+
+    // MARK: - Saves and setter calls during a sync's read
+
+    @Test
+    fun `save during a re-sync read is written by the next re-sync`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+
+            // The record is gone (a miss), and the user saves a new choice while the read is in flight.
+            val readGate = holdTheRead(null)
+            val resync = launch { sut.setUserIdentifier(userA, apiKey) }
+            testScheduler.runCurrent()
+            sut.savePreferences(choice(marketing = false, analytics = true)) {}
+            readGate.complete(Unit)
+            resync.join()
+            verifyNoWrite()
+
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertEquals(false, writtenPreferences().single().cookieOptions["category_marketing"])
+        }
+
+    @Test
+    fun `save the re-sync's adopt overwrote is not later written as the suppressed view`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
+
+            val readGate = holdTheRead(record(marketing = true))
+            val resync = launch { sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED) }
+            testScheduler.runCurrent()
+            sut.savePreferences(choice(marketing = true, analytics = false)) {}
+            // The adopt lands after the save and overwrites it with the record's suppressed view.
+            readGate.complete(Unit)
+            resync.join()
+            assertEquals(choice(marketing = false), storedPreferences)
+
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
+
+            verifyNoWrite()
+        }
+
+    @Test
+    fun `setter during a first login read is not reverted by the next re-sync or rehydrate`() =
+        runTest {
+            val readGate = holdTheRead(record(marketing = true))
+            val login = launch { sut.setUserIdentifier(userA, apiKey) }
+            testScheduler.runCurrent()
+            sut.setCcpaOptout(true)
+            readGate.complete(Unit)
+            login.join()
+            assertTrue(sut.getCcpaOptout())
+            assertTrue("no write carried it, so it is pending", storedCcpaWritePending)
+
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+            sut.rehydrateFromUniversalConsent(userA, apiKey)
+            assertTrue("the record's older false does not replace it", sut.getCcpaOptout())
+
+            // The next write carries it.
+            sut.savePreferences(choice(marketing = true, analytics = true)) {}
+            sut.setUserIdentifier(userA, apiKey)
+            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull())
+            assertFalse(storedCcpaWritePending)
+        }
+
     // MARK: - The persisted session's lifetime
 
     @Test
@@ -251,6 +374,16 @@ class UniversalConsentResyncTests {
         whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(record)
     }
 
+    /** Serve [record] only once the returned gate completes, so a test can act during the read. */
+    private suspend fun holdTheRead(record: UniversalConsentRecord?): CompletableDeferred<Unit> {
+        val gate = CompletableDeferred<Unit>()
+        whenever(mockConsentService.getUniversalConsent(any(), any(), any())).doSuspendableAnswer {
+            gate.await()
+            record
+        }
+        return gate
+    }
+
     private suspend fun writtenPreferences(): List<UniversalConsentPreferences> {
         val captor = argumentCaptor<UniversalConsentPreferences>()
         verify(mockConsentService, org.mockito.Mockito.atLeastOnce())
@@ -281,7 +414,10 @@ class UniversalConsentResyncTests {
                 ),
         )
 
-    private fun record(marketing: Boolean): UniversalConsentRecord =
+    private fun record(
+        marketing: Boolean,
+        gpc: Boolean = false,
+    ): UniversalConsentRecord =
         UniversalConsentRecord(
             status = "found",
             consentPreferences =
@@ -290,5 +426,6 @@ class UniversalConsentResyncTests {
                     cookieOptions = mapOf("category_essential" to true, "category_marketing" to marketing),
                 ),
             ccpaOptout = false,
+            gpc = gpc,
         )
 }
