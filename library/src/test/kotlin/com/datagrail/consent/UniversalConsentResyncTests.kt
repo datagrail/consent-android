@@ -166,6 +166,25 @@ class UniversalConsentResyncTests {
             assertEquals(choice(marketing = false), storedPreferences)
         }
 
+    @Test
+    fun `setter before the config loads on a bound device is still marked pending`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+
+            relaunch()
+            val config = sut.currentConfig
+            sut.currentConfig = null
+            sut.setCcpaOptout(true)
+            assertTrue(storedCcpaWritePending)
+
+            sut.currentConfig = config
+            sut.setUserIdentifier(userA, apiKey)
+
+            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull())
+            assertTrue("the record's older false does not replace it", sut.getCcpaOptout())
+        }
+
     // MARK: - The user changed something
 
     @Test

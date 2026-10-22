@@ -1145,14 +1145,15 @@ internal class ConsentManager(
     fun saveCcpaOptout(optedOut: Boolean) = persistCcpaChoice(optedOut)
 
     /**
-     * Store a host CCPA choice. When the device is bound and the gate is on, the choice is marked
-     * pending until a Universal Consent write carries it, so a later re-sync or rehydrate cannot
-     * replace it with the record's older value.
+     * Store a host CCPA choice. When the device is bound, the choice is marked pending until a
+     * Universal Consent write carries it, so a later re-sync or rehydrate cannot replace it with the
+     * record's older value. It is marked whatever the gate says (the config may not have loaded yet
+     * at app start); every reader of the marker checks the `syncOptout` gate itself.
      */
     private fun persistCcpaChoice(optedOut: Boolean) {
         storage.saveCcpaOptout(optedOut)
         ccpaChoiceRevision.incrementAndGet()
-        if (storage.loadBoundUserHash() != null && syncsCcpaOptout(currentConfig)) {
+        if (storage.loadBoundUserHash() != null) {
             storage.saveCcpaWritePending(true)
         }
     }
