@@ -419,7 +419,7 @@ internal class ConsentManager(
      */
     private class Rehydrated(
         val raw: ConsentPreferences,
-        val saveRevision: Int,
+        val saveRevision: Int?,
     )
 
     /**
@@ -443,6 +443,9 @@ internal class ConsentManager(
      * @param opGeneration When given, the identity-operation generation captured before the read. If
      *   a logout/reset bumped it during the read, nothing is persisted and this returns null.
      * @param ccpaRevision When given, the CCPA choice revision captured before the read.
+     * @param persistsLocal False when the caller will write its own local choice through right after:
+     *   local state already holds that choice, the newer one, so the record's view is not stored over
+     *   it (and no save revision is reported).
      * @param recordsSyncState For the standalone rehydrate, which has no later bind step: record the
      *   sync state for the bound identity itself, see [rehydrateFromUniversalConsent].
      * @return the record's raw preferences, or null on a miss.
@@ -455,6 +458,7 @@ internal class ConsentManager(
         adoptCcpaOptout: Boolean = true,
         opGeneration: Int? = null,
         ccpaRevision: Int? = null,
+        persistsLocal: Boolean = true,
         recordsSyncState: Boolean = false,
     ): Rehydrated? {
 
@@ -493,6 +497,7 @@ internal class ConsentManager(
         }
 
         val raw = rawPreferences(record) ?: return null
+        if (!persistsLocal) return Rehydrated(raw, saveRevision = null)
 
         // Local state gets the RECONCILED view. Shares the exact reconciliation policy with
         // fetchUniversalConsent via reconciledCookieOptions, so the persisted state and the
@@ -743,13 +748,16 @@ internal class ConsentManager(
                         adoptCcpaOptout = resyncChoice == null,
                         opGeneration = opGeneration,
                         ccpaRevision = ccpaRevisionAtEntry,
+                        // A local change is written through below, so the device keeps showing it
+                        // rather than the record's older view.
+                        persistsLocal = resyncChoice == null,
                     )
-                rehydrated?.let { saveRevisionBaseline = it.saveRevision }
+                rehydrated?.saveRevision?.let { saveRevisionBaseline = it }
                 val rawFromRecord = rehydrated?.raw
                 // A logout landed during the read: rehydrate persisted nothing, and anything stored
                 // since (a save or a setter call after the logout) is newer, so leave it alone.
                 if (identityOperationGeneration.get() != opGeneration) return
-                if (rawFromRecord != null) {
+                if (rawFromRecord != null && resyncChoice == null) {
                     getCategories()?.let { onRehydrated?.invoke(it) }
                 }
                 // Nothing to write: the record's raw choice (if any) is what was just adopted. An

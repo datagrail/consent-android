@@ -163,6 +163,22 @@ class UniversalConsentResyncTests {
         }
 
     @Test
+    fun `re-sync writing a user change through keeps that change locally`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+            val userChoice = choice(marketing = false, analytics = true)
+            sut.savePreferences(userChoice) {}
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertEquals(false, writtenPreferences().single().cookieOptions["category_marketing"])
+            assertEquals("not the record's older view", userChoice, storedPreferences)
+            assertEquals(userChoice, storedSyncState?.syncedLocal)
+            assertEquals(userChoice, storedSyncState?.syncedRaw)
+        }
+
+    @Test
     fun `save during an in-flight write is written by the next re-sync`() =
         runTest {
             storedPreferences = choice(marketing = true)
