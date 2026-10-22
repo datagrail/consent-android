@@ -766,7 +766,14 @@ internal class ConsentManager(
                 if (resyncChoice == null) {
                     syncedRaw = rawFromRecord ?: syncStateAtEntry?.syncedRaw?.takeIf { unchangedSinceSync }
                 }
-                resyncChoice
+                // A bound CCPA choice that has not reached the record yet (e.g. a setter call after a
+                // restart, with no session to write through) is a local change too: write it with the
+                // record's own raw choice just read, so the categories another device set stay as
+                // they are.
+                val ccpaPending =
+                    resyncChoice == null && localChoice != null && syncsCcpaOptout(config) &&
+                        storage.loadCcpaWritePending()
+                resyncChoice ?: rawFromRecord?.takeIf { ccpaPending }
             } else {
                 // LOGIN. Reads the record directly so a found record without a choice is told apart
                 // from a genuine miss (rehydrate folds the two together).

@@ -143,6 +143,29 @@ class UniversalConsentResyncTests {
             assertEquals(true, writtenPreferences().single().cookieOptions["category_marketing"])
         }
 
+    @Test
+    fun `pending setter choice after a relaunch is written by an unchanged re-sync`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+
+            relaunch()
+            // No session after the restart, so the setter stays local and pending.
+            sut.setCcpaOptout(true)
+            verifyNoWrite()
+            assertTrue(storedCcpaWritePending)
+
+            // Another device turned marketing off since; that stays as the record has it.
+            recordIs(record(marketing = false))
+            sut.setUserIdentifier(userA, apiKey)
+
+            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull())
+            assertEquals(false, writtenPreferences().single().cookieOptions["category_marketing"])
+            assertFalse(storedCcpaWritePending)
+            assertTrue(sut.getCcpaOptout())
+            assertEquals(choice(marketing = false), storedPreferences)
+        }
+
     // MARK: - The user changed something
 
     @Test
@@ -314,15 +337,15 @@ class UniversalConsentResyncTests {
             assertTrue("no write carried it, so it is pending", storedCcpaWritePending)
 
             recordIs(record(marketing = true))
-            sut.setUserIdentifier(userA, apiKey)
             sut.rehydrateFromUniversalConsent(userA, apiKey)
             assertTrue("the record's older false does not replace it", sut.getCcpaOptout())
+            verifyNoWrite()
 
-            // The next write carries it.
-            sut.savePreferences(choice(marketing = true, analytics = true)) {}
+            // The next re-sync carries it, even with no category change.
             sut.setUserIdentifier(userA, apiKey)
             verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull())
             assertFalse(storedCcpaWritePending)
+            assertTrue(sut.getCcpaOptout())
         }
 
     @Test
