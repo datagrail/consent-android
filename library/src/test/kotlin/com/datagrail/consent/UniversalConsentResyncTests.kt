@@ -221,6 +221,21 @@ class UniversalConsentResyncTests {
         }
 
     @Test
+    fun `setter write-through of a user change is not sent again by the next re-sync`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+            sut.savePreferences(choice(marketing = false)) {}
+
+            sut.setCcpaOptout(true)
+            assertEquals(1, writtenPreferences().size)
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertEquals("the re-sync adopts instead of writing again", 1, writtenPreferences().size)
+        }
+
+    @Test
     fun `save during an in-flight write is written by the next re-sync`() =
         runTest {
             storedPreferences = choice(marketing = true)

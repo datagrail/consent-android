@@ -1110,9 +1110,12 @@ internal class ConsentManager(
             // The bound hash moved (a logout, or a login to another identity) — the captured session
             // is no longer the bound one, so don't POST to it.
             if (session.userHash != storage.loadBoundUserHash()) return@withLock
-            val localChoice =
-                storage.loadPreferences()?.let { rawChoice(it, syncState(session.userHash)) }
-                    ?: return@withLock
+            // The stored choice and the save revision it was read at, together, so a save that lands
+            // during the POST is not recorded as synced below.
+            val (stored, saveRevision) =
+                synchronized(localChoiceLock) { storage.loadPreferences() to preferencesSaveRevision.get() }
+            if (stored == null) return@withLock
+            val localChoice = rawChoice(stored, syncState(session.userHash))
             // A logout/reset landed while preparing the write (including during the reads above):
             // don't write through to the now-unbound (or re-bound) identity.
             if (identityOperationGeneration.get() != opGeneration) return@withLock
@@ -1140,6 +1143,15 @@ internal class ConsentManager(
             // Reached the record. A newer toggle made during the POST stays pending for its own write.
             if (storage.loadCcpaOptout() == writtenCcpa) {
                 storage.saveCcpaWritePending(false)
+            }
+            // The record now holds this choice, so the next re-sync must not send it again: the edge
+            // stamps every write with its write time, so a repeat could beat a newer choice another
+            // device made meanwhile (TRUST-2902). Not after a logout, nor over a save made since.
+            if (identityOperationGeneration.get() != opGeneration) return@withLock
+            synchronized(localChoiceLock) {
+                if (preferencesSaveRevision.get() == saveRevision) {
+                    storage.saveSyncState(UniversalConsentSyncState(session.userHash, stored, localChoice))
+                }
             }
         }
     }
