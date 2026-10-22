@@ -746,13 +746,9 @@ internal class ConsentManager(
                     )
                 rehydrated?.let { saveRevisionBaseline = it.saveRevision }
                 val rawFromRecord = rehydrated?.raw
-                // A logout landed during the read: rehydrate has already persisted the reconciled
-                // view, so re-clear it and leave the device neutral and unbound rather than letting
-                // this stale re-sync resurrect the prior identity's state.
-                if (identityOperationGeneration.get() != opGeneration) {
-                    returnToNeutral(null)
-                    return
-                }
+                // A logout landed during the read: rehydrate persisted nothing, and anything stored
+                // since (a save or a setter call after the logout) is newer, so leave it alone.
+                if (identityOperationGeneration.get() != opGeneration) return
                 if (rawFromRecord != null) {
                     getCategories()?.let { onRehydrated?.invoke(it) }
                 }

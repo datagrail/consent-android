@@ -309,6 +309,26 @@ class UniversalConsentResyncTests {
             assertFalse(storedCcpaWritePending)
         }
 
+    @Test
+    fun `logout during a re-sync read keeps what was stored after it`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+
+            val readGate = holdTheRead(record(marketing = true))
+            val resync = launch { sut.setUserIdentifier(userA, apiKey) }
+            testScheduler.runCurrent()
+            sut.clearUserIdentifier()
+            sut.savePreferences(choice(marketing = false, analytics = true)) {}
+            sut.setCcpaOptout(true)
+            readGate.complete(Unit)
+            resync.join()
+
+            assertEquals(choice(marketing = false, analytics = true), storedPreferences)
+            assertTrue(sut.getCcpaOptout())
+            assertNull(storedBoundHash)
+        }
+
     // MARK: - The persisted session's lifetime
 
     @Test
