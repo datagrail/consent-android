@@ -207,6 +207,24 @@ class UniversalConsentCcpaOptoutTests {
         }
 
     @Test
+    fun `adapter write-through does not re-persist over a newer synchronous toggle`() =
+        runTest {
+            storedPreferences = choice(marketing = true)
+            recordIs(null)
+            sut.setUserIdentifier(userA, apiKey)
+
+            // setCcpaOptout(true); setCcpaOptout(false) on Main: both synchronous persists run first,
+            // then the launched write-throughs.
+            val opGeneration = sut.identityOperationGenerationSnapshot()
+            sut.saveCcpaOptout(true)
+            sut.saveCcpaOptout(false)
+            sut.setCcpaOptout(true, opGeneration, persistsLocally = false)
+
+            assertFalse("the last choice stands", sut.getCcpaOptout())
+            assertEquals(listOf(false, false), writtenCcpa())
+        }
+
+    @Test
     fun `write-through posts the latest stored flag, not the captured parameter`() =
         runTest {
             storedPreferences = choice(marketing = true)

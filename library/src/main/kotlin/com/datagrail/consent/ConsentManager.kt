@@ -1077,6 +1077,7 @@ internal class ConsentManager(
     suspend fun setCcpaOptout(
         optedOut: Boolean,
         opGeneration: Int = identityOperationGeneration.get(),
+        persistsLocally: Boolean = true,
     ) {
         // Token for this write. The public adapter persists the flag synchronously and then LAUNCHES
         // this coroutine, so a clearUserIdentifier()/reset() can land before it even starts; the
@@ -1087,7 +1088,9 @@ internal class ConsentManager(
         // the default argument. Same stale-write corruption guard (TRUST-2491/TRUST-2902) every other
         // identity-scoped operation in this file carries.
         if (identityOperationGeneration.get() != opGeneration) return
-        persistCcpaChoice(optedOut)
+        // The adapter already persisted the choice synchronously ([saveCcpaOptout]) and passes false:
+        // persisting the captured value again here could overwrite a newer toggle made since.
+        if (persistsLocally) persistCcpaChoice(optedOut)
         // Fast path only; everything below is re-read under the lock.
         if (!syncsCcpaOptout(currentConfig)) return
         if (universalConsentSession == null) return

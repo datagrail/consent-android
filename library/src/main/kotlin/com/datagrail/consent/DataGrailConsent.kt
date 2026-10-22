@@ -561,14 +561,20 @@ class DataGrailConsent private constructor() {
     ) {
         // Persist synchronously so getCcpaOptout() reflects the choice immediately; the
         // write-through (if any) then runs on the SDK scope like the other universal consent calls.
-        manager?.saveCcpaOptout(optedOut)
+        val persisted = manager?.let { it.saveCcpaOptout(optedOut) } != null
         // Capture the identity-operation generation NOW, before the write-through is launched. A
         // clearUserIdentifier()/reset() can land between this call and the launched coroutine running;
         // passing the pre-launch generation lets setCcpaOptout detect it and skip BOTH the local
         // re-persist and the POST, so a logout isn't silently undone by the trailing write-through.
         val opGeneration = manager?.identityOperationGenerationSnapshot()
         launchUniversalConsentOperation(callback, readSignal = false) { mgr, _ ->
-            mgr.setCcpaOptout(optedOut, opGeneration ?: mgr.identityOperationGenerationSnapshot())
+            // When already persisted above, persisting the captured value again here could revert a
+            // newer toggle made since.
+            mgr.setCcpaOptout(
+                optedOut,
+                opGeneration ?: mgr.identityOperationGenerationSnapshot(),
+                persistsLocally = !persisted,
+            )
         }
     }
 
