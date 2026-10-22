@@ -418,6 +418,7 @@ internal class ConsentManager(
      * after the reconciled view was stored (the baseline a sync checks for a later user save).
      */
     private class Rehydrated(
+        val record: UniversalConsentRecord,
         val raw: ConsentPreferences,
         val saveRevision: Int?,
     )
@@ -444,8 +445,8 @@ internal class ConsentManager(
      *   a logout/reset bumped it during the read, nothing is persisted and this returns null.
      * @param ccpaRevision When given, the CCPA choice revision captured before the read.
      * @param persistsLocal False when the caller will write its own local choice through right after:
-     *   local state already holds that choice, the newer one, so the record's view is not stored over
-     *   it (and no save revision is reported).
+     *   that choice is newer, so the record's view is not stored over it (and no save revision is
+     *   reported). The caller stores the view of its own choice once the write lands.
      * @param recordsSyncState For the standalone rehydrate, which has no later bind step: record the
      *   sync state for the bound identity itself, see [rehydrateFromUniversalConsent].
      * @return the record's raw preferences, or null on a miss.
@@ -502,7 +503,7 @@ internal class ConsentManager(
         }
 
         val raw = rawPreferences(record) ?: return null
-        if (!persistsLocal) return Rehydrated(raw, saveRevision = null)
+        if (!persistsLocal) return Rehydrated(record, raw, saveRevision = null)
 
         // Local state gets the RECONCILED view. Shares the exact reconciliation policy with
         // fetchUniversalConsent via reconciledCookieOptions, so the persisted state and the
@@ -534,7 +535,7 @@ internal class ConsentManager(
             }
         // (The record's CCPA choice was already adopted above, before the empty-preferences early
         // return, so a signal-only record is covered too.)
-        return Rehydrated(raw, saveRevision)
+        return Rehydrated(record, raw, saveRevision)
     }
 
     /**
@@ -732,6 +733,8 @@ internal class ConsentManager(
         // moved to the one right after each local persist below (any save before a persist was
         // overwritten by it). A save after it, during the read or the write, is a user change.
         var saveRevisionBaseline = preferencesSaveRevision.get()
+        // The record a re-sync read before writing a local change through, for that change's local view.
+        var writeThroughRecord: UniversalConsentRecord? = null
 
         // READ then WRITE. A read FAILURE THROWS and blocks the write — overwriting a record we
         // could not read would silently erase the user's real cross-device choice (the TRUST-2491
@@ -763,6 +766,7 @@ internal class ConsentManager(
                         persistsLocal = resyncChoice == null,
                     )
                 rehydrated?.saveRevision?.let { saveRevisionBaseline = it }
+                if (resyncChoice != null) writeThroughRecord = rehydrated?.record
                 val rawFromRecord = rehydrated?.raw
                 // A logout landed during the read: rehydrate persisted nothing, and anything stored
                 // since (a save or a setter call after the logout) is newer, so leave it alone.
@@ -851,7 +855,7 @@ internal class ConsentManager(
         // What this sync leaves, captured BEFORE any write is dispatched. It is recorded only if no
         // save landed since saveRevisionBaseline, so a save made during the read or while the write
         // is in flight still reads as a user change on the next re-sync.
-        val syncedLocal = storage.loadPreferences()
+        var syncedLocal = storage.loadPreferences()
         // The CCPA flag a write carried; null when nothing was written.
         var writtenCcpa: Boolean? = null
         if (toWrite != null) {
@@ -880,6 +884,37 @@ internal class ConsentManager(
             // The record now holds the flag (when the gate is on), so nothing is pending.
             if (config.universalConsent?.syncOptout == true && storage.loadCcpaOptout() == carriedCcpa) {
                 storage.saveCcpaWritePending(false)
+            }
+            // A re-sync that wrote a local change through stores that change's signal-reconciled view,
+            // as an adopt stores the record's, now that the record holds it (a failed write leaves
+            // the raw choice in place to be written again). Not over a save made since, nor after a
+            // logout.
+            val record = writeThroughRecord
+            if (record != null && identityOperationGeneration.get() == opGeneration) {
+                val viewChanged =
+                    synchronized(localChoiceLock) {
+                    if (preferencesSaveRevision.get() == saveRevisionBaseline) {
+                        val reconciled =
+                            reconciledCookieOptions(
+                                record,
+                                trackingSignal,
+                                config,
+                                toWrite.cookieOptions.associate { it.gtmKey to it.isEnabled },
+                            )
+                        val view =
+                            ConsentPreferences(
+                                isCustomised = true,
+                                cookieOptions = reconciled.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
+                            )
+                        storage.savePreferences(view)
+                        storage.saveConfigVersion(config.version)
+                        syncedLocal = view
+                        view != localChoice
+                    } else {
+                        false
+                    }
+                }
+                if (viewChanged) getCategories()?.let { onRehydrated?.invoke(it) }
             }
         }
         // A logout landed while the read/write was suspended: don't rebind the identity the device

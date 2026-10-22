@@ -221,6 +221,22 @@ class UniversalConsentResyncTests {
         }
 
     @Test
+    fun `re-sync writing a user change through under a signal stores its suppressed view, once written`() =
+        runTest {
+            recordIs(record(marketing = false))
+            sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
+            sut.savePreferences(choice(marketing = true)) {}
+
+            sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
+
+            assertEquals("the raw opt-in is written", true, writtenPreferences().single().cookieOptions["category_marketing"])
+            assertEquals("local state is its suppressed view", choice(marketing = false), storedPreferences)
+
+            sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
+            assertEquals("the next re-sync does not write the suppressed view", 1, writtenPreferences().size)
+        }
+
+    @Test
     fun `setter write-through of a user change is not sent again by the next re-sync`() =
         runTest {
             recordIs(record(marketing = true))
