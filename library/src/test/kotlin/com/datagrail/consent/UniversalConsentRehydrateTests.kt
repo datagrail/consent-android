@@ -241,42 +241,33 @@ class UniversalConsentRehydrateTests {
             assertTrue(sut.isCategoryEnabled("category_essential"))
         }
 
-    // MARK: - Rehydration persists the reconciled view but hands back the raw one
+    // MARK: - Rehydration persists the reconciled view
 
     /**
-     * The read-then-write flow's core invariant, and the reason
-     * [ConsentManager.rehydrateReturningRawPreferences] exists at all.
-     *
      * Rehydration deliberately persists the SUPPRESSED state locally — that is what makes
-     * [ConsentManager.isCategoryEnabled] honour the device signal. But the write that follows must
-     * carry the user's real choice. Sourcing it from `getCategories()` after rehydration would read
-     * the suppression back and store it as consent, erasing a web opt-in for every device on the
-     * identifier the first time the app opens with ad tracking limited.
+     * [ConsentManager.isCategoryEnabled] honour the device signal. The record's raw choice is what a
+     * later write carries (see the re-sync and setCcpaOptout tests), never this stored view.
      */
     @Test
-    fun `rehydrate returns the raw preferences while storing the suppressed ones`() =
+    fun `rehydrate stores the suppressed view`() =
         runTest {
             sut.currentConfig = universalConfig()
             stubRecord(marketing = true)
 
-            val raw = sut.rehydrateReturningRawPreferences("user@example.com", "dg_key", TrackingSignal.DENIED)
+            assertTrue(sut.rehydrateFromUniversalConsent("user@example.com", "dg_key", TrackingSignal.DENIED))
 
-            // Handed back to the write path: the user's actual opt-in.
-            assertNotNull(raw)
-            assertTrue("raw preferences keep the opt-in", raw!!.isCategoryEnabled("category_marketing"))
-            // Persisted locally: the suppressed view, so reads honour the device signal.
             assertFalse(sut.isCategoryEnabled("category_marketing"))
             assertTrue(sut.isCategoryEnabled("category_essential"))
         }
 
     @Test
-    fun `rehydrate returns null on a miss`() =
+    fun `rehydrate reports a miss`() =
         runTest {
             sut.currentConfig = universalConfig()
             whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(null)
 
             // A miss is the absence of a signal, not a denial — nothing to write, nothing stored.
-            assertNull(sut.rehydrateReturningRawPreferences("user@example.com", "dg_key", TrackingSignal.AUTHORIZED))
+            assertFalse(sut.rehydrateFromUniversalConsent("user@example.com", "dg_key", TrackingSignal.AUTHORIZED))
             verify(mockStorage, never()).savePreferences(any())
         }
 

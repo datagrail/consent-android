@@ -300,7 +300,7 @@ internal class ConsentManager(
      * The single source of truth for signal reconciliation on a fetched record.
      *
      * Both [fetchUniversalConsent] (which hands the reconciled record back to a caller) and
-     * [rehydrateReturningRawPreferences] (which persists the reconciled view to local storage)
+     * [rehydrate] (which persists the reconciled view to local storage)
      * MUST produce a byte-identical reconciled map for the same record — one drives what a caller
      * acts on directly, the other drives [isCategoryEnabled] / [needsConsent]. Keeping the suppress
      * predicate (`record.gpc || trackingSignal.suppressesNonEssential`) and the essential-key set in
@@ -414,44 +414,6 @@ internal class ConsentManager(
     }
 
     /**
-     * Rehydrate, and hand back the RAW preferences from the stored record.
-     *
-     * Same behaviour as [rehydrateFromUniversalConsent], except the return value carries the
-     * record's raw preferences (or null on a miss) rather than a Boolean. The read-then-write entry
-     * point needs this: rehydration deliberately persists the RECONCILED view locally, so a write
-     * that sourced its payload from [getCategories] afterwards would read that suppression back and
-     * store it in the universal record as though the user had chosen it. Returning the raw
-     * preferences lets the write carry what the user actually consented to.
-     *
-     * @param config Optional config snapshot to validate/read against. [setUserIdentifier] passes
-     *   the snapshot it captured at entry so the READ here and the WRITE that follows use ONE
-     *   config — otherwise this would re-read [currentConfig] independently and a concurrent
-     *   [loadConfig] could make the read and write disagree on consentProjectId/version. Other
-     *   callers omit it and get a fresh [requireUniversalConsentReady].
-     * @param adoptCcpaOptout Whether a found record's `ccpa_optout` replaces the local flag
-     *   (TRUST-2591: the record is authoritative for the stored choice), applied only when
-     *   `universalConsent.syncOptout` is on. [setUserIdentifier] passes
-     *   false on a re-sync that is about to write the local flag through, so a failed write cannot
-     *   drop the user's newer local choice. The adopt is also skipped while a bound CCPA choice has
-     *   not reached the record yet ([ConsentStorage.loadCcpaWritePending]), or when [ccpaRevision] is
-     *   given and a setter call landed since it was captured.
-     * @param opGeneration When given, the identity-operation generation captured before the read. If
-     *   a logout/reset bumped it during the read, nothing is persisted and this returns null.
-     * @param ccpaRevision When given, the CCPA choice revision captured before the read.
-     * @return the record's raw preferences, or null on a miss.
-     */
-    suspend fun rehydrateReturningRawPreferences(
-        identifier: String,
-        apiKey: String,
-        trackingSignal: TrackingSignal = TrackingSignal.NOT_DETERMINED,
-        config: ConsentConfig = requireUniversalConsentReady(),
-        adoptCcpaOptout: Boolean = true,
-        opGeneration: Int? = null,
-        ccpaRevision: Int? = null,
-    ): ConsentPreferences? =
-        rehydrate(identifier, apiKey, trackingSignal, config, adoptCcpaOptout, opGeneration, ccpaRevision)?.raw
-
-    /**
      * What [rehydrate] persisted: the record's RAW choice, and the user-save revision read right
      * after the reconciled view was stored (the baseline a sync checks for a later user save).
      */
@@ -461,9 +423,29 @@ internal class ConsentManager(
     )
 
     /**
-     * [rehydrateReturningRawPreferences], also reporting the save revision right after the persist.
-     * With [recordsSyncState] (the standalone rehydrate, which has no later bind step) it records the
-     * sync state for the bound identity itself, see [rehydrateFromUniversalConsent].
+     * Rehydrate local state from the stored record, and hand back the record's RAW preferences with
+     * the save revision read right after the persist.
+     *
+     * Rehydration deliberately persists the RECONCILED view locally, so a write that sourced its
+     * payload from [getCategories] afterwards would read that suppression back and store it in the
+     * universal record as though the user had chosen it. Returning the raw preferences lets the
+     * caller record and write what the user actually consented to.
+     *
+     * @param config The config snapshot to validate/read against. [setUserIdentifier] passes the
+     *   snapshot it captured at entry so the READ here and the WRITE that follows use ONE config.
+     * @param adoptCcpaOptout Whether a found record's `ccpa_optout` replaces the local flag
+     *   (TRUST-2591: the record is authoritative for the stored choice), applied only when
+     *   `universalConsent.syncOptout` is on. [setUserIdentifier] passes false on a re-sync that is
+     *   about to write the local flag through, so a failed write cannot drop the user's newer local
+     *   choice. The adopt is also skipped while a bound CCPA choice has not reached the record yet
+     *   ([ConsentStorage.loadCcpaWritePending]), or when [ccpaRevision] is given and a setter call
+     *   landed since it was captured.
+     * @param opGeneration When given, the identity-operation generation captured before the read. If
+     *   a logout/reset bumped it during the read, nothing is persisted and this returns null.
+     * @param ccpaRevision When given, the CCPA choice revision captured before the read.
+     * @param recordsSyncState For the standalone rehydrate, which has no later bind step: record the
+     *   sync state for the bound identity itself, see [rehydrateFromUniversalConsent].
+     * @return the record's raw preferences, or null on a miss.
      */
     private suspend fun rehydrate(
         identifier: String,
@@ -570,7 +552,7 @@ internal class ConsentManager(
 
     /**
      * The record's RAW category choice, or null when it carries none (signal-only). This is the one
-     * place a record's raw choice is derived; both [rehydrateReturningRawPreferences] and the
+     * place a record's raw choice is derived; both [rehydrate] and the
      * [setUserIdentifier] login adopt use it, and it is what a UC session holds as `syncedRaw` for a
      * later [setCcpaOptout] write-through (TRUST-3074).
      *
@@ -592,7 +574,7 @@ internal class ConsentManager(
      * universal consent store in one coordinated operation. This is the headline invariant of the
      * feature and it lives here, in the coordinator, not in the public singleton adapter.
      *
-     * READ first: [rehydrateReturningRawPreferences] pulls any existing record and applies it to
+     * READ first: [rehydrate] pulls any existing record and applies it to
      * local state, so a choice the same person made on the web or another device is honored here.
      * A read FAILURE THROWS and blocks any write — the server never merges, so overwriting a record
      * we could not read would silently erase the user's real cross-device choice (the TRUST-2491
@@ -723,9 +705,11 @@ internal class ConsentManager(
         // the capture above: nothing below adopts or clears over it, and a write carries it.
         val ccpaRevisionAtEntry = ccpaChoiceRevision.get()
         val ccpaChangedMidFlight = { ccpaChoiceRevision.get() != ccpaRevisionAtEntry }
+        // What the last sync for this identity left, read once for this call.
+        val syncStateAtEntry = if (isResync) syncState(userHash) else null
         // The user changed nothing on this device since the last sync for this identity: the record
         // is adopted and nothing is written (TRUST-2902).
-        val unchangedSinceSync = isResync && unchangedSinceSync(localChoice, userHash)
+        val unchangedSinceSync = unchangedSinceSync(localChoice, syncStateAtEntry)
         // The RAW choice the record holds once this call is done: what it wrote, or the record's own
         // choice it adopted. Null when neither (a miss with nothing written, a signal-only record).
         var syncedRaw: ConsentPreferences? = null
@@ -776,7 +760,7 @@ internal class ConsentManager(
                 // unchanged re-sync that read none (a miss, a signal-only record) keeps the raw choice
                 // the last sync recorded, since local state is still the view built from it.
                 if (resyncChoice == null) {
-                    syncedRaw = rawFromRecord ?: syncState(userHash)?.syncedRaw?.takeIf { unchangedSinceSync }
+                    syncedRaw = rawFromRecord ?: syncStateAtEntry?.syncedRaw?.takeIf { unchangedSinceSync }
                 }
                 resyncChoice
             } else {
@@ -799,7 +783,7 @@ internal class ConsentManager(
                     // SDKs: a login is a full record-wins reset, so a pre-login local value is
                     // dropped exactly like the categories (with the gate off the record holds
                     // false, the same neutral clearUserIdentifier() leaves). Only a RE-SYNC adopt
-                    // is gated (see rehydrateReturningRawPreferences). A setter call made while
+                    // is gated (see rehydrate). A setter call made while
                     // the read was in flight is newer than the record and is kept.
                     if (!ccpaChanged) {
                         storage.saveCcpaOptout(record.ccpaOptout)
@@ -910,14 +894,14 @@ internal class ConsentManager(
         storage.loadSyncState()?.takeIf { it.userHash == userHash }
 
     /**
-     * Whether the user changed nothing on this device since the last sync for [userHash]: storage
+     * Whether the user changed nothing on this device since the last sync [state] records: storage
      * still holds exactly what that sync left and no save happened since (a save clears the state).
      */
     private fun unchangedSinceSync(
         stored: ConsentPreferences?,
-        userHash: String,
+        state: UniversalConsentSyncState?,
     ): Boolean {
-        val syncedLocal = syncState(userHash)?.syncedLocal ?: return false
+        val syncedLocal = state?.syncedLocal ?: return false
         return stored != null && stored == syncedLocal
     }
 
@@ -928,10 +912,10 @@ internal class ConsentManager(
      */
     private fun rawChoice(
         stored: ConsentPreferences,
-        userHash: String,
+        state: UniversalConsentSyncState?,
     ): ConsentPreferences {
-        if (!unchangedSinceSync(stored, userHash)) return stored
-        return syncState(userHash)?.syncedRaw ?: stored
+        if (!unchangedSinceSync(stored, state)) return stored
+        return state?.syncedRaw ?: stored
     }
 
     /**
@@ -1113,7 +1097,7 @@ internal class ConsentManager(
             // is no longer the bound one, so don't POST to it.
             if (session.userHash != storage.loadBoundUserHash()) return@withLock
             val localChoice =
-                storage.loadPreferences()?.let { rawChoice(it, session.userHash) }
+                storage.loadPreferences()?.let { rawChoice(it, syncState(session.userHash)) }
                     ?: return@withLock
             // A logout/reset landed while preparing the write (including during the reads above):
             // don't write through to the now-unbound (or re-bound) identity.
