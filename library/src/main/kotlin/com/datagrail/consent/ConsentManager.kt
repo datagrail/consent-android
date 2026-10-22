@@ -893,27 +893,22 @@ internal class ConsentManager(
             if (record != null && identityOperationGeneration.get() == opGeneration) {
                 val viewChanged =
                     synchronized(localChoiceLock) {
-                    if (preferencesSaveRevision.get() == saveRevisionBaseline) {
-                        val reconciled =
-                            reconciledCookieOptions(
-                                record,
-                                trackingSignal,
-                                config,
-                                toWrite.cookieOptions.associate { it.gtmKey to it.isEnabled },
-                            )
-                        val view =
-                            ConsentPreferences(
-                                isCustomised = true,
-                                cookieOptions = reconciled.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
-                            )
-                        storage.savePreferences(view)
-                        storage.saveConfigVersion(config.version)
-                        syncedLocal = view
-                        view != localChoice
-                    } else {
-                        false
+                        if (preferencesSaveRevision.get() == saveRevisionBaseline) {
+                            val written = toWrite.cookieOptions.associate { it.gtmKey to it.isEnabled }
+                            val reconciled = reconciledCookieOptions(record, trackingSignal, config, written)
+                            val view =
+                                ConsentPreferences(
+                                    isCustomised = true,
+                                    cookieOptions = reconciled.map { (key, enabled) -> CategoryConsent(key, enabled) },
+                                )
+                            storage.savePreferences(view)
+                            storage.saveConfigVersion(config.version)
+                            syncedLocal = view
+                            view != localChoice
+                        } else {
+                            false
+                        }
                     }
-                }
                 if (viewChanged) getCategories()?.let { onRehydrated?.invoke(it) }
             }
         }

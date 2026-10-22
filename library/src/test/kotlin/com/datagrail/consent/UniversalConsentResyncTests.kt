@@ -229,7 +229,11 @@ class UniversalConsentResyncTests {
 
             sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
 
-            assertEquals("the raw opt-in is written", true, writtenPreferences().single().cookieOptions["category_marketing"])
+            assertEquals(
+                "the raw opt-in is written",
+                true,
+                writtenPreferences().single().cookieOptions["category_marketing"],
+            )
             assertEquals("local state is its suppressed view", choice(marketing = false), storedPreferences)
 
             sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
