@@ -314,6 +314,30 @@ class UniversalConsentResyncTests {
             assertEquals(hashFor(userA), storedBoundHash)
         }
 
+    @Test
+    fun `standalone rehydrate for another identity does not adopt its CCPA flag`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+
+            recordIs(record(marketing = true).copy(ccpaOptout = true))
+            assertTrue(sut.rehydrateFromUniversalConsent(userB, apiKey))
+
+            assertFalse("user B's opt-out is not user A's", sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `standalone rehydrate for the bound identity adopts its CCPA flag`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+
+            recordIs(record(marketing = true).copy(ccpaOptout = true))
+            assertTrue(sut.rehydrateFromUniversalConsent(userA, apiKey))
+
+            assertTrue(sut.getCcpaOptout())
+        }
+
     // MARK: - Saves and setter calls during a sync's read
 
     @Test

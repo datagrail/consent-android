@@ -492,7 +492,12 @@ internal class ConsentManager(
         // write), or one made during this read, is newer than the record's value and is kept.
         val keepsLocalCcpa =
             storage.loadCcpaWritePending() || (ccpaRevision != null && ccpaChoiceRevision.get() != ccpaRevision)
-        if (adoptCcpaOptout && !keepsLocalCcpa && config.universalConsent?.syncOptout == true) {
+        // A standalone rehydrate may read an identity the device is not bound to; that identity's flag
+        // would otherwise be sent by the bound identity's next write. (A re-sync is bound by definition.)
+        val standaloneUserHash = if (recordsSyncState) userHashOrNull(config, identifier) else null
+        val boundHash = storage.loadBoundUserHash()
+        val readsBoundOrUnbound = !recordsSyncState || boundHash == null || boundHash == standaloneUserHash
+        if (adoptCcpaOptout && !keepsLocalCcpa && readsBoundOrUnbound && config.universalConsent?.syncOptout == true) {
             storage.saveCcpaOptout(record.ccpaOptout)
         }
 
@@ -524,7 +529,7 @@ internal class ConsentManager(
                 // over a stale version from the writing device would re-prompt immediately and undo
                 // the rehydration.
                 storage.saveConfigVersion(config.version)
-                if (recordsSyncState) recordStandaloneSyncState(config, identifier, effective, raw)
+                if (recordsSyncState) recordStandaloneSyncState(standaloneUserHash, effective, raw)
                 preferencesSaveRevision.get()
             }
         // (The record's CCPA choice was already adopted above, before the empty-preferences early
@@ -533,27 +538,32 @@ internal class ConsentManager(
     }
 
     /**
-     * The standalone rehydrate just stored [syncedLocal], the reconciled view of a record whose RAW
-     * choice is [syncedRaw]. For the bound identity that is exactly what an adopt by a sync leaves,
+     * The standalone rehydrate of the identity hashed to [userHash] (null when it could not be
+     * hashed) just stored [syncedLocal], the reconciled view of a record whose RAW choice is
+     * [syncedRaw]. For the bound identity that is exactly what an adopt by a sync leaves,
      * so it is recorded the same way; otherwise the stored view no longer describes the bound
      * identity's last sync, so its state is dropped. Runs under [localChoiceLock].
      */
     private fun recordStandaloneSyncState(
-        config: ConsentConfig,
-        identifier: String,
+        userHash: String?,
         syncedLocal: ConsentPreferences,
         syncedRaw: ConsentPreferences,
     ) {
-        val userHash =
-            runCatching {
-                ConsentService.computeUserHash(config.dgCustomerId, requireNotNull(config.consentProjectId), identifier)
-            }.getOrNull()
         if (userHash != null && userHash == storage.loadBoundUserHash()) {
             storage.saveSyncState(UniversalConsentSyncState(userHash, syncedLocal, syncedRaw))
         } else {
             storage.clearSyncState()
         }
     }
+
+    /** The user hash for [identifier] under [config], or null when it cannot be computed. */
+    private fun userHashOrNull(
+        config: ConsentConfig,
+        identifier: String,
+    ): String? =
+        runCatching {
+            ConsentService.computeUserHash(config.dgCustomerId, requireNotNull(config.consentProjectId), identifier)
+        }.getOrNull()
 
     /**
      * The record's RAW category choice, or null when it carries none (signal-only). This is the one
