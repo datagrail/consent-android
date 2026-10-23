@@ -59,8 +59,11 @@ internal class ConsentManager(
 
     // Held across a user save (its storage write, the revision bump and the sync-state clear) and
     // across a sync's or rehydrate's local persist (and the revision it reads right after), so the two
-    // never interleave: the persist either precedes the save or follows it. Never held across a
-    // suspension point or a host callback.
+    // never interleave: the persist either precedes the save or follows it. Also held across a host
+    // CCPA choice (the flag, the ccpaChoiceRevision bump and the pending marker, see persistCcpaChoice)
+    // and across every revision check that adopts, clears or un-marks the flag on a sync's behalf, so
+    // the check and the write it guards see the setter's call either entirely before or entirely
+    // after. Never held across a suspension point or a host callback.
     private val localChoiceLock = Any()
 
     init {
@@ -491,15 +494,21 @@ internal class ConsentManager(
         // Same rule as the web/iOS/React Native SDKs.
         // A bound choice that never reached the record (no category choice to write with, or a failed
         // write), or one made during this read, is newer than the record's value and is kept.
-        val keepsLocalCcpa =
-            storage.loadCcpaWritePending() || (ccpaRevision != null && ccpaChoiceRevision.get() != ccpaRevision)
+        // Checked and adopted under the lock a setter call holds, so a setter that has stored its flag
+        // but not yet bumped the revision cannot have that flag overwritten here.
         // A standalone rehydrate may read an identity the device is not bound to; that identity's flag
         // would otherwise be sent by the bound identity's next write. (A re-sync is bound by definition.)
         val standaloneUserHash = if (recordsSyncState) userHashOrNull(config, identifier) else null
-        val boundHash = storage.loadBoundUserHash()
-        val readsBoundOrUnbound = !recordsSyncState || boundHash == null || boundHash == standaloneUserHash
-        if (adoptCcpaOptout && !keepsLocalCcpa && readsBoundOrUnbound && config.universalConsent?.syncOptout == true) {
-            storage.saveCcpaOptout(record.ccpaOptout)
+        synchronized(localChoiceLock) {
+            val keepsLocalCcpa =
+                storage.loadCcpaWritePending() || (ccpaRevision != null && ccpaChoiceRevision.get() != ccpaRevision)
+            val boundHash = storage.loadBoundUserHash()
+            val readsBoundOrUnbound = !recordsSyncState || boundHash == null || boundHash == standaloneUserHash
+            if (adoptCcpaOptout && !keepsLocalCcpa && readsBoundOrUnbound &&
+                config.universalConsent?.syncOptout == true
+            ) {
+                storage.saveCcpaOptout(record.ccpaOptout)
+            }
         }
 
         val raw = rawPreferences(record) ?: return null
@@ -797,33 +806,36 @@ internal class ConsentManager(
                 if (identityOperationGeneration.get() != opGeneration) return
                 // The other identity's sync state never describes this one.
                 if (boundToOther) storage.clearSyncState()
-                val ccpaChanged = ccpaChangedMidFlight()
-                if (!ccpaChanged) {
-                    // A login replaces local state, so a pending marker from before it is dropped.
-                    storage.saveCcpaWritePending(false)
-                }
-                if (record != null) {
-                    // A LOGIN that finds a record (with or without a category choice) adopts the
-                    // record's CCPA flag whatever the syncOptout gate, the same as the web and iOS
-                    // SDKs: a login is a full record-wins reset, so a pre-login local value is
-                    // dropped exactly like the categories (with the gate off the record holds
-                    // false, the same neutral clearUserIdentifier() leaves). Only a RE-SYNC adopt
-                    // is gated (see rehydrate). A setter call made while
-                    // the read was in flight is newer than the record and is kept.
-                    if (!ccpaChanged) {
-                        storage.saveCcpaOptout(record.ccpaOptout)
+                // A setter call made while the read was in flight is newer than the record and is
+                // kept. The check and the writes it guards run under the lock the setter holds, so a
+                // setter that has stored its flag but not yet bumped the revision is not overwritten.
+                synchronized(localChoiceLock) {
+                    if (!ccpaChangedMidFlight()) {
+                        // A login replaces local state, so a pending marker from before it is dropped.
+                        storage.saveCcpaWritePending(false)
+                        if (record != null) {
+                            // A LOGIN that finds a record (with or without a category choice) adopts
+                            // the record's CCPA flag whatever the syncOptout gate, the same as the web
+                            // and iOS SDKs: a login is a full record-wins reset, so a pre-login local
+                            // value is dropped exactly like the categories (with the gate off the
+                            // record holds false, the same neutral clearUserIdentifier() leaves). Only
+                            // a RE-SYNC adopt is gated (see rehydrate).
+                            storage.saveCcpaOptout(record.ccpaOptout)
+                        } else if (boundToOther) {
+                            // The previous identity's flag must not carry over to this one, whatever
+                            // the gate: the flag is identity-scoped, as clearUserIdentifier() treats it.
+                            storage.clearCcpaOptout()
+                        }
                     }
-                } else if (boundToOther && !ccpaChanged) {
-                    // The previous identity's flag must not carry over to this one, whatever the
-                    // gate: the flag is identity-scoped, as clearUserIdentifier() treats it.
-                    storage.clearCcpaOptout()
                 }
                 when {
                     record == null -> {
                         // Genuine MISS: only an explicit local choice is attached. A different
                         // identity's leftover state returns to neutral so it does not linger.
+                        // (That only happens when bound to another identity, whose flag was already
+                        // cleared above unless a setter call made during the read replaced it.)
                         if (explicitChoice == null && localChoice != null) {
-                            returnToNeutral(onRehydrated, clearCcpaOptout = !ccpaChanged)
+                            returnToNeutral(onRehydrated, clearCcpaOptout = false)
                         }
                         explicitChoice
                     }
@@ -882,9 +894,7 @@ internal class ConsentManager(
                 getSignature = getSignature,
             )
             // The record now holds the flag (when the gate is on), so nothing is pending.
-            if (config.universalConsent?.syncOptout == true && storage.loadCcpaOptout() == carriedCcpa) {
-                storage.saveCcpaWritePending(false)
-            }
+            if (config.universalConsent?.syncOptout == true) resolveCcpaWritePending(carriedCcpa)
             // A re-sync that wrote a local change through stores that change's signal-reconciled view,
             // as an adopt stores the record's, now that the record holds it (a failed write leaves
             // the raw choice in place to be written again). Not over a save made since, nor after a
@@ -922,8 +932,12 @@ internal class ConsentManager(
         // for the record. On a first login it found the device unbound, so it was neither written
         // through nor marked pending; mark it now, or the next re-sync or rehydrate would adopt the
         // record's older value over it.
-        if (syncsCcpaOptout(config) && ccpaChangedMidFlight() && storage.loadCcpaOptout() != writtenCcpa) {
-            storage.saveCcpaWritePending(true)
+        if (syncsCcpaOptout(config)) {
+            synchronized(localChoiceLock) {
+                if (ccpaChangedMidFlight() && storage.loadCcpaOptout() != writtenCcpa) {
+                    storage.saveCcpaWritePending(true)
+                }
+            }
         }
         if (preferencesSaveRevision.get() == saveRevisionBaseline) {
             storage.saveSyncState(UniversalConsentSyncState(userHash, syncedLocal, syncedRaw))
@@ -1181,9 +1195,7 @@ internal class ConsentManager(
                 getSignature = session.getSignature,
             )
             // Reached the record. A newer toggle made during the POST stays pending for its own write.
-            if (storage.loadCcpaOptout() == writtenCcpa) {
-                storage.saveCcpaWritePending(false)
-            }
+            resolveCcpaWritePending(writtenCcpa)
             // The record now holds this choice, so the next re-sync must not send it again: the edge
             // stamps every write with its write time, so a repeat could beat a newer choice another
             // device made meanwhile (TRUST-2902). Not after a logout, nor over a save made since.
@@ -1206,10 +1218,27 @@ internal class ConsentManager(
      * at app start); every reader of the marker checks the `syncOptout` gate itself.
      */
     private fun persistCcpaChoice(optedOut: Boolean) {
-        storage.saveCcpaOptout(optedOut)
-        ccpaChoiceRevision.incrementAndGet()
-        if (storage.loadBoundUserHash() != null) {
-            storage.saveCcpaWritePending(true)
+        // One critical section, as consent-ios's IdentityGate does it: a sync's revision check never
+        // sees the new flag without the bumped revision (and the pending marker) that protect it.
+        synchronized(localChoiceLock) {
+            storage.saveCcpaOptout(optedOut)
+            ccpaChoiceRevision.incrementAndGet()
+            if (storage.loadBoundUserHash() != null) {
+                storage.saveCcpaWritePending(true)
+            }
+        }
+    }
+
+    /**
+     * A Universal Consent write carried [writtenCcpa], so the record holds it and it is no longer
+     * pending, unless a setter call stored a different choice since; that one stays pending for its
+     * own write. Under [localChoiceLock] so the setter cannot land between the check and the clear.
+     */
+    private fun resolveCcpaWritePending(writtenCcpa: Boolean) {
+        synchronized(localChoiceLock) {
+            if (storage.loadCcpaOptout() == writtenCcpa) {
+                storage.saveCcpaWritePending(false)
+            }
         }
     }
 
