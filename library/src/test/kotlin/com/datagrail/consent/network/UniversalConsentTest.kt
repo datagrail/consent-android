@@ -126,7 +126,7 @@ class UniversalConsentTest {
             userHash,
         )
 
-        val provDigest = ConsentService.resolvedDefaultProvenanceDigest(timestamp)
+        val provDigest = ConsentService.provenanceDigest(timestamp)
         assertEquals(
             "4de0e6fe888081209009953420b400306063e95f4b2738b53204fb36a88cedb9",
             provDigest,
@@ -350,7 +350,7 @@ class UniversalConsentTest {
                 "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7:" +
                     "1fee132c298d615098190e3e75f9c7e05db20d6cff6398f686fcebc67d1d87a4:" +
                     "${payload.timestamp}:${payload.nonce}:" +
-                    ConsentService.resolvedDefaultProvenanceDigest(payload.timestamp),
+                    ConsentService.provenanceDigest(payload.timestamp),
                 payload.stringToSign,
             )
 
@@ -361,6 +361,78 @@ class UniversalConsentTest {
                 body.contains("1fee132c298d615098190e3e75f9c7e05db20d6cff6398f686fcebc67d1d87a4"),
             )
             assertTrue("cookieOptions is a map", body.contains("\"cookieOptions\":{"))
+        }
+
+    // MARK: - Decision time (TRUST-3224)
+
+    /** Write once with [decisionTs] and return the signed payload and the body sent. */
+    private suspend fun writeWithDecisionTs(
+        decisionTs: Long?,
+        signed: Boolean = true,
+    ): Pair<UniversalConsentSigningPayload?, String> {
+        whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+        val config =
+            ConsentServiceSecurityTest.createTestConfig().copy(
+                consentProjectId = "proj_abc123",
+                universalConsent = UniversalConsentConfig(enabled = true, syncOptout = false),
+            )
+        var seenPayload: UniversalConsentSigningPayload? = null
+        val provider: SignatureProvider = { payload ->
+            seenPayload = payload
+            UniversalConsentSignature(signature = "deadbeefsig", keyId = "key-1")
+        }
+        service.saveUniversalConsent(
+            config = config,
+            identifier = "opaque-user-7f3a",
+            preferences = UniversalConsentPreferences(isCustomised = true, cookieOptions = mapOf("m" to false)),
+            apiKey = "dg_live_key",
+            ccpaOptout = false,
+            getSignature = if (signed) provider else null,
+            decisionTs = decisionTs,
+        )
+        val bodyCaptor = argumentCaptor<String>()
+        verify(mockNetworkClient).request(any(), any(), bodyCaptor.capture(), any())
+        return seenPayload to bodyCaptor.firstValue
+    }
+
+    @Test
+    fun `provenanceDigest for an explicit decision time is pinned`() {
+        // sha256("true\n1700000000\n"): is_explicit "true", the decision time, actor_id "".
+        assertEquals(
+            "1047c17b7da10832816182786641bc86738ad7455f5e1862fe433d6f2d0991a6",
+            ConsentService.provenanceDigest(1700000000L),
+        )
+    }
+
+    @Test
+    fun `a write with a decision time sends it and signs it, not the request time`() =
+        runTest {
+            val (payload, body) = writeWithDecisionTs(1700000000L)
+
+            assertTrue(body, body.contains("\"is_explicit\":true"))
+            assertTrue(body, body.contains("\"decision_ts\":1700000000"))
+            val signed = requireNotNull(payload)
+            assertNotEquals("the request time is still its own", 1700000000L, signed.timestamp)
+            assertTrue(signed.stringToSign.endsWith(":${ConsentService.provenanceDigest(1700000000L)}"))
+        }
+
+    @Test
+    fun `a write with an unknown decision time sends and signs the request time`() =
+        runTest {
+            val (payload, body) = writeWithDecisionTs(null)
+
+            val signed = requireNotNull(payload)
+            assertTrue(body, body.contains("\"decision_ts\":${signed.timestamp}"))
+            assertTrue(signed.stringToSign.endsWith(":${ConsentService.provenanceDigest(signed.timestamp)}"))
+        }
+
+    @Test
+    fun `a limited-mode write still carries the decision time`() =
+        runTest {
+            val (_, body) = writeWithDecisionTs(1700000000L, signed = false)
+
+            assertTrue(body, body.contains("\"is_explicit\":true"))
+            assertTrue(body, body.contains("\"decision_ts\":1700000000"))
         }
 
     @Test

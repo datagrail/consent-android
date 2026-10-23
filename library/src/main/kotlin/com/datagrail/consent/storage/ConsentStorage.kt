@@ -37,6 +37,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         private const val KEY_CCPA_OPTOUT = "datagrail_consent_ccpa_optout"
         private const val KEY_CCPA_WRITE_PENDING = "datagrail_consent_ccpa_write_pending"
         private const val KEY_SYNC_STATE = "datagrail_consent_sync_state"
+        private const val KEY_DECISION_TS = "datagrail_consent_decision_ts"
 
         /**
          * Create a ConsentStorage backed by EncryptedSharedPreferences
@@ -155,6 +156,33 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
      */
     fun clearPreferences() {
         prefs.edit().remove(KEY_PREFERENCES).apply()
+    }
+
+    // MARK: - Decision time (TRUST-3224)
+
+    /**
+     * Persist WHEN the stored choice was made, as unix seconds: the user's own choice, or the time of
+     * the record a Universal Consent adopt stored. Sent as the write's `decision_ts` and compared with
+     * the record's `updated_at` on a re-sync, so a stale device cannot out-rank a newer choice made
+     * elsewhere. [clearAll] removes it with everything else.
+     */
+    fun saveDecisionTs(seconds: Long) {
+        prefs.edit().putLong(KEY_DECISION_TS, seconds).apply()
+    }
+
+    /** The stored decision time, unvalidated; null when none is stored (or it is unreadable). */
+    fun loadDecisionTs(): Long? {
+        if (!prefs.contains(KEY_DECISION_TS)) return null
+        return try {
+            prefs.getLong(KEY_DECISION_TS, 0L)
+        } catch (e: ClassCastException) {
+            null
+        }
+    }
+
+    /** Forget the decision time: the stored choice (if any) is no longer one with a known time. */
+    fun clearDecisionTs() {
+        prefs.edit().remove(KEY_DECISION_TS).apply()
     }
 
     // MARK: - Identity Binding
