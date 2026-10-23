@@ -79,14 +79,17 @@ internal class ConsentManager(
     /**
      * Load configuration from URL
      * @param configUrl URL to fetch configuration from
+     * @param onConfigError Receives a fetch failure the cached config masked (TRUST-3254); see
+     *   [ConfigService.fetchConfig]
      * @param callback Callback with result
      */
     suspend fun loadConfig(
         configUrl: String,
+        onConfigError: ((ConsentException) -> Unit)? = null,
         callback: (Result<ConsentConfig>) -> Unit,
     ) {
         try {
-            val config = configService.fetchConfigWithRetry(configUrl)
+            val config = configService.fetchConfigWithRetry(configUrl, onConfigError)
             currentConfig = config
             callback(Result.success(config))
         } catch (e: Exception) {

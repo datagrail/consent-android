@@ -239,6 +239,113 @@ class ConfigServiceValidationTest {
             }
         }
 
+    // MARK: - Masked failures reach onRefreshError (TRUST-3254)
+
+    private val cachedConfig get() = ConsentServiceSecurityTest.createTestConfig().copy(version = "cached-v1")
+
+    /** Fetch over a cache with [response] (a body, or a throwable to throw), collecting reports. */
+    private suspend fun fetchOverCache(response: Any): Pair<ConsentConfig, List<ConsentException>> {
+        val reported = mutableListOf<ConsentException>()
+        whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenAnswer {
+            if (response is Throwable) throw response else response as String
+        }
+        whenever(mockStorage.loadConfigCache()).thenReturn(cachedConfig)
+        val result = configService.fetchConfig("https://example.com/config.json") { reported += it }
+        return result to reported
+    }
+
+    @Test
+    fun `a 404 masked by the cache is reported once as ConfigNotPublished`() =
+        runTest {
+            val (result, reported) = fetchOverCache(ConsentException.HttpError(404))
+
+            assertEquals("cached-v1", result.version)
+            val error = reported.single()
+            assertTrue(error is ConsentException.ConfigNotPublished)
+            assertEquals(404, (error as ConsentException.ConfigNotPublished).statusCode)
+        }
+
+    @Test
+    fun `a transport failure masked by the cache is reported as a NetworkError`() =
+        runTest {
+            val (result, reported) = fetchOverCache(ConsentException.NetworkError("timeout"))
+
+            assertEquals("cached-v1", result.version)
+            val error = reported.single()
+            assertTrue(error is ConsentException.NetworkError)
+            assertFalse(error is ConsentException.ConfigNotPublished)
+        }
+
+    @Test
+    fun `wrong-shape JSON masked by the cache is reported as a ParseError, not a network error`() =
+        runTest {
+            val (result, reported) = fetchOverCache("""{"not":"a config"}""")
+
+            assertEquals("cached-v1", result.version)
+            assertTrue(reported.single() is ConsentException.ParseError)
+        }
+
+    @Test
+    fun `a config failing validation masked by the cache is reported as the ValidationError`() =
+        runTest {
+            val invalid = json.encodeToString(ConsentServiceSecurityTest.createTestConfig().copy(version = ""))
+
+            val (result, reported) = fetchOverCache(invalid)
+
+            assertEquals("cached-v1", result.version)
+            assertTrue(reported.single() is ConsentException.ValidationError)
+        }
+
+    @Test
+    fun `a successful fetch reports nothing`() =
+        runTest {
+            val (result, reported) = fetchOverCache(json.encodeToString(ConsentServiceSecurityTest.createTestConfig()))
+
+            assertNotEquals("cached-v1", result.version)
+            assertTrue(reported.isEmpty())
+        }
+
+    @Test
+    fun `an initial-fetch failure with no cache is thrown, not reported`() =
+        runTest {
+            stubRequestFailingWith(503)
+            whenever(mockStorage.loadConfigCache()).thenReturn(null)
+            val reported = mutableListOf<ConsentException>()
+
+            try {
+                configService.fetchConfig("https://example.com/config.json") { reported += it }
+                fail("Expected fetchConfig to throw")
+            } catch (e: ConsentException.NetworkError) {
+                // expected
+            }
+            assertTrue(reported.isEmpty())
+        }
+
+    @Test
+    fun `a throwing handler is ignored and the cache is still served`() =
+        runTest {
+            stubRequestFailingWith(500)
+            whenever(mockStorage.loadConfigCache()).thenReturn(cachedConfig)
+
+            val result =
+                configService.fetchConfig("https://example.com/config.json") { throw IllegalStateException("host bug") }
+
+            assertEquals("cached-v1", result.version)
+        }
+
+    @Test
+    fun `fetchConfigWithRetry reports a masked failure once`() =
+        runTest {
+            val client = networkClientFailingWith(503)
+            whenever(mockStorage.loadConfigCache()).thenReturn(cachedConfig)
+            val reported = mutableListOf<ConsentException>()
+
+            val result = ConfigService(client, mockStorage).fetchConfigWithRetry("https://example.com/config.json") { reported += it }
+
+            assertEquals("cached-v1", result.version)
+            assertEquals(1, reported.size)
+        }
+
     private suspend fun stubRequestFailingWith(statusCode: Int) {
         whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull()))
             .thenAnswer { throw ConsentException.HttpError(statusCode) }

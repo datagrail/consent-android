@@ -90,6 +90,7 @@ if (DataGrailConsent.getInstance().isCategoryEnabled("category_marketing")) {
 | Method | Description |
 |--------|-------------|
 | `initialize(context, configUrl, callback)` | Initialize SDK with config URL |
+| `onConfigError(callback)` | Receive config fetch failures that the cached config masked (`ConfigNotPublished`, `NetworkError`, `ParseError`, `ValidationError`); init still succeeds on the cache. Register before `initialize` |
 | `needsConsent() -> Boolean` | Check if user needs to provide consent |
 
 ### Banner Display

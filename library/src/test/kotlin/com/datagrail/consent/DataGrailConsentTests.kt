@@ -46,6 +46,60 @@ class DataGrailConsentTests {
         Dispatchers.resetMain()
     }
 
+    // MARK: - onConfigError (TRUST-3254)
+
+    @Test
+    fun `a config fetch failure reaches the onConfigError callback`() {
+        val received = mutableListOf<ConsentException>()
+        sut.onConfigError { received += it }
+        try {
+            val error = ConsentException.ConfigNotPublished(statusCode = 404)
+            sut.configErrorReporter()(error)
+            assertEquals(listOf<ConsentException>(error), received)
+        } finally {
+            sut.onConfigError(null)
+        }
+    }
+
+    @Test
+    fun `onConfigError stops for a fetch that reset() or a newer initialize superseded`() {
+        val received = mutableListOf<ConsentException>()
+        sut.onConfigError { received += it }
+        try {
+            val beforeReset = sut.configErrorReporter()
+            sut.reset()
+            beforeReset(ConsentException.NetworkError("offline"))
+
+            val superseded = sut.configErrorReporter()
+            val current = sut.configErrorReporter()
+            superseded(ConsentException.NetworkError("offline"))
+            assertTrue(received.isEmpty())
+
+            current(ConsentException.NetworkError("offline"))
+            assertEquals(1, received.size)
+        } finally {
+            sut.onConfigError(null)
+        }
+    }
+
+    @Test
+    fun `the Java listener receives config fetch failures`() {
+        val received = mutableListOf<ConsentException>()
+        sut.onConfigError(
+            object : ConfigErrorListener {
+                override fun onConfigError(error: ConsentException) {
+                    received += error
+                }
+            },
+        )
+        try {
+            sut.configErrorReporter()(ConsentException.ParseError("not a config"))
+            assertTrue(received.single() is ConsentException.ParseError)
+        } finally {
+            sut.onConfigError(null)
+        }
+    }
+
     // MARK: - URL Validation Tests
 
     @Test
