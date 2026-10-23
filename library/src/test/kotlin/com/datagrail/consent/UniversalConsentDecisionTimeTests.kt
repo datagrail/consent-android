@@ -133,7 +133,9 @@ class UniversalConsentDecisionTimeTests {
 
             assertEquals(false, writtenPreferences().single().cookieOptions["category_marketing"])
             assertEquals("the time of the choice, not of the request", listOf(changedAt), writtenDecisionTs())
+            // The device keeps the newer choice it wrote and its time, not the older record (TRUST-3310).
             assertEquals(choice(marketing = false), storedPreferences)
+            assertEquals(changedAt, storedDecisionTs)
         }
 
     @Test
@@ -206,6 +208,40 @@ class UniversalConsentDecisionTimeTests {
 
             assertEquals(true, writtenPreferences().single().cookieOptions["category_marketing"])
             assertEquals("still its own older time", listOf(now - 1_000), writtenDecisionTs())
+        }
+
+    // MARK: - setCcpaOptout write-through (TRUST-3311)
+
+    @Test
+    fun `a stale device's setCcpaOptout cannot undo a newer revocation made elsewhere`() =
+        runTest {
+            // Synced marketing on, recorded at the record's time.
+            val syncedAt = now - 100
+            bindAndSync(record(marketing = true, updatedAt = syncedAt))
+            // Since then (unseen here) the user revoked marketing on another device, at `now`.
+            now += 500
+
+            sut.setCcpaOptout(true)
+
+            // The write carries this device's stale categories, but stamped with when they were
+            // chosen, so the edge's newer revocation wins the merge for every category.
+            assertEquals(true, writtenPreferences().single().cookieOptions["category_marketing"])
+            assertEquals(listOf<Long?>(syncedAt), writtenDecisionTs())
+        }
+
+    @Test
+    fun `setCcpaOptout after a local change stamps the write with that change's time`() =
+        runTest {
+            bindAndSync(record(marketing = true, updatedAt = now - 100))
+            now += 10
+            val changedAt = now
+            sut.savePreferences(choice(marketing = false)) {}
+            now += 300
+
+            sut.setCcpaOptout(true)
+
+            assertEquals(false, writtenPreferences().single().cookieOptions["category_marketing"])
+            assertEquals(listOf<Long?>(changedAt), writtenDecisionTs())
         }
 
     // MARK: - Recording the time

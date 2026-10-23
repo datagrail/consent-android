@@ -1241,10 +1241,12 @@ internal class ConsentManager(
             // The bound hash moved (a logout, or a login to another identity) — the captured session
             // is no longer the bound one, so don't POST to it.
             if (session.userHash != storage.loadBoundUserHash()) return@withLock
-            // The stored choice and the save revision it was read at, together, so a save that lands
-            // during the POST is not recorded as synced below.
-            val (stored, saveRevision) =
-                synchronized(localChoiceLock) { storage.loadPreferences() to preferencesSaveRevision.get() }
+            // The stored choice, when it was made, and the save revision they were read at, together,
+            // so a save that lands during the POST is not recorded as synced below.
+            val (stored, saveRevision, choiceDecisionTs) =
+                synchronized(localChoiceLock) {
+                    Triple(storage.loadPreferences(), preferencesSaveRevision.get(), storedDecisionTs())
+                }
             if (stored == null) return@withLock
             val localChoice = rawChoice(stored, syncState(session.userHash))
             // A logout/reset landed while preparing the write (including during the reads above):
@@ -1270,6 +1272,12 @@ internal class ConsentManager(
                 // out of order then both land the final value instead of reversing the user's intent.
                 ccpaOptout = writtenCcpa,
                 getSignature = session.getSignature,
+                // The categories riding along are stamped with when they were chosen (the user's save,
+                // or the adopted record's own time), not now, so this write cannot undo a newer
+                // revocation made elsewhere (TRUST-3311, as consent-react#47 / consent-ios#49).
+                // Trade-off: the fresh CCPA choice shares that older stamp, so it can lose to a newer
+                // record (the edge reports such a write as stale).
+                decisionTs = choiceDecisionTs,
             )
             // Reached the record. A newer toggle made during the POST stays pending for its own write.
             resolveCcpaWritePending(writtenCcpa)
