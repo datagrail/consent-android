@@ -119,6 +119,9 @@ data class UniversalConsentRecord(
     val consentPreferences: UniversalConsentPreferences? = null,
     @SerialName("consent_mode")
     val consentMode: String? = null,
+    // The user's explicit CCPA/CPRA "Do Not Sell or Share" choice as stored (TRUST-2591). Adopted
+    // into the local flag on a found record; an absent field decodes to false. Records written by
+    // older SDKs that derived this value are indistinguishable and are adopted as-is.
     @SerialName("ccpa_optout")
     val ccpaOptout: Boolean = false,
     val platform: String? = null,
