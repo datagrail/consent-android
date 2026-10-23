@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG-ONLY network security config (applies to the debug build only).
+
+  Trusts user-installed CAs in addition to system CAs, so the Android TV demo can
+  talk to a local HTTPS test server whose certificate is signed by a developer CA
+  (e.g. mkcert). Install that CA on the device/emulator yourself — no certificate
+  is bundled in the repo, and this file is NOT part of the release build.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
