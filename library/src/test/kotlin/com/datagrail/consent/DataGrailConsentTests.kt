@@ -21,6 +21,9 @@ import org.junit.Before
 import org.junit.Test
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
+import org.mockito.kotlin.mock
+import org.mockito.kotlin.verify
+import org.mockito.kotlin.verifyNoMoreInteractions
 
 /**
  * Tests for DataGrailConsent public API including URL validation and category detection
@@ -49,55 +52,89 @@ class DataGrailConsentTests {
     // MARK: - onConfigError (TRUST-3254)
 
     @Test
-    fun `a config fetch failure reaches the onConfigError callback`() {
+    fun `a config fetch failure reaches the init's onConfigError handler`() {
         val received = mutableListOf<ConsentException>()
-        sut.onConfigError { received += it }
-        try {
-            val error = ConsentException.ConfigNotPublished(statusCode = 404)
-            sut.configErrorReporter()(error)
-            assertEquals(listOf<ConsentException>(error), received)
-        } finally {
-            sut.onConfigError(null)
-        }
+        val error = ConsentException.ConfigNotPublished(statusCode = 404)
+        sut.configErrorReporter(sut.currentInitGeneration()) { received += it }(error)
+        assertEquals(listOf<ConsentException>(error), received)
     }
 
     @Test
     fun `onConfigError stops for a fetch that reset() or a newer initialize superseded`() {
         val received = mutableListOf<ConsentException>()
-        sut.onConfigError { received += it }
+        val beforeReset = sut.configErrorReporter(sut.currentInitGeneration()) { received += it }
+        sut.reset()
+        beforeReset(ConsentException.NetworkError("offline"))
+        assertTrue(received.isEmpty())
+
+        // A newer initialize bumps the same token (its launched work never runs on the paused Main).
+        val beforeInit = sut.configErrorReporter(sut.currentInitGeneration()) { received += it }
+        sut.initialize(mockContext, "https://consent.datagrail.io/config.json", { received += it }) { }
+        beforeInit(ConsentException.NetworkError("offline"))
+        assertTrue(received.isEmpty())
+
+        sut.configErrorReporter(sut.currentInitGeneration()) { received += it }(ConsentException.NetworkError("offline"))
+        assertEquals(1, received.size)
+    }
+
+    @Test
+    fun `reset during an in-flight initialize stops its commit and fails its callback`() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        val building = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val done = java.util.concurrent.CountDownLatch(1)
+        val built = mock<ConsentManager>()
+        val defaultFactory = sut.managerFactory
+        sut.managerFactory = { _, _ ->
+            building.countDown()
+            release.await(5, java.util.concurrent.TimeUnit.SECONDS)
+            built
+        }
         try {
-            val beforeReset = sut.configErrorReporter()
+            val configErrors = mutableListOf<ConsentException>()
+            var result: Result<Unit>? = null
+            sut.initialize(mockContext, "https://consent.datagrail.io/config.json", { configErrors += it }) {
+                result = it
+                done.countDown()
+            }
+            assertTrue(building.await(5, java.util.concurrent.TimeUnit.SECONDS))
+
             sut.reset()
-            beforeReset(ConsentException.NetworkError("offline"))
+            release.countDown()
 
-            val superseded = sut.configErrorReporter()
-            val current = sut.configErrorReporter()
-            superseded(ConsentException.NetworkError("offline"))
-            assertTrue(received.isEmpty())
-
-            current(ConsentException.NetworkError("offline"))
-            assertEquals(1, received.size)
+            assertTrue(done.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            assertTrue(result!!.exceptionOrNull() is ConsentException.NotInitialized)
+            assertNull(sut.getConfig())
+            // The wipe reached the uncommitted init's storage, and it never loaded a config, so
+            // nothing could report to onConfigError.
+            verify(built).reset()
+            verifyNoMoreInteractions(built)
+            assertTrue(configErrors.isEmpty())
         } finally {
-            sut.onConfigError(null)
+            release.countDown()
+            sut.managerFactory = defaultFactory
         }
     }
 
     @Test
-    fun `the Java listener receives config fetch failures`() {
-        val received = mutableListOf<ConsentException>()
-        sut.onConfigError(
+    fun `the Java initialize overload takes a ConfigErrorListener`() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        val done = java.util.concurrent.CountDownLatch(1)
+        sut.initialize(
+            mockContext,
+            "ftp://consent.datagrail.io/config.json",
             object : ConfigErrorListener {
-                override fun onConfigError(error: ConsentException) {
-                    received += error
+                override fun onConfigError(error: ConsentException) = Unit
+            },
+            object : ConsentCallback {
+                override fun onSuccess() = Unit
+
+                override fun onFailure(error: ConsentException) {
+                    done.countDown()
                 }
             },
         )
-        try {
-            sut.configErrorReporter()(ConsentException.ParseError("not a config"))
-            assertTrue(received.single() is ConsentException.ParseError)
-        } finally {
-            sut.onConfigError(null)
-        }
+        assertTrue(done.await(5, java.util.concurrent.TimeUnit.SECONDS))
     }
 
     // MARK: - URL Validation Tests
