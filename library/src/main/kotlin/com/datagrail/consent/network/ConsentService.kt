@@ -228,7 +228,10 @@ internal class ConsentService(
         val url =
             universalConsentUrl() +
                 "?customer_id=${encodeParam(config.dgCustomerId)}" +
-                "&user_hash=${encodeParam(userHash)}"
+                "&user_hash=${encodeParam(userHash)}" +
+                // Same platform writes declare, so UC analytics classify reads and writes as one
+                // surface (TRUST-3251; universal_consent_edge/lib/analytics.js).
+                "&platform=$PLATFORM"
 
         try {
             val response =

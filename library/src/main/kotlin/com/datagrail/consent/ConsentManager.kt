@@ -494,7 +494,7 @@ internal class ConsentManager(
         // branch) and this function's documented invariant ("a found record's ccpa_optout replaces
         // the local flag"). The early return only governs whether there are raw category preferences
         // to hand back for the WRITE; it must not suppress the opt-out adopt. This is the RE-SYNC (and
-        // standalone rehydrate) adopt, so it is gated: on the adoptCcpaOptout flag and on syncOptout,
+        // standalone rehydrate) adopt, so it is gated: on the caller not keeping its local choice and on syncOptout,
         // since with the gate off the SDK never puts the choice on the record and adopting it would
         // erase a local-only setCcpaOptout(true). The LOGIN adopt in setUserIdentifier is ungated.
         // Not when the caller keeps its local choice: it writes the local flag through.
