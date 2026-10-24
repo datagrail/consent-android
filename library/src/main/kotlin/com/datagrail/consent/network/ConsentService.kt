@@ -430,10 +430,10 @@ internal class ConsentService(
                 method = HTTPMethod.POST,
                 body = jsonBody,
             )
-
-            // Save locally after successful backend save
-            storage.replacePreferencesKeepingDecisionTs(preferences)
-            storage.saveConfigVersion(config.version)
+            // No local write here (TRUST-3224): ConsentManager.savePreferences already stored this
+            // choice, its decision time and the config version before the request. Rewriting it after
+            // the request lets an older save that completes late restore a stale choice under a newer
+            // choice's decision time, so it could outrank a revocation adopted from the server.
         } catch (e: Exception) {
             // Queue for retry on failure
             val eventJson =
@@ -452,10 +452,6 @@ internal class ConsentService(
                 existingEvents.subList(0, existingEvents.size - MAX_PENDING_EVENTS).clear()
             }
             storage.savePendingEvents(existingEvents)
-
-            // Still save locally
-            storage.replacePreferencesKeepingDecisionTs(preferences)
-            storage.saveConfigVersion(config.version)
 
             throw ConsentException.NetworkError("Failed to save preferences: ${e.message}")
         }
