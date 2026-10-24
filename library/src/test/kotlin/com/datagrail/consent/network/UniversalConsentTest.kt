@@ -577,6 +577,7 @@ class UniversalConsentTest {
             assertTrue(
                 urlCaptor.firstValue.contains("user_hash=1fee132c298d615098190e3e75f9c7e05db20d6cff6398f686fcebc67d1d87a4"),
             )
+            assertTrue("read sends the platform hint", urlCaptor.firstValue.contains("&platform=android"))
             assertEquals("dg_live_key", headersCaptor.firstValue["X-DG-Api-Key"])
         }
 
