@@ -26,6 +26,8 @@ internal class ConfigService(
      * config is returned instead and the failure goes to [onRefreshError] (TRUST-3254); without a
      * cache it is thrown.
      * @param url The configuration URL
+     * @param isCurrent False once the init this fetch serves is superseded; a fetched config is then
+     *   returned but not cached
      * @param onRefreshError Receives a failure the cached config masked: exactly the exception this
      *   call would have thrown without a cache ([ConsentException.ConfigNotPublished] for a definite
      *   4xx, [ConsentException.NetworkError] for transport/timeout/5xx, [ConsentException.ParseError]
@@ -37,6 +39,7 @@ internal class ConfigService(
      */
     suspend fun fetchConfig(
         url: String,
+        isCurrent: () -> Boolean = { true },
         onRefreshError: ((ConsentException) -> Unit)? = null,
     ): ConsentConfig {
         return try {
@@ -52,8 +55,9 @@ internal class ConfigService(
                 return cachedOrThrow(e, onRefreshError)
             }
 
-            // Cache the configuration
-            storage.saveConfigCache(config)
+            // Cache the configuration, unless a reset() or a newer initialize() superseded this fetch
+            // while it was in flight: a superseded fetch must not repopulate the wiped cache (TRUST-3254).
+            if (isCurrent()) storage.saveConfigCache(config)
 
             config
         } catch (e: ConsentException.NetworkError) {
@@ -100,17 +104,19 @@ internal class ConfigService(
     /**
      * Fetch configuration with retry logic
      * @param url The configuration URL
+     * @param isCurrent See [fetchConfig]
      * @return The parsed configuration
      * @throws ConsentException if all retries fail
      */
     suspend fun fetchConfigWithRetry(
         url: String,
+        isCurrent: () -> Boolean = { true },
         onRefreshError: ((ConsentException) -> Unit)? = null,
     ): ConsentConfig {
         // A definite 4xx or ConfigNotPublished gives up at once; 408, 429, 5xx and transport failures retry.
         // An attempt that falls back to the cache returns, so a masked failure is reported once.
         return networkClient.retryWithBackoff(shouldRetry = ConsentException::isRetryable) {
-            fetchConfig(url, onRefreshError)
+            fetchConfig(url, isCurrent, onRefreshError)
         }
     }
 }

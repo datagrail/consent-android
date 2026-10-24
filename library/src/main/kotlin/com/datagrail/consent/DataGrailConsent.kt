@@ -345,19 +345,27 @@ class DataGrailConsent private constructor() {
                     return@launch
                 }
 
-            // If a newer initialize() or a reset() has superseded this call, don't commit our state.
-            // Still fire this caller's callback so it isn't left hanging.
-            if (initGeneration.get() != generation) {
+            val isCurrent = { initGeneration.get() == generation }
+
+            // A newer initialize() or a reset() superseded this call. Still fire this caller's
+            // callback so it isn't left hanging.
+            fun finishSuperseded() {
                 if (initGeneration.get() == resetGeneration) {
                     // reset() ran over this init and no newer init followed: the SDK is not
                     // initialized. Apply the wipe to this init's storage too: reset() could not
-                    // reach it, since it ran before this manager existed.
+                    // reach it if it ran before this manager existed, and if it ran mid-load it
+                    // could not stop a config cached or made current after its own wipe.
                     manager.reset()
                     callback(Result.failure(ConsentException.NotInitialized()))
                 } else {
                     // A newer initialize() will commit and report its own result.
                     callback(Result.success(Unit))
                 }
+            }
+
+            // If superseded during storage setup, don't commit our state.
+            if (!isCurrent()) {
+                finishSuperseded()
                 return@launch
             }
 
@@ -373,8 +381,12 @@ class DataGrailConsent private constructor() {
             manager.loadConfig(
                 configUrl,
                 onConfigError = reportConfigError,
+                isCurrent = isCurrent,
             ) { result ->
                 when {
+                    // Superseded while the config loaded, including by a reset() from this init's
+                    // own onConfigError: no success, no pending-request retry (TRUST-3254).
+                    !isCurrent() -> finishSuperseded()
                     result.isSuccess -> {
                         // Retry any pending requests on initialization
                         scope.launch {

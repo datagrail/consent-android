@@ -62,6 +62,19 @@ class ConfigServiceValidationTest {
             verify(mockStorage).saveConfigCache(any())
         }
 
+    @Test
+    fun `fetchConfig superseded mid-fetch returns the config without caching it`() =
+        runTest {
+            val validConfig = ConsentServiceSecurityTest.createTestConfig()
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull()))
+                .thenReturn(json.encodeToString(validConfig))
+
+            val result = configService.fetchConfig("https://example.com/config.json", isCurrent = { false })
+
+            assertEquals(validConfig.version, result.version)
+            verify(mockStorage, never()).saveConfigCache(any())
+        }
+
     // MARK: - Validation Failure with Cache
 
     @Test
