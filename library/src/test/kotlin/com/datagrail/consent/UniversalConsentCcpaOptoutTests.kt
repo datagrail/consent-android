@@ -7,6 +7,7 @@ import com.datagrail.consent.storage.ConsentStorage
 import com.datagrail.consent.storage.UniversalConsentSyncState
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -23,6 +24,9 @@ import org.mockito.kotlin.never
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 /**
  * First-class `ccpa_optout` (TRUST-2591): the user's explicit "Do Not Sell or Share" choice, set by
@@ -607,6 +611,79 @@ class UniversalConsentCcpaOptoutTests {
             // Only the login seed: the unchanged re-sync writes nothing, and the setter doesn't write through.
             verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
         }
+
+    @Test
+    fun `a setter call racing a rehydrate adopt is not overwritten by the record`() {
+        storedBoundHash = hashFor(userA)
+
+        racePausedSetter(record(ccpaOptout = false)) { sut.rehydrateFromUniversalConsent(userA, apiKey) }
+
+        assertTrue(sut.getCcpaOptout())
+        assertTrue(storedCcpaWritePending)
+    }
+
+    @Test
+    fun `a setter call racing a login adopt is not overwritten by the record`() {
+        racePausedSetter(record(ccpaOptout = false)) { sut.setUserIdentifier(userA, apiKey) }
+
+        assertTrue(sut.getCcpaOptout())
+        assertTrue(storedCcpaWritePending)
+    }
+
+    /**
+     * Runs the adapter's synchronous half of `setCcpaOptout(true)` on its own thread, paused right
+     * after it stores the flag (before the revision bump), and runs [sync] on another thread in that
+     * window. [sync] captures its CCPA revision before its GET, so the window is open once the GET
+     * (answered with [found]) is reached. Without the setter and the sync's revision check sharing
+     * one lock, [sync] then finishes inside the window and adopts the record's value over the newer
+     * choice; with it, [sync] blocks on the lock, and the setter is released once it does.
+     */
+    private fun racePausedSetter(
+        found: UniversalConsentRecord,
+        sync: suspend () -> Unit,
+    ) {
+        val flagStored = CountDownLatch(1)
+        val readReached = CountDownLatch(1)
+        val resume = CountDownLatch(1)
+        lateinit var setter: Thread
+        var setterFailure: Throwable? = null
+        var syncFailure: Throwable? = null
+        whenever(mockStorage.saveCcpaOptout(any())).doAnswer {
+            storedCcpaOptout = it.getArgument(0)
+            if (Thread.currentThread() === setter) {
+                flagStored.countDown()
+                resume.await(5, TimeUnit.SECONDS)
+            }
+        }
+        runBlocking {
+            whenever(mockConsentService.getUniversalConsent(any(), any(), any())).doAnswer {
+                readReached.countDown()
+                found
+            }
+        }
+        setter = thread(start = false) { runCatching { sut.saveCcpaOptout(true) }.onFailure { setterFailure = it } }
+        val syncThread = thread(start = false) { runCatching { runBlocking { sync() } }.onFailure { syncFailure = it } }
+        try {
+            setter.start()
+            assertTrue("setter never stored the flag", flagStored.await(5, TimeUnit.SECONDS))
+            syncThread.start()
+            assertTrue("sync never reached its read", readReached.await(5, TimeUnit.SECONDS))
+            // Wait until the sync has either finished inside the window or is blocked on the lock.
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (syncThread.state != Thread.State.TERMINATED && syncThread.state != Thread.State.BLOCKED) {
+                assertTrue("sync neither finished nor blocked", System.nanoTime() < deadline)
+                Thread.sleep(1)
+            }
+        } finally {
+            resume.countDown()
+            setter.join(5_000)
+            syncThread.join(5_000)
+        }
+        assertFalse(setter.isAlive)
+        assertFalse(syncThread.isAlive)
+        setterFailure?.let { throw it }
+        syncFailure?.let { throw it }
+    }
 
     // MARK: - Raw choice on the write-through (TRUST-3074)
 
