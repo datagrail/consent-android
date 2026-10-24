@@ -16,6 +16,7 @@ import org.junit.Test
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.doSuspendableAnswer
@@ -640,6 +641,7 @@ class ConsentManagerTests {
                 eq("dg_key"),
                 ccpaCaptor.capture(),
                 any(),
+                anyOrNull(),
             )
 
             val written = prefsCaptor.firstValue
@@ -684,6 +686,8 @@ class ConsentManagerTests {
             whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
                 UniversalConsentRecord(
                     status = "found",
+                    // Older than the local change (TRUST-3224).
+                    updatedAt = "2020-01-01T00:00:00Z",
                     consentPreferences =
                         UniversalConsentPreferences(
                             isCustomised = true,
@@ -698,6 +702,8 @@ class ConsentManagerTests {
             // RE-SYNC: already bound to this identity. On a LOGIN a found record now wins and
             // nothing is written (TRUST-2902), so write-through is a re-sync behavior.
             bindDeviceTo("user@example.com")
+            // The local change was made after the record's latest decision, so it is written through.
+            whenever(mockStorage.loadDecisionTs()).thenReturn(System.currentTimeMillis() / 1000)
 
             sut.setUserIdentifier(
                 "user@example.com",
@@ -714,6 +720,7 @@ class ConsentManagerTests {
                 any(),
                 eq(false),
                 any(),
+                anyOrNull(),
             )
             assertEquals(
                 "write carries the user's CURRENT LOCAL choice, not the fetched record",
@@ -754,6 +761,8 @@ class ConsentManagerTests {
             whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(
                 UniversalConsentRecord(
                     status = "found",
+                    // Older than the local change (TRUST-3224).
+                    updatedAt = "2020-01-01T00:00:00Z",
                     consentPreferences =
                         UniversalConsentPreferences(
                             isCustomised = true,
@@ -769,6 +778,8 @@ class ConsentManagerTests {
             // RE-SYNC: already bound to this identity, so the found record does not suppress the
             // write-through (on a LOGIN the record wins and nothing is written, TRUST-2902).
             bindDeviceTo("user@example.com")
+            // The local change was made after the record's latest decision, so it is written through.
+            whenever(mockStorage.loadDecisionTs()).thenReturn(System.currentTimeMillis() / 1000)
 
             // A DENIED device signal must suppress marketing LOCALLY but never on the wire.
             sut.setUserIdentifier(
@@ -780,7 +791,7 @@ class ConsentManagerTests {
 
             // Local storage got the reconciled (suppressed) view: marketing forced off.
             val storedCaptor = argumentCaptor<ConsentPreferences>()
-            verify(mockStorage).savePreferences(storedCaptor.capture())
+            verify(mockStorage).replacePreferencesKeepingDecisionTs(storedCaptor.capture())
             assertEquals(
                 "local state suppressed under DENIED",
                 false,
@@ -796,6 +807,7 @@ class ConsentManagerTests {
                 any(),
                 eq(false),
                 any(),
+                anyOrNull(),
             )
             assertEquals(
                 "write carries the raw local opt-in, not the suppressed local view",
@@ -840,12 +852,12 @@ class ConsentManagerTests {
             sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
 
             // Nothing was POSTed: the record is adopted, not re-POSTed.
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
 
             // The record was adopted into local state, stamped customised so the banner does not
             // re-prompt a user who already answered on another device.
             val storedCaptor = argumentCaptor<ConsentPreferences>()
-            verify(mockStorage).savePreferences(storedCaptor.capture())
+            verify(mockStorage).savePreferences(storedCaptor.capture(), anyOrNull())
             assertTrue(
                 "local copy stays customised so needsConsent() does not re-prompt",
                 storedCaptor.firstValue.isCustomised,
@@ -887,7 +899,7 @@ class ConsentManagerTests {
             }
 
             // A record we could not read is never overwritten.
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
         }
 
     @Test
@@ -925,6 +937,7 @@ class ConsentManagerTests {
                 any(),
                 eq(false),
                 any(),
+                anyOrNull(),
             )
 
             assertEquals(true, prefsCaptor.firstValue.cookieOptions["category_marketing"])
@@ -967,6 +980,7 @@ class ConsentManagerTests {
                 eq("dg_key"),
                 eq(false),
                 isNull(),
+                anyOrNull(),
             )
         }
 
@@ -982,9 +996,9 @@ class ConsentManagerTests {
 
             sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
 
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
             val storedCaptor = argumentCaptor<ConsentPreferences>()
-            verify(mockStorage).savePreferences(storedCaptor.capture())
+            verify(mockStorage).savePreferences(storedCaptor.capture(), anyOrNull())
             assertEquals(
                 "the record (marketing on) replaced the local opt-out",
                 true,
@@ -1046,9 +1060,9 @@ class ConsentManagerTests {
                 onRehydrated = { notified.add(it) },
             )
 
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
             val storedCaptor = argumentCaptor<ConsentPreferences>()
-            verify(mockStorage).savePreferences(storedCaptor.capture())
+            verify(mockStorage).savePreferences(storedCaptor.capture(), anyOrNull())
             val stored = storedCaptor.firstValue
             assertTrue(
                 "analytics takes its config default, not the prior local OFF",
@@ -1079,9 +1093,9 @@ class ConsentManagerTests {
                 onRehydrated = { notified.add(it) },
             )
 
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
             verify(mockStorage).clearPreferences()
-            verify(mockStorage, never()).savePreferences(any())
+            verify(mockStorage, never()).savePreferences(any(), anyOrNull())
             assertEquals("listener sees the neutral defaults", listOf(sut.getDefaultPreferences()), notified)
             verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
         }
@@ -1114,10 +1128,10 @@ class ConsentManagerTests {
             )
 
             // The record wins as-is: adopted locally, never posted, never reset to neutral.
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
             verify(mockStorage, never()).clearPreferences()
             val storedCaptor = argumentCaptor<ConsentPreferences>()
-            verify(mockStorage).savePreferences(storedCaptor.capture())
+            verify(mockStorage).savePreferences(storedCaptor.capture(), anyOrNull())
             val stored = storedCaptor.firstValue
             assertTrue("the adopted essential-only choice is customised", stored.isCustomised)
             assertTrue("essential is always on", stored.isCategoryEnabled("category_essential"))
@@ -1159,9 +1173,9 @@ class ConsentManagerTests {
             sut.setUserIdentifier("bob@example.com", "dg_key", getSignature = signatureProvider())
 
             // Adopted as-is, never posted back.
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
             val storedCaptor = argumentCaptor<ConsentPreferences>()
-            verify(mockStorage).savePreferences(storedCaptor.capture())
+            verify(mockStorage).savePreferences(storedCaptor.capture(), anyOrNull())
             val stored = storedCaptor.firstValue
             assertTrue("essential is always on", stored.isCategoryEnabled("category_essential"))
             assertFalse(
@@ -1180,8 +1194,8 @@ class ConsentManagerTests {
 
             sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
 
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
-            verify(mockStorage).savePreferences(any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
+            verify(mockStorage).savePreferences(any(), anyOrNull())
             verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
         }
 
@@ -1195,7 +1209,7 @@ class ConsentManagerTests {
             sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
 
             val prefsCaptor = argumentCaptor<UniversalConsentPreferences>()
-            verify(mockConsentService).saveUniversalConsent(any(), any(), prefsCaptor.capture(), any(), any(), any())
+            verify(mockConsentService).saveUniversalConsent(any(), any(), prefsCaptor.capture(), any(), any(), any(), anyOrNull())
             assertTrue(prefsCaptor.firstValue.isCustomised)
             assertEquals(false, prefsCaptor.firstValue.cookieOptions["category_marketing"])
             verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
@@ -1209,8 +1223,8 @@ class ConsentManagerTests {
 
             sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
 
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
-            verify(mockStorage, never()).savePreferences(any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
+            verify(mockStorage, never()).savePreferences(any(), anyOrNull())
             verify(mockStorage, never()).clearPreferences()
             verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
         }
@@ -1231,7 +1245,7 @@ class ConsentManagerTests {
                 onRehydrated = { notified.add(it) },
             )
 
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
             verify(mockStorage).clearPreferences()
             verify(mockStorage, never()).clearAll()
             verify(mockStorage).saveBoundUserHash(hashFor("bob@example.com"))
@@ -1249,7 +1263,7 @@ class ConsentManagerTests {
 
             sut.setUserIdentifier("bob@example.com", "dg_key", getSignature = signatureProvider())
 
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
             verify(mockStorage, never()).clearPreferences()
             verify(mockStorage).saveBoundUserHash(hashFor("bob@example.com"))
         }
@@ -1264,7 +1278,7 @@ class ConsentManagerTests {
 
             sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
 
-            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
             verify(mockStorage, never()).clearPreferences()
             verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
         }
@@ -1278,7 +1292,7 @@ class ConsentManagerTests {
 
             sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
 
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
             verify(mockStorage).saveBoundUserHash(hashFor("user@example.com"))
         }
 
@@ -1306,7 +1320,7 @@ class ConsentManagerTests {
         runTest {
             sut.currentConfig = twoCategoryUniversalConfig()
             whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice())
-            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), any()))
+            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull()))
                 .thenAnswer { throw ConsentException.NetworkError("503") }
 
             assertThrows(ConsentException.NetworkError::class.java) {
@@ -1385,8 +1399,8 @@ class ConsentManagerTests {
 
             verify(mockStorage).clearBoundUserHash()
             verify(mockStorage, never()).saveBoundUserHash(any())
-            verify(mockStorage, never()).savePreferences(any())
-            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockStorage, never()).savePreferences(any(), anyOrNull())
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
         }
 
     /**
@@ -1400,12 +1414,12 @@ class ConsentManagerTests {
             whenever(mockStorage.loadPreferences()).thenReturn(explicitChoice())
             whenever(mockConsentService.getUniversalConsent(any(), any(), any())).thenReturn(null)
             whenever(
-                mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), any()),
+                mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull()),
             ).thenAnswer { sut.clearUserIdentifier() }
 
             sut.setUserIdentifier("user@example.com", "dg_key", getSignature = signatureProvider())
 
-            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), any(), any(), any())
+            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), any(), any(), any(), anyOrNull())
             verify(mockStorage).clearBoundUserHash()
             verify(mockStorage, never()).saveBoundUserHash(any())
         }
@@ -1542,7 +1556,7 @@ class ConsentManagerTests {
             sut.rehydrateFromUniversalConsent("user@example.com", "dg_key")
 
             val storedCaptor = argumentCaptor<ConsentPreferences>()
-            verify(mockStorage).savePreferences(storedCaptor.capture())
+            verify(mockStorage).savePreferences(storedCaptor.capture(), anyOrNull())
             assertEquals(
                 "always-on category absent from the record is surfaced enabled, not dropped",
                 true,

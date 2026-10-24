@@ -63,6 +63,10 @@ internal class ConsentService(
         val platform: String,
         @SerialName("policy_name") val policyName: String,
         @SerialName("config_version") val configVersion: String,
+        // Merge provenance (TRUST-2592, TRUST-3224): every SDK write is the user's explicit choice,
+        // made at decisionTs. No actor_id, so the edge resolves it to "".
+        @SerialName("is_explicit") val isExplicit: Boolean,
+        @SerialName("decision_ts") val decisionTs: Long,
     )
 
     companion object {
@@ -132,12 +136,14 @@ internal class ConsentService(
          * Provenance sub-digest bound into the signed string (TRUST-2971).
          *
          * Per-category CRDT merge (TRUST-2592) orders writes by a provenance triple —
-         * `is_explicit`, `decision_ts`, `actor_id`. Because this client sends no provenance in
-         * the request body today, the edge RESOLVES the default triple, so the SDK must sign the
-         * digest of that same resolved-default triple or the signature will not verify:
+         * `is_explicit`, `decision_ts`, `actor_id`. The body carries `is_explicit: true` and
+         * `decision_ts` and omits `actor_id`, so the SDK signs the digest of the triple the edge
+         * resolves for that body, or the signature will not verify:
          *
          *   is_explicit → "true"                  (literal)
-         *   decision_ts → the signed unix-seconds timestamp (base-10, no leading zeros)
+         *   decision_ts → the write's unix-seconds decision time (base-10, no leading zeros): when
+         *                 the user made the choice (TRUST-3224), or the signed request timestamp
+         *                 when that is unknown, which is byte-identical to the edge's default
          *   actor_id    → ""                       (absent)
          *
          * provInput  = is_explicit + "\n" + decision_ts + "\n" + actor_id   ("\n" = U+000A)
@@ -147,8 +153,8 @@ internal class ConsentService(
          * derivation is identical across every signer and the edge verifier; see the TRUST-2971
          * signing spec and the shared golden-vector corpus.
          */
-        fun resolvedDefaultProvenanceDigest(timestamp: Long): String {
-            val provInput = "true" + "\n" + timestamp.toString() + "\n" + ""
+        fun provenanceDigest(decisionTs: Long): String {
+            val provInput = "true" + "\n" + decisionTs.toString() + "\n" + ""
             val digest = MessageDigest.getInstance("SHA-256")
             return toHex(digest.digest(provInput.toByteArray(Charsets.UTF_8)))
         }
@@ -270,6 +276,10 @@ internal class ConsentService(
      *   otherwise `false`. Never derived from the device's ad-tracking signal or any category.
      * @param getSignature the customer signing callback, or null for a limited-mode
      *   (API-key-only) write.
+     * @param decisionTs when the user made the choice being written, in unix seconds (TRUST-3224).
+     *   Sent as the body's `decision_ts` and signed into provDigest. Null when unknown (a choice
+     *   stored before the SDK recorded decision times, or a write that is not one choice): the
+     *   request time stands in, exactly the edge's own default for a provenance-less write.
      * @throws ConsentException.NetworkError on failure (also queues nothing — universal writes
      *   are user-identity-scoped and not part of the anonymous pending-events retry queue).
      */
@@ -280,8 +290,14 @@ internal class ConsentService(
         apiKey: String,
         ccpaOptout: Boolean,
         getSignature: SignatureProvider?,
+        decisionTs: Long? = null,
     ) {
         val projectId = requireProjectId(config)
+
+        // One request time for the whole write: the signed X-DG-Timestamp, and the decision time
+        // when the choice's own is unknown.
+        val timestamp = System.currentTimeMillis() / 1000
+        val effectiveDecisionTs = decisionTs ?: timestamp
 
         val userHash = computeUserHash(config.dgCustomerId, projectId, identifier)
 
@@ -298,6 +314,8 @@ internal class ConsentService(
                 platform = PLATFORM,
                 policyName = config.consentPolicy.name,
                 configVersion = config.version,
+                isExplicit = true,
+                decisionTs = effectiveDecisionTs,
             )
 
         val headers =
@@ -308,17 +326,14 @@ internal class ConsentService(
                 // The SDK owns the timestamp and nonce and binds them into the string the
                 // customer backend signs, so the value the edge verifies is byte-for-byte the
                 // value we send. The nonce is 128-bit / 32 lowercase hex from a CSPRNG.
-                val timestamp = System.currentTimeMillis() / 1000
                 val nonce = generateNonce()
-                // Bind provenance into the signed string (TRUST-2971). This client sends no
-                // provenance body fields, so it signs the digest of the resolved-DEFAULT triple
-                // ("true", the signed timestamp, "") — exactly what the edge reconstructs for a
-                // request that carries no provenance. Without this an intermediary could rewrite
+                // Bind provenance into the signed string (TRUST-2971): the same triple the body
+                // carries ("true", its decision_ts, ""). Without this an intermediary could rewrite
                 // decision_ts/is_explicit/actor_id on an otherwise-valid write without breaking
                 // the signature. The getSignature callback contract is unchanged: it still HMACs
                 // stringToSign verbatim.
-                val provDigestDefault = resolvedDefaultProvenanceDigest(timestamp)
-                val stringToSign = "${config.dgCustomerId}:$userHash:$timestamp:$nonce:$provDigestDefault"
+                val provDigest = provenanceDigest(effectiveDecisionTs)
+                val stringToSign = "${config.dgCustomerId}:$userHash:$timestamp:$nonce:$provDigest"
                 val payload =
                     UniversalConsentSigningPayload(
                         stringToSign = stringToSign,
@@ -415,10 +430,10 @@ internal class ConsentService(
                 method = HTTPMethod.POST,
                 body = jsonBody,
             )
-
-            // Save locally after successful backend save
-            storage.savePreferences(preferences)
-            storage.saveConfigVersion(config.version)
+            // No local write here (TRUST-3224): ConsentManager.savePreferences already stored this
+            // choice, its decision time and the config version before the request. Rewriting it after
+            // the request lets an older save that completes late restore a stale choice under a newer
+            // choice's decision time, so it could outrank a revocation adopted from the server.
         } catch (e: Exception) {
             // Queue for retry on failure
             val eventJson =
@@ -437,10 +452,6 @@ internal class ConsentService(
                 existingEvents.subList(0, existingEvents.size - MAX_PENDING_EVENTS).clear()
             }
             storage.savePendingEvents(existingEvents)
-
-            // Still save locally
-            storage.savePreferences(preferences)
-            storage.saveConfigVersion(config.version)
 
             throw ConsentException.NetworkError("Failed to save preferences: ${e.message}")
         }

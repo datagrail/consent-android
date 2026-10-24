@@ -34,6 +34,7 @@ class ConsentStorageTest {
         whenever(mockSharedPreferences.edit()).thenReturn(mockEditor)
         whenever(mockEditor.putString(any(), any())).thenReturn(mockEditor)
         whenever(mockEditor.remove(any())).thenReturn(mockEditor)
+        whenever(mockEditor.putLong(any(), any())).thenReturn(mockEditor)
         whenever(mockEditor.apply()).then { }
 
         storage = ConsentStorage(mockSharedPreferences)
@@ -55,14 +56,34 @@ class ConsentStorageTest {
                     ),
             )
 
-        storage.savePreferences(prefs)
+        storage.savePreferences(prefs, 1_760_000_000L)
 
-        // Verify putString was called with the correct key
+        // The choice and its decision time go in one edit.
         Mockito.verify(mockEditor).putString(
             Mockito.eq("datagrail_consent_preferences"),
             any(),
         )
+        Mockito.verify(mockEditor).putLong("datagrail_consent_decision_ts", 1_760_000_000L)
         Mockito.verify(mockEditor).apply()
+    }
+
+    @Test
+    fun testSavePreferencesWithUnknownTimeRemovesTheOldTime() {
+        storage.savePreferences(ConsentPreferences(isCustomised = true, cookieOptions = emptyList()), null)
+
+        Mockito.verify(mockEditor).putString(Mockito.eq("datagrail_consent_preferences"), any())
+        Mockito.verify(mockEditor).remove("datagrail_consent_decision_ts")
+        Mockito.verify(mockEditor, Mockito.never()).putLong(any(), any())
+        Mockito.verify(mockEditor).apply()
+    }
+
+    @Test
+    fun testReplacePreferencesKeepsTheDecisionTime() {
+        storage.replacePreferencesKeepingDecisionTs(ConsentPreferences(isCustomised = true, cookieOptions = emptyList()))
+
+        Mockito.verify(mockEditor).putString(Mockito.eq("datagrail_consent_preferences"), any())
+        Mockito.verify(mockEditor, Mockito.never()).remove("datagrail_consent_decision_ts")
+        Mockito.verify(mockEditor, Mockito.never()).putLong(any(), any())
     }
 
     @Test
@@ -197,6 +218,7 @@ class ConsentStorageTest {
         storage.clearPreferences()
 
         Mockito.verify(mockEditor).remove("datagrail_consent_preferences")
+        Mockito.verify(mockEditor).remove("datagrail_consent_decision_ts")
         Mockito.verify(mockEditor, Mockito.never()).clear()
         Mockito.verify(mockEditor, Mockito.never()).remove("datagrail_consent_id")
         Mockito.verify(mockEditor, Mockito.never()).remove("datagrail_consent_version")

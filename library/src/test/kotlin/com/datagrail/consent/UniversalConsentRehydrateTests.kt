@@ -11,6 +11,7 @@ import org.junit.Test
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.doAnswer
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
@@ -50,7 +51,7 @@ class UniversalConsentRehydrateTests {
 
         storedPreferences = null
         storedConfigVersion = null
-        whenever(mockStorage.savePreferences(any())).doAnswer { invocation ->
+        whenever(mockStorage.savePreferences(any(), anyOrNull())).doAnswer { invocation ->
             storedPreferences = invocation.getArgument(0)
             Unit
         }
@@ -118,7 +119,7 @@ class UniversalConsentRehydrateTests {
 
             // Nothing persisted: "no record" is the absence of a signal, not a denial. Writing an
             // empty record here would fabricate a choice and hide the banner meant to collect it.
-            verify(mockStorage, never()).savePreferences(any())
+            verify(mockStorage, never()).savePreferences(any(), anyOrNull())
             assertNull(mockStorage.loadPreferences())
             assertTrue(sut.needsConsent())
         }
@@ -171,7 +172,7 @@ class UniversalConsentRehydrateTests {
 
             assertFalse(sut.rehydrateFromUniversalConsent("user@example.com", "dg_key", TrackingSignal.AUTHORIZED))
 
-            verify(mockStorage, never()).savePreferences(any())
+            verify(mockStorage, never()).savePreferences(any(), anyOrNull())
             assertTrue(sut.needsConsent())
         }
 
@@ -268,7 +269,7 @@ class UniversalConsentRehydrateTests {
 
             // A miss is the absence of a signal, not a denial — nothing to write, nothing stored.
             assertFalse(sut.rehydrateFromUniversalConsent("user@example.com", "dg_key", TrackingSignal.AUTHORIZED))
-            verify(mockStorage, never()).savePreferences(any())
+            verify(mockStorage, never()).savePreferences(any(), anyOrNull())
         }
 
     // MARK: - Preconditions
@@ -281,7 +282,7 @@ class UniversalConsentRehydrateTests {
                     sut.rehydrateFromUniversalConsent("user@example.com", "dg_key", TrackingSignal.AUTHORIZED)
                 }
             }
-            verify(mockStorage, never()).savePreferences(any())
+            verify(mockStorage, never()).savePreferences(any(), anyOrNull())
         }
 
     @Test
@@ -294,7 +295,7 @@ class UniversalConsentRehydrateTests {
                     sut.rehydrateFromUniversalConsent("user@example.com", "dg_key", TrackingSignal.AUTHORIZED)
                 }
             }
-            verify(mockStorage, never()).savePreferences(any())
+            verify(mockStorage, never()).savePreferences(any(), anyOrNull())
         }
 
     // MARK: - Helpers

@@ -37,6 +37,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         private const val KEY_CCPA_OPTOUT = "datagrail_consent_ccpa_optout"
         private const val KEY_CCPA_WRITE_PENDING = "datagrail_consent_ccpa_write_pending"
         private const val KEY_SYNC_STATE = "datagrail_consent_sync_state"
+        private const val KEY_DECISION_TS = "datagrail_consent_decision_ts"
 
         /**
          * Create a ConsentStorage backed by EncryptedSharedPreferences
@@ -121,18 +122,40 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
     // MARK: - Preferences
 
     /**
-     * Save consent preferences to local storage
-     * @param preferences The consent preferences to save
+     * Save a consent choice and WHEN it was made (TRUST-3224), in one edit, so the two never drift
+     * apart. [decisionTs] is unix seconds: the user's own choice time, or the `updated_at` of the
+     * record a Universal Consent adopt stored. Null means the time is unknown, and removes any stored
+     * time rather than leaving another choice's time paired with this one. The time is sent as the
+     * write's `decision_ts` and compared with the record's `updated_at` on a re-sync, so a stale
+     * device cannot out-rank a newer choice made elsewhere.
      * @throws ConsentException.StorageError if encoding fails
      */
-    fun savePreferences(preferences: ConsentPreferences) {
+    fun savePreferences(
+        preferences: ConsentPreferences,
+        decisionTs: Long?,
+    ) {
+        val jsonString = encodePreferences(preferences)
+        val edit = prefs.edit().putString(KEY_PREFERENCES, jsonString)
+        if (decisionTs != null) edit.putLong(KEY_DECISION_TS, decisionTs) else edit.remove(KEY_DECISION_TS)
+        edit.apply()
+    }
+
+    /**
+     * Replace the stored choice with another view OF THE SAME CHOICE, keeping its decision time: the
+     * reconciled view a write-through leaves, or the local copy the legacy save path re-stores. Never
+     * use this for a new choice or an adopt; those decide their time through [savePreferences].
+     * @throws ConsentException.StorageError if encoding fails
+     */
+    fun replacePreferencesKeepingDecisionTs(preferences: ConsentPreferences) {
+        prefs.edit().putString(KEY_PREFERENCES, encodePreferences(preferences)).apply()
+    }
+
+    private fun encodePreferences(preferences: ConsentPreferences): String =
         try {
-            val jsonString = json.encodeToString(preferences)
-            prefs.edit().putString(KEY_PREFERENCES, jsonString).apply()
+            json.encodeToString(preferences)
         } catch (e: Exception) {
             throw ConsentException.StorageError("Failed to encode preferences: ${e.message}", e)
         }
-    }
 
     /**
      * Load consent preferences from local storage
@@ -151,10 +174,22 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
      * Remove the stored explicit consent choice only, returning reads to the config defaults (the
      * same state a first-time install sees: [loadPreferences] returns null, so the banner shows).
      * Unlike [clearAll] this leaves the unique id, config cache, config version, locale, pending
-     * event queue and identity binding in place.
+     * event queue and identity binding in place. The choice's decision time goes with it.
      */
     fun clearPreferences() {
-        prefs.edit().remove(KEY_PREFERENCES).apply()
+        prefs.edit().remove(KEY_PREFERENCES).remove(KEY_DECISION_TS).apply()
+    }
+
+    // MARK: - Decision time (TRUST-3224)
+
+    /** The stored decision time, unvalidated; null when none is stored (or it is unreadable). */
+    fun loadDecisionTs(): Long? {
+        if (!prefs.contains(KEY_DECISION_TS)) return null
+        return try {
+            prefs.getLong(KEY_DECISION_TS, 0L)
+        } catch (e: ClassCastException) {
+            null
+        }
     }
 
     // MARK: - Identity Binding
