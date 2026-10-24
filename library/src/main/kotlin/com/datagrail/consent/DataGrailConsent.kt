@@ -65,11 +65,28 @@ class DataGrailConsent private constructor() {
     private var onConsentChangedCallback: ((ConsentPreferences) -> Unit)? = null
     private val scope = CoroutineScope(Dispatchers.Main)
 
-    // Monotonic token bumped on each initialize() call. A background init coroutine only
-    // commits its manager/configUrl if its token is still current, so overlapping/re-entrant
-    // initialize() calls resolve deterministically to the last caller ("last wins") instead of
-    // whichever coroutine happens to finish last.
+    // Monotonic token bumped on each initialize() and reset() call: the one answer to "is this init
+    // still current?". A background init coroutine only commits its manager/configUrl, and only
+    // reports a config fetch failure to its onConfigError, while its token is still current. So
+    // overlapping/re-entrant initialize() calls resolve deterministically to the last caller ("last
+    // wins") instead of whichever coroutine happens to finish last, and a reset() supersedes an
+    // init still in flight: that init neither commits nor reports (TRUST-3254).
     private val initGeneration = AtomicInteger(0)
+
+    // The initGeneration value reset() last set. Not a second currency token: it only tells a
+    // superseded init whether the reset (not a newer initialize) superseded it, to pick its result.
+    @Volatile
+    private var resetGeneration = 0
+
+    // Builds an init's storage + services off the main thread. A seam so tests can hold an init in
+    // flight; production always uses the default.
+    internal var managerFactory: (Context, String) -> ConsentManager = { context, privacyDomain ->
+        val storage = ConsentStorage.create(context)
+        val networkClient = NetworkClient()
+        val configService = ConfigService(networkClient, storage)
+        val consentService = ConsentService(networkClient, storage, privacyDomain)
+        ConsentManager(storage, configService, consentService)
+    }
 
     companion object {
         @Volatile
@@ -180,6 +197,25 @@ class DataGrailConsent private constructor() {
     }
 
     /**
+     * Initialize the DataGrail Consent SDK and be told when the cached config masked a config fetch
+     * failure (Java-friendly). See the Kotlin overload with `onConfigError`.
+     * @param context Android application context
+     * @param configUrl URL to fetch consent configuration from
+     * @param onConfigError Listener for a fetch failure the cached config masked
+     * @param callback Callback interface for success/failure
+     */
+    fun initialize(
+        context: Context,
+        configUrl: String,
+        onConfigError: ConfigErrorListener,
+        callback: ConsentCallback,
+    ) {
+        initialize(context, configUrl, { error -> onConfigError.onConfigError(error) }) { result ->
+            adaptResult(result, callback)
+        }
+    }
+
+    /**
      * Initialize the DataGrail Consent SDK (Kotlin-friendly)
      * @param context Android application context
      * @param configUrl URL to fetch consent configuration from
@@ -188,6 +224,47 @@ class DataGrailConsent private constructor() {
     fun initialize(
         context: Context,
         configUrl: String,
+        callback: (Result<Unit>) -> Unit,
+    ) {
+        startInitialize(context, configUrl, onConfigError = null, callback)
+    }
+
+    /**
+     * Initialize the DataGrail Consent SDK, and be told when a config fetch fails but the SDK
+     * carries on with the cached config (TRUST-3254). Same shape as the iOS SDK's
+     * `initialize(configUrl:onConfigError:completion:)` and consent-react's `onConfigError` option:
+     * the handler belongs to this call only.
+     *
+     * Every [initialize] fetches the config from the network. When that fetch fails and a config
+     * cached by an earlier launch exists, initialization succeeds on the cached config, and
+     * [onConfigError] receives the failure with the same exception [initialize] reports when there
+     * is no cache: [ConsentException.ConfigNotPublished] (a definite 4xx, e.g. the config was
+     * unpublished), [ConsentException.NetworkError] (transport failure, timeout, 5xx),
+     * [ConsentException.ParseError] (the response is not a config) or
+     * [ConsentException.ValidationError] (it decodes but fails validation). It is for logging and
+     * monitoring only: the cached config is already in use.
+     *
+     * Fires at most once per call, on the main thread, before [callback]. Not on a successful fetch,
+     * and not when there is no cache (that failure is [callback]'s own result). Never once a newer
+     * [initialize] or a [reset] has superseded this call. A handler that throws is logged and ignored.
+     * @param context Android application context
+     * @param configUrl URL to fetch consent configuration from
+     * @param onConfigError Receives a fetch failure the cached config masked
+     * @param callback Callback with result
+     */
+    fun initialize(
+        context: Context,
+        configUrl: String,
+        onConfigError: (ConsentException) -> Unit,
+        callback: (Result<Unit>) -> Unit,
+    ) {
+        startInitialize(context, configUrl, onConfigError, callback)
+    }
+
+    private fun startInitialize(
+        context: Context,
+        configUrl: String,
+        onConfigError: ((ConsentException) -> Unit)?,
         callback: (Result<Unit>) -> Unit,
     ) {
         // Validate URL format and scheme
@@ -227,8 +304,10 @@ class DataGrailConsent private constructor() {
         val privacyDomain = url.host
 
         // Token for this init call. Any earlier in-flight init is now superseded and must not
-        // commit its manager/configUrl (see the generation check after storage setup below).
+        // commit its manager/configUrl (see the generation check after storage setup below), nor
+        // report a config fetch failure.
         val generation = initGeneration.incrementAndGet()
+        val reportConfigError = onConfigError?.let { configErrorReporter(generation, it) }
 
         // Build storage + services and load configuration off the calling thread.
         //
@@ -241,13 +320,7 @@ class DataGrailConsent private constructor() {
         scope.launch {
             val manager =
                 try {
-                    withContext(Dispatchers.IO) {
-                        val storage = ConsentStorage.create(context)
-                        val networkClient = NetworkClient()
-                        val configService = ConfigService(networkClient, storage)
-                        val consentService = ConsentService(networkClient, storage, privacyDomain)
-                        ConsentManager(storage, configService, consentService)
-                    }
+                    withContext(Dispatchers.IO) { managerFactory(context, privacyDomain) }
                 } catch (e: CancellationException) {
                     // Never swallow cancellation — let it propagate so the coroutine unwinds
                     // normally rather than being reported as a storage-init failure.
@@ -272,10 +345,27 @@ class DataGrailConsent private constructor() {
                     return@launch
                 }
 
-            // If a newer initialize() call has started, don't clobber its state with ours.
-            // Still fire this caller's callback so it isn't left hanging.
-            if (initGeneration.get() != generation) {
-                callback(Result.success(Unit))
+            val isCurrent = { initGeneration.get() == generation }
+
+            // A newer initialize() or a reset() superseded this call. Still fire this caller's
+            // callback so it isn't left hanging.
+            fun finishSuperseded() {
+                if (initGeneration.get() == resetGeneration) {
+                    // reset() ran over this init and no newer init followed: the SDK is not
+                    // initialized. Apply the wipe to this init's storage too: reset() could not
+                    // reach it if it ran before this manager existed, and if it ran mid-load it
+                    // could not stop a config cached or made current after its own wipe.
+                    manager.reset()
+                    callback(Result.failure(ConsentException.NotInitialized()))
+                } else {
+                    // A newer initialize() will commit and report its own result.
+                    callback(Result.success(Unit))
+                }
+            }
+
+            // If superseded during storage setup, don't commit our state.
+            if (!isCurrent()) {
+                finishSuperseded()
                 return@launch
             }
 
@@ -288,8 +378,15 @@ class DataGrailConsent private constructor() {
             this@DataGrailConsent.appContext = context.applicationContext
 
             // Load configuration
-            manager.loadConfig(configUrl) { result ->
+            manager.loadConfig(
+                configUrl,
+                onConfigError = reportConfigError,
+                isCurrent = isCurrent,
+            ) { result ->
                 when {
+                    // Superseded while the config loaded, including by a reset() from this init's
+                    // own onConfigError: no success, no pending-request retry (TRUST-3254).
+                    !isCurrent() -> finishSuperseded()
                     result.isSuccess -> {
                         // Retry any pending requests on initialization
                         scope.launch {
@@ -506,6 +603,9 @@ class DataGrailConsent private constructor() {
      * the device, use [clearUserIdentifier].
      */
     fun reset() {
+        // Supersede an init still in flight: it neither commits nor reports a config fetch failure
+        // to its onConfigError (TRUST-3254), and its callback fails with NotInitialized.
+        resetGeneration = initGeneration.incrementAndGet()
         manager?.reset()
     }
 
@@ -1069,6 +1169,17 @@ class DataGrailConsent private constructor() {
     fun onConsentChanged(callback: (ConsentPreferences) -> Unit) {
         this.onConsentChangedCallback = callback
     }
+
+    /**
+     * A reporter for one [initialize]'s config fetch: it delivers to [handler] only while
+     * [generation] is still current, i.e. until a newer [initialize] or a [reset] supersedes it.
+     */
+    internal fun configErrorReporter(
+        generation: Int,
+        handler: (ConsentException) -> Unit,
+    ): (ConsentException) -> Unit = { error -> if (initGeneration.get() == generation) handler(error) }
+
+    internal fun currentInitGeneration(): Int = initGeneration.get()
 
     // MARK: - Utility
 

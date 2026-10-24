@@ -79,15 +79,23 @@ internal class ConsentManager(
     /**
      * Load configuration from URL
      * @param configUrl URL to fetch configuration from
+     * @param onConfigError Receives a fetch failure the cached config masked (TRUST-3254); see
+     *   [ConfigService.fetchConfig]
+     * @param isCurrent False once the init this load serves is superseded: the fetched config is
+     *   then neither cached nor made current
      * @param callback Callback with result
      */
     suspend fun loadConfig(
         configUrl: String,
+        onConfigError: ((ConsentException) -> Unit)? = null,
+        isCurrent: () -> Boolean = { true },
         callback: (Result<ConsentConfig>) -> Unit,
     ) {
         try {
-            val config = configService.fetchConfigWithRetry(configUrl)
-            currentConfig = config
+            val config = configService.fetchConfigWithRetry(configUrl, isCurrent, onConfigError)
+            // A load that a reset() (or a newer initialize()) superseded mid-fetch does not restore
+            // the config the reset cleared (TRUST-3254); the caller decides its result.
+            if (isCurrent()) currentConfig = config
             callback(Result.success(config))
         } catch (e: Exception) {
             callback(Result.failure(e))

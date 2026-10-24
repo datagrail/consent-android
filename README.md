@@ -90,6 +90,7 @@ if (DataGrailConsent.getInstance().isCategoryEnabled("category_marketing")) {
 | Method | Description |
 |--------|-------------|
 | `initialize(context, configUrl, callback)` | Initialize SDK with config URL |
+| `initialize(context, configUrl, onConfigError, callback)` | Same, and `onConfigError` receives a config fetch failure that the cached config masked (`ConfigNotPublished`, `NetworkError`, `ParseError`, `ValidationError`); init still succeeds on the cache. The handler belongs to that call only, as on iOS and React |
 | `needsConsent() -> Boolean` | Check if user needs to provide consent |
 
 ### Banner Display
