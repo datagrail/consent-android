@@ -432,7 +432,7 @@ internal class ConsentService(
             )
 
             // Save locally after successful backend save
-            storage.savePreferences(preferences)
+            storage.replacePreferencesKeepingDecisionTs(preferences)
             storage.saveConfigVersion(config.version)
         } catch (e: Exception) {
             // Queue for retry on failure
@@ -454,7 +454,7 @@ internal class ConsentService(
             storage.savePendingEvents(existingEvents)
 
             // Still save locally
-            storage.savePreferences(preferences)
+            storage.replacePreferencesKeepingDecisionTs(preferences)
             storage.saveConfigVersion(config.version)
 
             throw ConsentException.NetworkError("Failed to save preferences: ${e.message}")

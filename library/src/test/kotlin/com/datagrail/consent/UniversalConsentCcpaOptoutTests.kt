@@ -73,12 +73,17 @@ class UniversalConsentCcpaOptoutTests {
         whenever(mockStorage.clearSyncState()).doAnswer { storedSyncState = null }
         whenever(mockStorage.saveCcpaWritePending(any())).doAnswer { storedCcpaWritePending = it.getArgument(0) }
         whenever(mockStorage.loadCcpaWritePending()).doAnswer { storedCcpaWritePending }
-        whenever(mockStorage.savePreferences(any())).doAnswer { storedPreferences = it.getArgument(0) }
+        whenever(mockStorage.savePreferences(any(), anyOrNull())).doAnswer {
+            storedPreferences = it.getArgument(0)
+            storedDecisionTs = it.getArgument(1)
+        }
+        whenever(mockStorage.replacePreferencesKeepingDecisionTs(any())).doAnswer { storedPreferences = it.getArgument(0) }
         whenever(mockStorage.loadPreferences()).doAnswer { storedPreferences }
-        whenever(mockStorage.saveDecisionTs(any())).doAnswer { storedDecisionTs = it.getArgument(0) }
         whenever(mockStorage.loadDecisionTs()).doAnswer { storedDecisionTs }
-        whenever(mockStorage.clearDecisionTs()).doAnswer { storedDecisionTs = null }
-        whenever(mockStorage.clearPreferences()).doAnswer { storedPreferences = null }
+        whenever(mockStorage.clearPreferences()).doAnswer {
+            storedPreferences = null
+            storedDecisionTs = null
+        }
         whenever(mockStorage.saveCcpaOptout(any())).doAnswer { storedCcpaOptout = it.getArgument(0) }
         whenever(mockStorage.loadCcpaOptout()).doAnswer { storedCcpaOptout }
         whenever(mockStorage.clearCcpaOptout()).doAnswer { storedCcpaOptout = false }

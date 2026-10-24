@@ -58,12 +58,17 @@ class UniversalConsentDecisionTimeTests {
     @Before
     fun setUp() {
         MockitoAnnotations.openMocks(this)
-        whenever(mockStorage.savePreferences(any())).doAnswer { storedPreferences = it.getArgument(0) }
+        whenever(mockStorage.savePreferences(any(), anyOrNull())).doAnswer {
+            storedPreferences = it.getArgument(0)
+            storedDecisionTs = it.getArgument(1)
+        }
+        whenever(mockStorage.replacePreferencesKeepingDecisionTs(any())).doAnswer { storedPreferences = it.getArgument(0) }
         whenever(mockStorage.loadPreferences()).doAnswer { storedPreferences }
-        whenever(mockStorage.clearPreferences()).doAnswer { storedPreferences = null }
-        whenever(mockStorage.saveDecisionTs(any())).doAnswer { storedDecisionTs = it.getArgument(0) }
+        whenever(mockStorage.clearPreferences()).doAnswer {
+            storedPreferences = null
+            storedDecisionTs = null
+        }
         whenever(mockStorage.loadDecisionTs()).doAnswer { storedDecisionTs }
-        whenever(mockStorage.clearDecisionTs()).doAnswer { storedDecisionTs = null }
         whenever(mockStorage.saveBoundUserHash(any())).doAnswer { storedBoundHash = it.getArgument(0) }
         whenever(mockStorage.loadBoundUserHash()).doAnswer { storedBoundHash }
         whenever(mockStorage.clearBoundUserHash()).doAnswer {
@@ -288,7 +293,7 @@ class UniversalConsentDecisionTimeTests {
         }
 
     @Test
-    fun `a write that only carries a pending CCPA choice uses the request time`() =
+    fun `a write that only carries a pending CCPA choice is stamped with the record's time`() =
         runTest {
             bindAndSync(record(marketing = true, updatedAt = now - 100))
             // A bound CCPA choice that never reached the record (no session after a restart).
@@ -298,7 +303,8 @@ class UniversalConsentDecisionTimeTests {
             sut.setUserIdentifier(user, apiKey)
 
             assertEquals("the record's own categories", true, writtenPreferences().single().cookieOptions["category_marketing"])
-            assertEquals(listOf<Long?>(null), writtenDecisionTs())
+            // Not "now": that would out-rank a newer category change another device made since.
+            assertEquals(listOf<Long?>(now - 100), writtenDecisionTs())
         }
 
     // MARK: - updated_at parsing

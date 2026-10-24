@@ -189,10 +189,9 @@ internal class ConsentManager(
             // re-sync writes it, and a setCcpaOptout write-through sends it rather than the record's
             // raw choice.
             synchronized(localChoiceLock) {
-                storage.savePreferences(preferences)
-                storage.saveConfigVersion(config.version)
                 // A choice made now (TRUST-3224): the time a re-sync sends it with and compares it at.
-                storage.saveDecisionTs(DecisionTime.next(storedDecisionTs(), nowSeconds()))
+                storage.savePreferences(preferences, DecisionTime.next(storedDecisionTs(), nowSeconds()))
+                storage.saveConfigVersion(config.version)
                 preferencesSaveRevision.incrementAndGet()
                 storage.clearSyncState()
             }
@@ -538,7 +537,8 @@ internal class ConsentManager(
             )
         val saveRevision =
             synchronized(localChoiceLock) {
-                storage.savePreferences(effective)
+                // The adopted choice was made when the record says, not now (TRUST-3224).
+                storage.savePreferences(effective, recordDecisionTs(record))
                 // Stamp the version of the config snapshot this request was validated against — not a
                 // fresh read of currentConfig, which a concurrent loadConfig() could have swapped while
                 // the network GET was suspended. This marks the rehydrated consent as current for the
@@ -546,8 +546,6 @@ internal class ConsentManager(
                 // over a stale version from the writing device would re-prompt immediately and undo
                 // the rehydration.
                 storage.saveConfigVersion(config.version)
-                // The adopted choice was made when the record says, not now (TRUST-3224).
-                stampRecordDecisionTs(record)
                 if (recordsSyncState) recordStandaloneSyncState(standaloneUserHash, effective, raw)
                 preferencesSaveRevision.get()
             }
@@ -833,7 +831,12 @@ internal class ConsentManager(
                     writeDecisionTs = localDecisionTs
                     resyncChoice
                 } else {
-                    rawFromRecord?.takeIf { ccpaPending }
+                    // The write carries the record's own categories, so it is stamped with the
+                    // record's time, never "now": a "now" stamp would out-rank a newer category
+                    // change another device made since the record was written (P0-06).
+                    rawFromRecord?.takeIf { ccpaPending }?.also {
+                        writeDecisionTs = rehydrated?.record?.let(::recordDecisionTs)
+                    }
                 }
             } else {
                 // LOGIN. Reads the record directly so a found record without a choice is told apart
@@ -953,7 +956,8 @@ internal class ConsentManager(
                                     isCustomised = true,
                                     cookieOptions = reconciled.map { (key, enabled) -> CategoryConsent(key, enabled) },
                                 )
-                            storage.savePreferences(view)
+                            // The same choice, reconciled: it keeps the time it was written with.
+                            storage.replacePreferencesKeepingDecisionTs(view)
                             storage.saveConfigVersion(config.version)
                             syncedLocal = view
                             view != localChoice
@@ -1069,9 +1073,9 @@ internal class ConsentManager(
                 isCustomised = true,
                 cookieOptions = reconciled.map { (gtmKey, isEnabled) -> CategoryConsent(gtmKey, isEnabled) },
             ),
+            recordDecisionTs(record),
         )
         storage.saveConfigVersion(config.version)
-        stampRecordDecisionTs(record)
     }
 
     // MARK: - Decision time (TRUST-3224)
@@ -1080,14 +1084,11 @@ internal class ConsentManager(
     private fun storedDecisionTs(): Long? = DecisionTime.stored(storage.loadDecisionTs(), nowSeconds())
 
     /**
-     * An adopt stored [record]'s choice, so the local choice was made when the record says: its
-     * `updated_at`, or unknown when it has no usable one. Never "now", which would let this device's
-     * next re-sync out-rank a newer choice made elsewhere. Runs under [localChoiceLock].
+     * The decision time an adopt of [record]'s choice is stored with: the record's `updated_at`, or
+     * unknown (null) when it has no usable one. Never "now", which would let this device's next
+     * re-sync out-rank a newer choice made elsewhere.
      */
-    private fun stampRecordDecisionTs(record: UniversalConsentRecord) {
-        val recordTs = DecisionTime.ofRecord(record.updatedAt)
-        if (recordTs != null) storage.saveDecisionTs(recordTs) else storage.clearDecisionTs()
-    }
+    private fun recordDecisionTs(record: UniversalConsentRecord): Long? = DecisionTime.ofRecord(record.updatedAt)
 
     /**
      * Whether a local choice made at [localDecisionTs] is strictly newer than [record]'s latest
@@ -1140,9 +1141,8 @@ internal class ConsentManager(
         onNeutral: ((ConsentPreferences) -> Unit)?,
         clearCcpaOptout: Boolean = true,
     ) {
+        // Clears the choice's decision time with it.
         storage.clearPreferences()
-        // No stored choice, so no decision time for it.
-        storage.clearDecisionTs()
         if (clearCcpaOptout) {
             storage.clearCcpaOptout()
             storage.saveCcpaWritePending(false)
