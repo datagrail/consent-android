@@ -30,6 +30,7 @@ import org.mockito.kotlin.atLeast
 import org.mockito.kotlin.doSuspendableAnswer
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
+import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoMoreInteractions
 import org.mockito.kotlin.whenever
@@ -64,26 +65,25 @@ class DataGrailConsentTests {
     fun `a config fetch failure reaches the init's onConfigError handler`() {
         val received = mutableListOf<ConsentException>()
         val error = ConsentException.ConfigNotPublished(statusCode = 404)
-        sut.configErrorReporter(sut.currentInitGeneration()) { received += it }(error)
+        val (result, _) = initializeWithFetch(onConfigError = { received += it }) { _, report -> report?.invoke(error) }
+        assertTrue(result.isSuccess)
         assertEquals(listOf<ConsentException>(error), received)
     }
 
     @Test
-    fun `onConfigError stops for a fetch that reset() or a newer initialize superseded`() {
+    fun `onConfigError stops for a fetch that a newer initialize superseded`() {
         val received = mutableListOf<ConsentException>()
-        val beforeReset = sut.configErrorReporter(sut.currentInitGeneration()) { received += it }
-        sut.reset()
-        beforeReset(ConsentException.NetworkError("offline"))
+        val newerDone = java.util.concurrent.CountDownLatch(1)
+        initializeWithFetch(onConfigError = { received += it }) { _, report ->
+            // From another thread: an unconfined launch nested in this one would only start once
+            // this fetch returns. Its storage setup fails, so it only bumps the generation.
+            sut.managerFactory = { _, _ -> throw IllegalStateException("keystore unavailable") }
+            Thread { sut.initialize(mockContext, "https://consent.datagrail.io/config.json") { newerDone.countDown() } }
+                .start()
+            assertTrue(newerDone.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            report?.invoke(ConsentException.NetworkError("offline"))
+        }
         assertTrue(received.isEmpty())
-
-        // A newer initialize bumps the same token (its launched work never runs on the paused Main).
-        val beforeInit = sut.configErrorReporter(sut.currentInitGeneration()) { received += it }
-        sut.initialize(mockContext, "https://consent.datagrail.io/config.json", { received += it }) { }
-        beforeInit(ConsentException.NetworkError("offline"))
-        assertTrue(received.isEmpty())
-
-        sut.configErrorReporter(sut.currentInitGeneration()) { received += it }(ConsentException.NetworkError("offline"))
-        assertEquals(1, received.size)
     }
 
     @Test
@@ -190,8 +190,11 @@ class DataGrailConsentTests {
         // The fetch saw the reset, so ConfigService skips caching what it fetched.
         assertEquals(false, currentWhenFetched)
         assertNull(sut.getConfig())
-        // The reset's wipe, then the superseded init's own wipe of anything persisted in the race.
-        verify(storage, atLeast(2)).clearAll()
+        // Only the reset's own wipe: the superseded init cached and kept nothing after it, and a
+        // second wipe would erase what the host stored after its reset().
+        verify(storage, times(1)).clearAll()
+        // Not left committed: the SDK reads as uninitialized, as the callback said.
+        assertThrows(ConsentException.NotInitialized::class.java) { sut.shouldDisplayBanner() }
         verify(storage, never()).loadPendingEvents()
     }
 

@@ -115,7 +115,8 @@ internal class ConfigService(
     ): ConsentConfig {
         // A definite 4xx or ConfigNotPublished gives up at once; 408, 429, 5xx and transport failures retry.
         // An attempt that falls back to the cache returns, so a masked failure is reported once.
-        return networkClient.retryWithBackoff(shouldRetry = ConsentException::isRetryable) {
+        // A superseded load stops retrying: its result is never used.
+        return networkClient.retryWithBackoff(shouldRetry = { isCurrent() && ConsentException.isRetryable(it) }) {
             fetchConfig(url, isCurrent, onRefreshError)
         }
     }
