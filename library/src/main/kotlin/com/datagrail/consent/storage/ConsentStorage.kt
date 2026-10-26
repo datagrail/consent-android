@@ -142,7 +142,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
 
     /**
      * Replace the stored choice with another view OF THE SAME CHOICE, keeping its decision time: the
-     * reconciled view a write-through leaves, or the local copy the legacy save path re-stores. Never
+     * reconciled view a re-sync write-through leaves. Never
      * use this for a new choice or an adopt; those decide their time through [savePreferences].
      * @throws ConsentException.StorageError if encoding fails
      */

@@ -766,6 +766,8 @@ internal class ConsentManager(
         // The write's decision_ts: the local choice's own time when the write carries it, else null
         // (the request time, the edge default).
         var writeDecisionTs: Long? = null
+        // A pending-CCPA flush sends no category (TRUST-2902): see the re-sync branch below.
+        var ccpaOnly = false
 
         // READ then WRITE. A read FAILURE THROWS and blocks the write — overwriting a record we
         // could not read would silently erase the user's real cross-device choice (the TRUST-2491
@@ -821,9 +823,8 @@ internal class ConsentManager(
                     syncedRaw = rawFromRecord ?: syncStateAtEntry?.syncedRaw?.takeIf { unchangedSinceSync }
                 }
                 // A bound CCPA choice that has not reached the record yet (e.g. a setter call after a
-                // restart, with no session to write through) is a local change too: write it with the
-                // record's own raw choice just read, so the categories another device set stay as
-                // they are.
+                // restart, with no session to write through) is a local change too, flushed now that a
+                // session exists again.
                 val ccpaPending =
                     !writesThrough && localChoice != null && syncsCcpaOptout(config) &&
                         storage.loadCcpaWritePending()
@@ -831,12 +832,13 @@ internal class ConsentManager(
                     writeDecisionTs = localDecisionTs
                     resyncChoice
                 } else {
-                    // The write carries the record's own categories, so it is stamped with the
-                    // record's time, never "now": a "now" stamp would out-rank a newer category
-                    // change another device made since the record was written (P0-06).
-                    rawFromRecord?.takeIf { ccpaPending }?.also {
-                        writeDecisionTs = rehydrated?.record?.let(::recordDecisionTs)
-                    }
+                    // CCPA-only: the write sends no category, so no category on the record (another
+                    // device's newer one included, P0-06) can change at any stamp. It carries no
+                    // decision time, so the edge stamps the request time and the `ccpa_optout`
+                    // register lands: every write carries ccpa_optout, so a record-time stamp would
+                    // tie the record's register, and the edge keeps an opt-out on a tie. The record's
+                    // raw choice is still what the record holds afterwards (syncedRaw).
+                    rawFromRecord?.takeIf { ccpaPending }?.also { ccpaOnly = true }
                 }
             } else {
                 // LOGIN. Reads the record directly so a found record without a choice is told apart
@@ -919,7 +921,8 @@ internal class ConsentManager(
             val universalPrefs =
                 UniversalConsentPreferences(
                     isCustomised = toWrite.isCustomised,
-                    cookieOptions = toWrite.cookieOptions.associate { it.gtmKey to it.isEnabled },
+                    cookieOptions =
+                        if (ccpaOnly) emptyMap() else toWrite.cookieOptions.associate { it.gtmKey to it.isEnabled },
                 )
 
             consentService.saveUniversalConsent(
@@ -1248,7 +1251,14 @@ internal class ConsentManager(
                     Triple(storage.loadPreferences(), preferencesSaveRevision.get(), storedDecisionTs())
                 }
             if (stored == null) return@withLock
-            val localChoice = rawChoice(stored, syncState(session.userHash))
+            val syncState = syncState(session.userHash)
+            val localChoice = rawChoice(stored, syncState)
+            // Unchanged since the last sync, the write is CCPA-only (TRUST-2902): no category rides
+            // along, so it cannot undo a newer revocation made elsewhere (TRUST-3311), and the choice
+            // made now is stamped now. A category-time stamp would tie the record's `ccpa_optout`
+            // register right after an adopt, and the edge keeps an opt-out on a tie, so an opt-in
+            // never landed. A local change made since the sync rides along with when it was made.
+            val carriesLocalChange = !unchangedSinceSync(stored, syncState)
             // A logout/reset landed while preparing the write (including during the reads above):
             // don't write through to the now-unbound (or re-bound) identity.
             if (identityOperationGeneration.get() != opGeneration) return@withLock
@@ -1265,19 +1275,21 @@ internal class ConsentManager(
                 preferences =
                     UniversalConsentPreferences(
                         isCustomised = localChoice.isCustomised,
-                        cookieOptions = localChoice.cookieOptions.associate { it.gtmKey to it.isEnabled },
+                        cookieOptions =
+                            if (carriesLocalChange) {
+                                localChoice.cookieOptions.associate { it.gtmKey to it.isEnabled }
+                            } else {
+                                emptyMap()
+                            },
                     ),
                 apiKey = apiKey,
                 // The LATEST stored flag, not the captured parameter: two rapid toggles that complete
                 // out of order then both land the final value instead of reversing the user's intent.
                 ccpaOptout = writtenCcpa,
                 getSignature = session.getSignature,
-                // The categories riding along are stamped with when they were chosen (the user's save,
-                // or the adopted record's own time), not now, so this write cannot undo a newer
-                // revocation made elsewhere (TRUST-3311, as consent-react#47 / consent-ios#49).
-                // Trade-off: the fresh CCPA choice shares that older stamp, so it can lose to a newer
-                // record (the edge reports such a write as stale).
-                decisionTs = choiceDecisionTs,
+                // A carried local change is stamped with when the user made it (TRUST-3311); a
+                // CCPA-only write with the request time (null).
+                decisionTs = choiceDecisionTs.takeIf { carriesLocalChange },
             )
             // Reached the record. A newer toggle made during the POST stays pending for its own write.
             resolveCcpaWritePending(writtenCcpa)

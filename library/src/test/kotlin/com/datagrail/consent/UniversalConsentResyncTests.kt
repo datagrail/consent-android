@@ -150,7 +150,7 @@ class UniversalConsentResyncTests {
             sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
             sut.setCcpaOptout(true)
 
-            assertEquals(true, writtenPreferences().single().cookieOptions["category_marketing"])
+            assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
         }
 
     @Test
@@ -170,7 +170,7 @@ class UniversalConsentResyncTests {
             sut.setUserIdentifier(userA, apiKey)
 
             verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull(), anyOrNull())
-            assertEquals(false, writtenPreferences().single().cookieOptions["category_marketing"])
+            assertEquals("CCPA-only", emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
             assertFalse(storedCcpaWritePending)
             assertTrue(sut.getCcpaOptout())
             assertEquals(choice(marketing = false), storedPreferences)
@@ -304,9 +304,9 @@ class UniversalConsentResyncTests {
             verifyNoWrite()
             sut.setCcpaOptout(true)
             assertEquals(
-                "the record's raw opt-in",
-                true,
-                writtenPreferences().single().cookieOptions["category_marketing"],
+                "CCPA-only: the record's raw opt-in is untouched",
+                emptyMap<String, Boolean>(),
+                writtenPreferences().single().cookieOptions,
             )
         }
 

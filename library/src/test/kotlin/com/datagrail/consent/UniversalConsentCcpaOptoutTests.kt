@@ -700,7 +700,7 @@ class UniversalConsentCcpaOptoutTests {
     // MARK: - Raw choice on the write-through (TRUST-3074)
 
     @Test
-    fun `write-through after a login adopt under a denied signal sends the record's raw opt-in`() =
+    fun `write-through after a login adopt under a denied signal leaves the record's raw opt-in untouched`() =
         runTest {
             recordIs(record(ccpaOptout = false))
             sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
@@ -710,12 +710,12 @@ class UniversalConsentCcpaOptoutTests {
             sut.setCcpaOptout(true)
 
             val written = writtenPreferences().single()
-            assertEquals(true, written.cookieOptions["category_marketing"])
+            assertEquals("CCPA-only: the record's raw opt-in is untouched", emptyMap<String, Boolean>(), written.cookieOptions)
             assertEquals(listOf(true), writtenCcpa())
         }
 
     @Test
-    fun `write-through after adopting an opted-out record sends its raw opt-ins, not all-off`() =
+    fun `write-through after adopting an opted-out record sends no category, not all-off`() =
         runTest {
             // A web DNSMPI opt-out: ccpa_optout plus the record's stored gpc, which suppresses locally.
             recordIs(record(ccpaOptout = true).copy(gpc = true))
@@ -726,7 +726,7 @@ class UniversalConsentCcpaOptoutTests {
             sut.setCcpaOptout(false)
 
             val written = writtenPreferences().single()
-            assertEquals(true, written.cookieOptions["category_marketing"])
+            assertEquals("CCPA-only, never the all-off view", emptyMap<String, Boolean>(), written.cookieOptions)
             assertEquals(listOf(false), writtenCcpa())
         }
 

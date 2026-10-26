@@ -228,10 +228,10 @@ class UniversalConsentDecisionTimeTests {
 
             sut.setCcpaOptout(true)
 
-            // The write carries this device's stale categories, but stamped with when they were
-            // chosen, so the edge's newer revocation wins the merge for every category.
-            assertEquals(true, writtenPreferences().single().cookieOptions["category_marketing"])
-            assertEquals(listOf<Long?>(syncedAt), writtenDecisionTs())
+            // Unchanged since the sync, the write is CCPA-only (TRUST-2902): it sends no category, so
+            // the edge's newer revocation stands, and the CCPA choice made now is stamped now.
+            assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
+            assertEquals(listOf<Long?>(null), writtenDecisionTs())
         }
 
     @Test
@@ -293,7 +293,7 @@ class UniversalConsentDecisionTimeTests {
         }
 
     @Test
-    fun `a write that only carries a pending CCPA choice is stamped with the record's time`() =
+    fun `a write that only carries a pending CCPA choice sends no category and the request time`() =
         runTest {
             bindAndSync(record(marketing = true, updatedAt = now - 100))
             // A bound CCPA choice that never reached the record (no session after a restart).
@@ -302,9 +302,11 @@ class UniversalConsentDecisionTimeTests {
 
             sut.setUserIdentifier(user, apiKey)
 
-            assertEquals("the record's own categories", true, writtenPreferences().single().cookieOptions["category_marketing"])
-            // Not "now": that would out-rank a newer category change another device made since.
-            assertEquals(listOf<Long?>(now - 100), writtenDecisionTs())
+            // CCPA-only: no category on the record can change at any stamp.
+            assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
+            // No provenance: the request time, so the ccpa_optout register lands. The record's time
+            // would tie the record's own ccpa_optout register, and a tie keeps an opt-out.
+            assertEquals(listOf<Long?>(null), writtenDecisionTs())
         }
 
     // MARK: - updated_at parsing
