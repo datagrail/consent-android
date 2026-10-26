@@ -48,6 +48,7 @@ class UniversalConsentDecisionTimeTests {
     private var storedDecisionTs: Long? = null
     private var storedCcpaOptout = false
     private var storedCcpaWritePending = false
+    private var storedCcpaDecisionTs: Long? = null
 
     // Unix seconds. 1_760_000_000 is 2025-10-09T08:53:20Z.
     private var now = 1_760_000_000L
@@ -83,6 +84,8 @@ class UniversalConsentDecisionTimeTests {
         whenever(mockStorage.clearCcpaOptout()).doAnswer { storedCcpaOptout = false }
         whenever(mockStorage.saveCcpaWritePending(any())).doAnswer { storedCcpaWritePending = it.getArgument(0) }
         whenever(mockStorage.loadCcpaWritePending()).doAnswer { storedCcpaWritePending }
+        whenever(mockStorage.saveCcpaDecisionTs(any())).doAnswer { storedCcpaDecisionTs = it.getArgument(0) }
+        whenever(mockStorage.loadCcpaDecisionTs()).doAnswer { storedCcpaDecisionTs }
         sut = ConsentManager(mockStorage, mockConfigService, mockConsentService, nowSeconds = { now })
         sut.currentConfig = universalConsentTestConfig(syncOptout = true)
     }
@@ -229,9 +232,9 @@ class UniversalConsentDecisionTimeTests {
             sut.setCcpaOptout(true)
 
             // Unchanged since the sync, the write is CCPA-only (TRUST-2902): it sends no category, so
-            // the edge's newer revocation stands, and the CCPA choice made now is stamped now.
+            // the edge's newer revocation stands, and the CCPA choice is stamped with its own time.
             assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
-            assertEquals(listOf<Long?>(null), writtenDecisionTs())
+            assertEquals(listOf<Long?>(now), writtenDecisionTs())
         }
 
     @Test
@@ -293,20 +296,23 @@ class UniversalConsentDecisionTimeTests {
         }
 
     @Test
-    fun `a write that only carries a pending CCPA choice sends no category and the request time`() =
+    fun `a write that only carries a pending CCPA choice sends no category and the setter's time`() =
         runTest {
             bindAndSync(record(marketing = true, updatedAt = now - 100))
-            // A bound CCPA choice that never reached the record (no session after a restart).
+            // A bound CCPA choice that never reached the record (no session after a restart), made
+            // well before this re-sync finally sends it.
             storedCcpaOptout = true
             storedCcpaWritePending = true
+            storedCcpaDecisionTs = now - 50
 
             sut.setUserIdentifier(user, apiKey)
 
             // CCPA-only: no category on the record can change at any stamp.
             assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
-            // No provenance: the request time, so the ccpa_optout register lands. The record's time
-            // would tie the record's own ccpa_optout register, and a tie keeps an opt-out.
-            assertEquals(listOf<Long?>(null), writtenDecisionTs())
+            // When the setter was called: not the record's time (it would tie the record's own
+            // ccpa_optout register, and a tie keeps an opt-out), nor the send time (a late flush
+            // would out-rank a newer CCPA choice made on another device meanwhile).
+            assertEquals(listOf<Long?>(now - 50), writtenDecisionTs())
         }
 
     // MARK: - updated_at parsing

@@ -38,6 +38,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
         private const val KEY_CCPA_WRITE_PENDING = "datagrail_consent_ccpa_write_pending"
         private const val KEY_SYNC_STATE = "datagrail_consent_sync_state"
         private const val KEY_DECISION_TS = "datagrail_consent_decision_ts"
+        private const val KEY_CCPA_DECISION_TS = "datagrail_consent_ccpa_decision_ts"
 
         /**
          * Create a ConsentStorage backed by EncryptedSharedPreferences
@@ -269,6 +270,20 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
      * @return The stored choice, or false ("not opted out") if none is stored
      */
     fun loadCcpaOptout(): Boolean = prefs.getBoolean(KEY_CCPA_OPTOUT, false)
+
+    /**
+     * Record when the host app's CCPA choice was made (TRUST-2902), unix seconds. A CCPA-only write
+     * sends it as `decision_ts`, so a choice that waited for a session (pending) is ranked by when the
+     * user made it, not by when it was finally sent. Its own key: the category choice's time never
+     * stamps the CCPA flag. [clearAll] removes it.
+     */
+    fun saveCcpaDecisionTs(decisionTs: Long) {
+        prefs.edit().putLong(KEY_CCPA_DECISION_TS, decisionTs).apply()
+    }
+
+    /** When the stored CCPA choice was made by the setter, or null when unknown. */
+    fun loadCcpaDecisionTs(): Long? =
+        if (prefs.contains(KEY_CCPA_DECISION_TS)) prefs.getLong(KEY_CCPA_DECISION_TS, 0L) else null
 
     /**
      * Remove the stored CCPA opt-out choice, so reads return false. Does not touch any other stored data.

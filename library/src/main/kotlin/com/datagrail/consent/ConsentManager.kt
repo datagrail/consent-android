@@ -833,12 +833,16 @@ internal class ConsentManager(
                     resyncChoice
                 } else {
                     // CCPA-only: the write sends no category, so no category on the record (another
-                    // device's newer one included, P0-06) can change at any stamp. It carries no
-                    // decision time, so the edge stamps the request time and the `ccpa_optout`
-                    // register lands: every write carries ccpa_optout, so a record-time stamp would
-                    // tie the record's register, and the edge keeps an opt-out on a tie. The record's
-                    // raw choice is still what the record holds afterwards (syncedRaw).
-                    rawFromRecord?.takeIf { ccpaPending }?.also { ccpaOnly = true }
+                    // device's newer one included, P0-06) can change at any stamp. It is stamped with
+                    // when the setter was called: not the record's time (every write carries
+                    // ccpa_optout, so that would tie the record's register, and the edge keeps an
+                    // opt-out on a tie), nor the send time (a late flush would out-rank a newer CCPA
+                    // choice made on another device meanwhile). Unknown, it sends no provenance. The
+                    // record's raw choice is still what the record holds afterwards (syncedRaw).
+                    rawFromRecord?.takeIf { ccpaPending }?.also {
+                        ccpaOnly = true
+                        writeDecisionTs = storedCcpaDecisionTs()
+                    }
                 }
             } else {
                 // LOGIN. Reads the record directly so a found record without a choice is told apart
@@ -1086,6 +1090,9 @@ internal class ConsentManager(
     /** When the stored choice was made, or null when unknown (see [DecisionTime.stored]). */
     private fun storedDecisionTs(): Long? = DecisionTime.stored(storage.loadDecisionTs(), nowSeconds())
 
+    /** When the stored CCPA choice was made by the setter, or null when unknown or bogus (TRUST-2902). */
+    private fun storedCcpaDecisionTs(): Long? = DecisionTime.stored(storage.loadCcpaDecisionTs(), nowSeconds())
+
     /**
      * The decision time an adopt of [record]'s choice is stored with: the record's `updated_at`, or
      * unknown (null) when it has no usable one. Never "now", which would let this device's next
@@ -1255,7 +1262,7 @@ internal class ConsentManager(
             val localChoice = rawChoice(stored, syncState)
             // Unchanged since the last sync, the write is CCPA-only (TRUST-2902): no category rides
             // along, so it cannot undo a newer revocation made elsewhere (TRUST-3311), and the choice
-            // made now is stamped now. A category-time stamp would tie the record's `ccpa_optout`
+            // is stamped with its own time (just now). A category-time stamp would tie the record's `ccpa_optout`
             // register right after an adopt, and the edge keeps an opt-out on a tie, so an opt-in
             // never landed. A local change made since the sync rides along with when it was made.
             val carriesLocalChange = !unchangedSinceSync(stored, syncState)
@@ -1288,8 +1295,8 @@ internal class ConsentManager(
                 ccpaOptout = writtenCcpa,
                 getSignature = session.getSignature,
                 // A carried local change is stamped with when the user made it (TRUST-3311); a
-                // CCPA-only write with the request time (null).
-                decisionTs = choiceDecisionTs.takeIf { carriesLocalChange },
+                // CCPA-only write with when the CCPA choice was made (TRUST-2902).
+                decisionTs = if (carriesLocalChange) choiceDecisionTs else storedCcpaDecisionTs(),
             )
             // Reached the record. A newer toggle made during the POST stays pending for its own write.
             resolveCcpaWritePending(writtenCcpa)
@@ -1319,6 +1326,7 @@ internal class ConsentManager(
         // sees the new flag without the bumped revision (and the pending marker) that protect it.
         synchronized(localChoiceLock) {
             storage.saveCcpaOptout(optedOut)
+            storage.saveCcpaDecisionTs(nowSeconds())
             ccpaChoiceRevision.incrementAndGet()
             if (storage.loadBoundUserHash() != null) {
                 storage.saveCcpaWritePending(true)
