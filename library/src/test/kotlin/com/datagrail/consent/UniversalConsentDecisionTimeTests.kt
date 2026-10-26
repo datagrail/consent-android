@@ -241,21 +241,27 @@ class UniversalConsentDecisionTimeTests {
             // the edge's newer revocation stands, and the CCPA choice is stamped with its own time.
             assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
             assertEquals(listOf<Long?>(now), writtenDecisionTs())
+            assertEquals("the CCPA-only body", listOf(true), writtenCcpaOnlyFlags())
         }
 
     @Test
-    fun `setCcpaOptout after a local change is CCPA-only, dated when the CCPA choice was made`() =
+    fun `setCcpaOptout after a local change sends it at its time, then a CCPA-only write at the CCPA time`() =
         runTest {
             bindAndSync(record(marketing = true, updatedAt = now - 100))
             now += 10
+            val changedAt = now
             sut.savePreferences(choice(marketing = false)) {}
             now += 300
 
             sut.setCcpaOptout(true)
 
-            // TRUST-2591 decision (2026-10-26): the category change is not resent with it.
-            assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
-            assertEquals(listOf<Long?>(now), writtenDecisionTs())
+            // As consent-banner #756: the change first, so the CCPA write cannot make it look older
+            // than the record; then the CCPA change alone (TRUST-2591 decision, 2026-10-26).
+            val writes = writtenPreferences()
+            assertEquals(false, writes[0].cookieOptions["category_marketing"])
+            assertEquals(emptyMap<String, Boolean>(), writes[1].cookieOptions)
+            assertEquals(listOf<Long?>(changedAt, now), writtenDecisionTs())
+            assertEquals(listOf(false, true), writtenCcpaOnlyFlags())
         }
 
     @Test
@@ -347,6 +353,7 @@ class UniversalConsentDecisionTimeTests {
             // ccpa_optout register, and a tie keeps an opt-out), nor the send time (a late flush
             // would out-rank a newer CCPA choice made on another device meanwhile).
             assertEquals(listOf<Long?>(now - 50), writtenDecisionTs())
+            assertEquals("the CCPA-only body", listOf(true), writtenCcpaOnlyFlags())
         }
 
     // MARK: - updated_at parsing
@@ -381,6 +388,13 @@ class UniversalConsentDecisionTimeTests {
         val captor = argumentCaptor<UniversalConsentPreferences>()
         verify(mockConsentService, org.mockito.Mockito.atLeastOnce())
             .saveUniversalConsent(any(), any(), captor.capture(), eq(apiKey), any(), anyOrNull(), anyOrNull(), any())
+        return captor.allValues
+    }
+
+    private suspend fun writtenCcpaOnlyFlags(): List<Boolean> {
+        val captor = argumentCaptor<Boolean>()
+        verify(mockConsentService, org.mockito.Mockito.atLeastOnce())
+            .saveUniversalConsent(any(), any(), any(), eq(apiKey), any(), anyOrNull(), anyOrNull(), captor.capture())
         return captor.allValues
     }
 

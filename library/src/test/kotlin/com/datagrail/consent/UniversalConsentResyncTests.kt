@@ -285,20 +285,24 @@ class UniversalConsentResyncTests {
         }
 
     @Test
-    fun `setter write-through is CCPA-only and the next re-sync writes the user change`() =
+    fun `setter write-through of a user change is not sent again by the next re-sync`() =
         runTest {
             recordIs(record(marketing = true))
             sut.setUserIdentifier(userA, apiKey)
             sut.savePreferences(choice(marketing = false)) {}
 
             sut.setCcpaOptout(true)
-            assertEquals("CCPA-only", emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
+            val writes = writtenPreferences()
+            assertEquals("the change, then the CCPA-only write", 2, writes.size)
+            assertEquals(false, writes[0].cookieOptions["category_marketing"])
+            assertEquals(emptyMap<String, Boolean>(), writes[1].cookieOptions)
 
+            // The record now holds the change (its updated_at moved past it with the CCPA write).
+            recordIs(record(marketing = false))
             sut.setUserIdentifier(userA, apiKey)
 
-            val writes = writtenPreferences()
-            assertEquals(2, writes.size)
-            assertEquals("the re-sync writes the change", false, writes[1].cookieOptions["category_marketing"])
+            assertEquals("the re-sync adopts instead of writing again", 2, writtenPreferences().size)
+            assertEquals(choice(marketing = false), storedPreferences)
         }
 
     @Test

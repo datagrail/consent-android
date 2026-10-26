@@ -188,8 +188,7 @@ internal class ConsentManager(
 
         try {
             // Save locally. The user's own choice now replaces what the last sync left: the next
-            // re-sync writes it, and a setCcpaOptout write-through sends it rather than the record's
-            // raw choice.
+            // re-sync writes it, and so does a setCcpaOptout write-through (before its CCPA-only write).
             synchronized(localChoiceLock) {
                 // A choice made now (TRUST-3224): the time a re-sync sends it with and compares it at.
                 storage.savePreferences(preferences, DecisionTime.next(storedDecisionTs(), nowSeconds()))
@@ -1106,7 +1105,9 @@ internal class ConsentManager(
 
     /** What a [setCcpaOptout] write-through reads in one [localChoiceLock] critical section. */
     private data class SetterWriteCapture(
-        val hasChoice: Boolean,
+        val stored: ConsentPreferences?,
+        val saveRevision: Int,
+        val choiceDecisionTs: Long?,
         val ccpaOptout: Boolean,
         val ccpaDecisionTs: Long?,
     )
@@ -1225,16 +1226,17 @@ internal class ConsentManager(
      * it through to the bound identity's universal consent record when that applies. Changes no
      * category and fires no listener.
      *
-     * The write — the user's RAW choice plus the new flag, the same write [setUserIdentifier]
-     * makes — happens only when universal consent is enabled, `universalConsent.syncOptout` is on,
+     * The write is a CCPA-only write (TRUST-2591 decision, 2026-10-26, as consent-banner #756): the
+     * flag and its provenance, dated when this choice was made, never the category map. An unsynced
+     * local category change with a known decision time goes first in its own write, at its own time.
+     * It happens only when universal consent is enabled, `universalConsent.syncOptout` is on,
      * the device is bound to the identity a [setUserIdentifier] call succeeded for in this process,
      * and an explicit local choice is stored (config defaults are never seeded). Otherwise the flag
      * stays local and rides the next universal consent write. A failed write throws; the local flag
      * is kept. Until the choice reaches the record, a re-sync or rehydrate does not replace it with
      * the record's value ([ConsentStorage.loadCcpaWritePending]); a choice made during a first login,
-     * before the device is bound, is marked pending when that login binds without writing it. While the stored choice is still the
-     * possibly-suppressed view the last sync left, the RAW choice is the record's own (see
-     * [rawChoice]), never that view itself (TRUST-3074).
+     * before the device is bound, is marked pending when that login binds without writing it. The
+     * possibly-suppressed view the last sync left is never sent: it is not a local change (TRUST-3074).
      */
     suspend fun setCcpaOptout(
         optedOut: Boolean,
@@ -1272,18 +1274,31 @@ internal class ConsentManager(
             // The bound hash moved (a logout, or a login to another identity) — the captured session
             // is no longer the bound one, so don't POST to it.
             if (session.userHash != storage.loadBoundUserHash()) return@withLock
-            // The CCPA flag and its time are read in one critical section, so a toggle landing between
-            // two separate reads cannot pair the old flag with the new toggle's time. The write needs
-            // an explicit category choice stored, as every write-through does.
+            // The stored choice, its time, the save revision and the CCPA flag with its time are read
+            // in one critical section, so a toggle or save landing between separate reads cannot pair
+            // a value with another's time, and a save during the POSTs is not recorded as synced.
             val captured =
                 synchronized(localChoiceLock) {
                     SetterWriteCapture(
-                        hasChoice = storage.loadPreferences() != null,
+                        stored = storage.loadPreferences(),
+                        saveRevision = preferencesSaveRevision.get(),
+                        choiceDecisionTs = storedDecisionTs(),
                         ccpaOptout = storage.loadCcpaOptout(),
                         ccpaDecisionTs = storedCcpaDecisionTs(),
                     )
                 }
-            if (!captured.hasChoice) return@withLock
+            // Every write-through needs an explicit category choice stored.
+            val stored = captured.stored ?: return@withLock
+            val syncState = syncState(session.userHash)
+            // As consent-banner #756 (withCategories): an unsynced local category change goes first, in
+            // its own write at its own decision time. Without it, the CCPA write below advances the
+            // record's updated_at (the latest decision over ALL registers), so the next re-sync would
+            // read the change as older than the record and adopt over it. Also when the last sync found
+            // no category choice, so the CCPA write never leaves an empty, answered-all-off block. An
+            // unknown time is not sent stamped now (P0-06): the change waits for the next re-sync.
+            val sendsCategories =
+                (!unchangedSinceSync(stored, syncState) && captured.choiceDecisionTs != null) ||
+                    (syncState != null && syncState.syncedRaw == null)
             // A logout/reset landed while preparing the write (including during the reads above):
             // don't write through to the now-unbound (or re-bound) identity.
             if (identityOperationGeneration.get() != opGeneration) return@withLock
@@ -1293,26 +1308,47 @@ internal class ConsentManager(
             // bind time. Throws ValidationError if neither source has a key now, exactly like the
             // other call paths.
             val apiKey = resolveUniversalConsentApiKey(config, session.explicitApiKey)
+            // The stored flag read just above, not the captured parameter: two rapid toggles that
+            // complete out of order then both land the final value instead of reversing it.
             val writtenCcpa = captured.ccpaOptout
-            // A CCPA-only write (TRUST-2591 decision, 2026-10-26, as consent-banner #756): the flag
-            // alone, dated when the CCPA choice was made. It never resends the category map, so it
-            // cannot undo a newer revocation made elsewhere (TRUST-3311), and the CCPA register is not
-            // tied to a category time. A local category change made since the sync is written by the
-            // next re-sync with its own decision time.
+            if (sendsCategories) {
+                consentService.saveUniversalConsent(
+                    config = config,
+                    identifier = session.identifier,
+                    preferences =
+                        UniversalConsentPreferences(
+                            isCustomised = stored.isCustomised,
+                            cookieOptions = stored.cookieOptions.associate { it.gtmKey to it.isEnabled },
+                        ),
+                    apiKey = apiKey,
+                    ccpaOptout = writtenCcpa,
+                    getSignature = session.getSignature,
+                    decisionTs = captured.choiceDecisionTs,
+                )
+                // The record now holds this choice, so the next re-sync must not send it again. Not
+                // after a logout, nor over a save made since.
+                if (identityOperationGeneration.get() != opGeneration) return@withLock
+                synchronized(localChoiceLock) {
+                    if (preferencesSaveRevision.get() == captured.saveRevision) {
+                        storage.saveSyncState(UniversalConsentSyncState(session.userHash, stored, stored))
+                    }
+                }
+            }
+            // Then the CCPA-only write (TRUST-2591 decision, 2026-10-26, as consent-banner #756): the
+            // flag alone, dated when the CCPA choice was made. It never resends the category map, so
+            // it cannot undo a newer revocation made elsewhere (TRUST-3311), and the CCPA register is
+            // not tied to a category time.
             consentService.saveUniversalConsent(
                 config = config,
                 identifier = session.identifier,
                 preferences = UniversalConsentPreferences(),
                 apiKey = apiKey,
-                // The stored flag read just above, not the captured parameter: two rapid toggles that
-                // complete out of order then both land the final value instead of reversing it.
                 ccpaOptout = writtenCcpa,
                 getSignature = session.getSignature,
                 decisionTs = captured.ccpaDecisionTs,
                 ccpaOnly = true,
             )
             // Reached the record. A newer toggle made during the POST stays pending for its own write.
-            // The sync state is untouched: no category was written.
             resolveCcpaWritePending(writtenCcpa)
         }
     }

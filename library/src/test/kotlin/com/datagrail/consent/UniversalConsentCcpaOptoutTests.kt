@@ -732,7 +732,7 @@ class UniversalConsentCcpaOptoutTests {
         }
 
     @Test
-    fun `write-through after a user save is CCPA-only and leaves the save to the re-sync`() =
+    fun `write-through after a user save sends the save, then a CCPA-only write`() =
         runTest {
             recordIs(record(ccpaOptout = false))
             sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
@@ -741,9 +741,12 @@ class UniversalConsentCcpaOptoutTests {
 
             sut.setCcpaOptout(true)
 
-            // TRUST-2591 decision (2026-10-26): a CCPA change never resends the category map.
-            assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
-            assertEquals(listOf(true), writtenCcpa())
+            // As consent-banner #756: the unsynced save at its own time, then the CCPA change alone
+            // (TRUST-2591 decision, 2026-10-26: a CCPA change never resends the category map).
+            val writes = writtenPreferences()
+            assertEquals(2, writes.size)
+            assertEquals(false, writes[0].cookieOptions["category_marketing"])
+            assertEquals(emptyMap<String, Boolean>(), writes[1].cookieOptions)
         }
 
     @Test
