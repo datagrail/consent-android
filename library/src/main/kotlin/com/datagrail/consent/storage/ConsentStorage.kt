@@ -184,10 +184,13 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
     // MARK: - Decision time (TRUST-3224)
 
     /** The stored decision time, unvalidated; null when none is stored (or it is unreadable). */
-    fun loadDecisionTs(): Long? {
-        if (!prefs.contains(KEY_DECISION_TS)) return null
+    fun loadDecisionTs(): Long? = loadLongOrNull(KEY_DECISION_TS)
+
+    /** A stored Long, or null when none is stored or the value is not a Long. */
+    private fun loadLongOrNull(key: String): Long? {
+        if (!prefs.contains(key)) return null
         return try {
-            prefs.getLong(KEY_DECISION_TS, 0L)
+            prefs.getLong(key, 0L)
         } catch (e: ClassCastException) {
             null
         }
@@ -275,9 +278,11 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
      */
     fun saveCcpaChoice(
         optedOut: Boolean,
-        decisionTs: Long,
+        decisionTs: Long?,
     ) {
-        prefs.edit().putBoolean(KEY_CCPA_OPTOUT, optedOut).putLong(KEY_CCPA_DECISION_TS, decisionTs).apply()
+        val edit = prefs.edit().putBoolean(KEY_CCPA_OPTOUT, optedOut)
+        if (decisionTs != null) edit.putLong(KEY_CCPA_DECISION_TS, decisionTs) else edit.remove(KEY_CCPA_DECISION_TS)
+        edit.apply()
     }
 
     /**
@@ -287,14 +292,7 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
     fun loadCcpaOptout(): Boolean = prefs.getBoolean(KEY_CCPA_OPTOUT, false)
 
     /** When the stored CCPA choice was made by the setter, or null when unknown (or unreadable). */
-    fun loadCcpaDecisionTs(): Long? {
-        if (!prefs.contains(KEY_CCPA_DECISION_TS)) return null
-        return try {
-            prefs.getLong(KEY_CCPA_DECISION_TS, 0L)
-        } catch (e: ClassCastException) {
-            null
-        }
-    }
+    fun loadCcpaDecisionTs(): Long? = loadLongOrNull(KEY_CCPA_DECISION_TS)
 
     /**
      * Remove the stored CCPA opt-out choice, so reads return false. Does not touch any other stored data.

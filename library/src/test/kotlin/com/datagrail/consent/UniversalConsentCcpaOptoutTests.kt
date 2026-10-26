@@ -85,7 +85,7 @@ class UniversalConsentCcpaOptoutTests {
             storedDecisionTs = null
         }
         whenever(mockStorage.saveCcpaOptout(any())).doAnswer { storedCcpaOptout = it.getArgument(0) }
-        whenever(mockStorage.saveCcpaChoice(any(), any())).doAnswer { storedCcpaOptout = it.getArgument(0) }
+        whenever(mockStorage.saveCcpaChoice(any(), anyOrNull())).doAnswer { storedCcpaOptout = it.getArgument(0) }
         whenever(mockStorage.loadCcpaOptout()).doAnswer { storedCcpaOptout }
         whenever(mockStorage.clearCcpaOptout()).doAnswer { storedCcpaOptout = false }
         whenever(mockStorage.saveBoundUserHash(any())).doAnswer { storedBoundHash = it.getArgument(0) }
@@ -299,14 +299,32 @@ class UniversalConsentCcpaOptoutTests {
         }
 
     @Test
-    fun `re-sync write-through carries the local flag, not the record's`() =
+    fun `re-sync write-through carries a pending local flag, not the record's`() =
         runTest {
             storedBoundHash = hashFor(userA)
             storedPreferences = choice(marketing = false)
             // Made after the record's latest decision, so it is written through (TRUST-3224).
             storedDecisionTs = System.currentTimeMillis() / 1000
             storedCcpaOptout = true
+            storedCcpaWritePending = true
             recordIs(record(ccpaOptout = false))
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertEquals(listOf(true), writtenCcpa())
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `re-sync write-through of a category change adopts and carries the record's newer CCPA flag`() =
+        runTest {
+            // lucasv-dg (#74): this device's flag is stale (no pending choice) and another device has
+            // since opted out. A category change written through must not carry the stale false.
+            storedBoundHash = hashFor(userA)
+            storedPreferences = choice(marketing = false)
+            storedDecisionTs = System.currentTimeMillis() / 1000
+            storedCcpaOptout = false
+            recordIs(record(ccpaOptout = true))
 
             sut.setUserIdentifier(userA, apiKey)
 
@@ -681,7 +699,7 @@ class UniversalConsentCcpaOptoutTests {
         lateinit var setter: Thread
         var setterFailure: Throwable? = null
         var syncFailure: Throwable? = null
-        whenever(mockStorage.saveCcpaChoice(any(), any())).doAnswer {
+        whenever(mockStorage.saveCcpaChoice(any(), anyOrNull())).doAnswer {
             storedCcpaOptout = it.getArgument(0)
             if (Thread.currentThread() === setter) {
                 flagStored.countDown()

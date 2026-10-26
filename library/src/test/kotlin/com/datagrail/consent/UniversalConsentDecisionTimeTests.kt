@@ -83,7 +83,7 @@ class UniversalConsentDecisionTimeTests {
             storedCcpaOptout = it.getArgument(0)
             storedCcpaDecisionTs = null
         }
-        whenever(mockStorage.saveCcpaChoice(any(), any())).doAnswer {
+        whenever(mockStorage.saveCcpaChoice(any(), anyOrNull())).doAnswer {
             storedCcpaOptout = it.getArgument(0)
             storedCcpaDecisionTs = it.getArgument(1)
         }

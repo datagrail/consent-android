@@ -513,13 +513,14 @@ internal class ConsentManager(
                 storage.loadCcpaWritePending() || (ccpaRevision != null && ccpaChoiceRevision.get() != ccpaRevision)
             val boundHash = storage.loadBoundUserHash()
             val readsBoundOrUnbound = !recordsSyncState || boundHash == null || boundHash == standaloneUserHash
-            if (!keptLocal && !keepsLocalCcpa && readsBoundOrUnbound &&
-                config.universalConsent?.syncOptout == true
-            ) {
+            // Also when the categories were kept local (keptLocal): the CCPA flag is its own register,
+            // and a re-sync that writes a category change through must not carry this device's stale
+            // flag over a newer CCPA choice made elsewhere (lucasv-dg, #74). Only a pending local CCPA
+            // choice keeps the local flag.
+            if (!keepsLocalCcpa && readsBoundOrUnbound && config.universalConsent?.syncOptout == true) {
                 // Adopted with the record's time, as a category adopt is, so the next toggle here is
                 // stamped strictly after it (a tie keeps an opt-out).
-                val recordTs = recordDecisionTs(record)
-                if (recordTs != null) storage.saveCcpaChoice(record.ccpaOptout, recordTs) else storage.saveCcpaOptout(record.ccpaOptout)
+                storage.saveCcpaChoice(record.ccpaOptout, recordDecisionTs(record))
             }
         }
 
@@ -741,19 +742,16 @@ internal class ConsentManager(
         // Capture the user's RAW local choice BEFORE the rehydrate below persists the
         // signal-reconciled view, so no ATT/GPC-suppressed view reaches the write body. It is
         // EXPLICIT only when no other identity is bound (see the KDoc above).
-        // ...with WHEN it was made (TRUST-3224). Read the time FIRST: every local persist stores the
-        // choice before its time, so a save or adopt landing between the two reads can only pair the
-        // newer choice with the older time (which reads as less new, so errs toward adopting), never
-        // an older choice with a newer time. Not under localChoiceLock: this runs before the read, and
-        // a setter holding the lock must not hold up a sync's capture of the CCPA revision.
-        val localDecisionTs = storedDecisionTs()
-        val localChoice = storage.loadPreferences()
-        val explicitChoice = if (boundToOther) null else localChoice
-        // The RAW local CCPA flag, captured before any adopt below can replace it. Never derived.
-        val localCcpaOptout = storage.loadCcpaOptout()
         // A setCcpaOptout that lands while this call is suspended is newer than both the record and
-        // the capture above: nothing below adopts or clears over it, and a write carries it.
+        // the capture below: nothing below adopts or clears over it, and a write carries it. Read
+        // before the locked capture, so a setter holding the lock (flag stored, revision not yet
+        // bumped) still reads as a change made mid-flight once it releases.
         val ccpaRevisionAtEntry = ccpaChoiceRevision.get()
+        // ...with WHEN it was made (TRUST-3224), read with it in one localChoiceLock section: a
+        // standalone rehydrate's adopt (an older choice at an older time) landing between two
+        // separate reads would otherwise pair the adopted view with the local change's newer time.
+        val (localDecisionTs, localChoice) = synchronized(localChoiceLock) { storedDecisionTs() to storage.loadPreferences() }
+        val explicitChoice = if (boundToOther) null else localChoice
         val ccpaChangedMidFlight = { ccpaChoiceRevision.get() != ccpaRevisionAtEntry }
         // What the last sync for this identity left, read once for this call.
         val syncStateAtEntry = if (isResync) syncState(userHash) else null
@@ -774,6 +772,8 @@ internal class ConsentManager(
         var writeDecisionTs: Long? = null
         // A pending-CCPA flush sends no category (TRUST-2902): see the re-sync branch below.
         var ccpaOnly = false
+        // The flag a flush sends, captured with its time.
+        var flushCcpa: Boolean? = null
 
         // READ then WRITE. A read FAILURE THROWS and blocks the write — overwriting a record we
         // could not read would silently erase the user's real cross-device choice (the TRUST-2491
@@ -855,7 +855,12 @@ internal class ConsentManager(
                             }
                     rawFromRecord?.takeIf { ccpaPending && !recordHoldsPending }?.also {
                         ccpaOnly = true
-                        writeDecisionTs = storedCcpaDecisionTs()
+                        // The flag and its time read together, so a toggle landing in between cannot
+                        // pair one with the other's time (as the setter's SetterWriteCapture).
+                        synchronized(localChoiceLock) {
+                            flushCcpa = storage.loadCcpaOptout()
+                            writeDecisionTs = storedCcpaDecisionTs()
+                        }
                     }
                 }
             } else {
@@ -883,12 +888,7 @@ internal class ConsentManager(
                             // a RE-SYNC adopt is gated (see rehydrate).
                             // With the record's time, as a re-sync adopt, so the next toggle here is
                             // stamped strictly after it (a tie keeps an opt-out).
-                            val recordTs = recordDecisionTs(record)
-                            if (recordTs != null) {
-                                storage.saveCcpaChoice(record.ccpaOptout, recordTs)
-                            } else {
-                                storage.saveCcpaOptout(record.ccpaOptout)
-                            }
+                            storage.saveCcpaChoice(record.ccpaOptout, recordDecisionTs(record))
                         } else if (boundToOther) {
                             // The previous identity's flag must not carry over to this one, whatever
                             // the gate: the flag is identity-scoped, as clearUserIdentifier() treats it.
@@ -941,7 +941,10 @@ internal class ConsentManager(
         var writtenCcpa: Boolean? = null
         if (toWrite != null) {
             syncedRaw = toWrite
-            val carriedCcpa = if (ccpaChangedMidFlight()) storage.loadCcpaOptout() else localCcpaOptout
+            // The stored flag at write time: the rehydrate adopted the record's unless a local CCPA
+            // choice is pending (or landed mid-flight), so a write never carries a stale flag over a
+            // newer CCPA choice made elsewhere. A flush carries the flag captured with its time.
+            val carriedCcpa = flushCcpa ?: storage.loadCcpaOptout()
             val universalPrefs =
                 UniversalConsentPreferences(
                     isCustomised = toWrite.isCustomised,
