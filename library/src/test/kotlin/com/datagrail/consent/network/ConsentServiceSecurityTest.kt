@@ -257,6 +257,51 @@ class ConsentServiceSecurityTest {
             )
         }
 
+    // MARK: - No post-request local writes (TRUST-3224)
+
+    // ConsentManager stores the choice and its decision time before it calls the service. If the
+    // service rewrote them after the request, an older save that completes after a newer save (or
+    // after a re-sync adopted a server revocation) would restore the stale choice under the newer
+    // decision time.
+
+    @Test
+    fun `savePreferences does not rewrite local preferences after a successful request`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+
+            service.savePreferences(
+                ConsentPreferences(isCustomised = true, cookieOptions = listOf(CategoryConsent("cat1", true))),
+                testConfig,
+            )
+
+            verify(mockStorage, never()).replacePreferencesKeepingDecisionTs(any())
+            verify(mockStorage, never()).savePreferences(any(), anyOrNull())
+            verify(mockStorage, never()).saveConfigVersion(any())
+        }
+
+    @Test
+    fun `savePreferences does not rewrite local preferences after a failed request`() =
+        runTest {
+            whenever(mockStorage.loadPendingEvents()).thenReturn(emptyList())
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull()))
+                .thenThrow(RuntimeException("network error"))
+
+            try {
+                service.savePreferences(
+                    ConsentPreferences(isCustomised = true, cookieOptions = listOf(CategoryConsent("cat1", true))),
+                    testConfig,
+                )
+                fail("expected NetworkError")
+            } catch (_: ConsentException.NetworkError) {
+                // Expected
+            }
+
+            verify(mockStorage).savePendingEvents(any())
+            verify(mockStorage, never()).replacePreferencesKeepingDecisionTs(any())
+            verify(mockStorage, never()).savePreferences(any(), anyOrNull())
+            verify(mockStorage, never()).saveConfigVersion(any())
+        }
+
     // MARK: - Queue Cap Tests
 
     @Test

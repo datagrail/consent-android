@@ -3,6 +3,7 @@ package com.datagrail.consent.network
 import com.datagrail.consent.models.*
 import com.datagrail.consent.storage.ConsentStorage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
@@ -126,7 +127,7 @@ class UniversalConsentTest {
             userHash,
         )
 
-        val provDigest = ConsentService.resolvedDefaultProvenanceDigest(timestamp)
+        val provDigest = ConsentService.provenanceDigest(timestamp)
         assertEquals(
             "4de0e6fe888081209009953420b400306063e95f4b2738b53204fb36a88cedb9",
             provDigest,
@@ -268,6 +269,72 @@ class UniversalConsentTest {
     // MARK: - Signed POST
 
     @Test
+    fun `a CCPA-only write sends only ccpa_optout and its provenance`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+            val config =
+                ConsentServiceSecurityTest.createTestConfig().copy(
+                    dgCustomerId = "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
+                    consentProjectId = "proj_abc123",
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = true),
+                )
+
+            service.saveUniversalConsent(
+                config = config,
+                identifier = "user-7f3c2a91",
+                preferences =
+                    UniversalConsentPreferences(
+                        isCustomised = true,
+                        cookieOptions = mapOf("dg-category-marketing" to false),
+                    ),
+                apiKey = "dg_live_key",
+                ccpaOptout = true,
+                getSignature = null,
+                decisionTs = 1_760_000_000L,
+                ccpaOnly = true,
+            )
+
+            val bodyCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(any(), any(), bodyCaptor.capture(), anyOrNull())
+            val body = kotlinx.serialization.json.Json.parseToJsonElement(bodyCaptor.firstValue).jsonObject
+            // TRUST-2591 decision (2026-10-26), same body as consent-banner #756: no category map, no
+            // isCustomised and no record metadata, so the edge advances ccpa_optout alone.
+            assertEquals(
+                setOf("customer_id", "user_hash", "consent_preferences", "ccpa_optout", "is_explicit", "decision_ts"),
+                body.keys,
+            )
+            assertEquals("{\"cookieOptions\":{}}", body["consent_preferences"].toString())
+            assertEquals("true", body["ccpa_optout"].toString())
+            assertEquals("1760000000", body["decision_ts"].toString())
+        }
+
+    @Test
+    fun `with the gate on, a false ccpa_optout is still sent on both bodies`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+            val config =
+                ConsentServiceSecurityTest.createTestConfig().copy(
+                    consentProjectId = "proj_abc123",
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = true),
+                )
+            for (ccpaOnly in listOf(false, true)) {
+                service.saveUniversalConsent(
+                    config = config,
+                    identifier = "user-7f3c2a91",
+                    preferences = UniversalConsentPreferences(isCustomised = true),
+                    apiKey = "dg_live_key",
+                    ccpaOptout = false,
+                    getSignature = null,
+                    ccpaOnly = ccpaOnly,
+                )
+            }
+            val bodyCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient, times(2)).request(any(), any(), bodyCaptor.capture(), anyOrNull())
+            // TRUST-3381 omits the field only with the gate off; an explicit opt-in still clears it.
+            bodyCaptor.allValues.forEach { assertTrue(it, it.contains("\"ccpa_optout\":false")) }
+        }
+
+    @Test
     fun `saveUniversalConsent attaches signature headers and hits CloudFront path`() =
         runTest {
             whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
@@ -350,7 +417,7 @@ class UniversalConsentTest {
                 "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7:" +
                     "1fee132c298d615098190e3e75f9c7e05db20d6cff6398f686fcebc67d1d87a4:" +
                     "${payload.timestamp}:${payload.nonce}:" +
-                    ConsentService.resolvedDefaultProvenanceDigest(payload.timestamp),
+                    ConsentService.provenanceDigest(payload.timestamp),
                 payload.stringToSign,
             )
 
@@ -361,6 +428,78 @@ class UniversalConsentTest {
                 body.contains("1fee132c298d615098190e3e75f9c7e05db20d6cff6398f686fcebc67d1d87a4"),
             )
             assertTrue("cookieOptions is a map", body.contains("\"cookieOptions\":{"))
+        }
+
+    // MARK: - Decision time (TRUST-3224)
+
+    /** Write once with [decisionTs] and return the signed payload and the body sent. */
+    private suspend fun writeWithDecisionTs(
+        decisionTs: Long?,
+        signed: Boolean = true,
+    ): Pair<UniversalConsentSigningPayload?, String> {
+        whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+        val config =
+            ConsentServiceSecurityTest.createTestConfig().copy(
+                consentProjectId = "proj_abc123",
+                universalConsent = UniversalConsentConfig(enabled = true, syncOptout = false),
+            )
+        var seenPayload: UniversalConsentSigningPayload? = null
+        val provider: SignatureProvider = { payload ->
+            seenPayload = payload
+            UniversalConsentSignature(signature = "deadbeefsig", keyId = "key-1")
+        }
+        service.saveUniversalConsent(
+            config = config,
+            identifier = "opaque-user-7f3a",
+            preferences = UniversalConsentPreferences(isCustomised = true, cookieOptions = mapOf("m" to false)),
+            apiKey = "dg_live_key",
+            ccpaOptout = false,
+            getSignature = if (signed) provider else null,
+            decisionTs = decisionTs,
+        )
+        val bodyCaptor = argumentCaptor<String>()
+        verify(mockNetworkClient).request(any(), any(), bodyCaptor.capture(), any())
+        return seenPayload to bodyCaptor.firstValue
+    }
+
+    @Test
+    fun `provenanceDigest for an explicit decision time is pinned`() {
+        // sha256("true\n1700000000\n"): is_explicit "true", the decision time, actor_id "".
+        assertEquals(
+            "1047c17b7da10832816182786641bc86738ad7455f5e1862fe433d6f2d0991a6",
+            ConsentService.provenanceDigest(1700000000L),
+        )
+    }
+
+    @Test
+    fun `a write with a decision time sends it and signs it, not the request time`() =
+        runTest {
+            val (payload, body) = writeWithDecisionTs(1700000000L)
+
+            assertTrue(body, body.contains("\"is_explicit\":true"))
+            assertTrue(body, body.contains("\"decision_ts\":1700000000"))
+            val signed = requireNotNull(payload)
+            assertNotEquals("the request time is still its own", 1700000000L, signed.timestamp)
+            assertTrue(signed.stringToSign.endsWith(":${ConsentService.provenanceDigest(1700000000L)}"))
+        }
+
+    @Test
+    fun `a write with an unknown decision time sends and signs the request time`() =
+        runTest {
+            val (payload, body) = writeWithDecisionTs(null)
+
+            val signed = requireNotNull(payload)
+            assertTrue(body, body.contains("\"decision_ts\":${signed.timestamp}"))
+            assertTrue(signed.stringToSign.endsWith(":${ConsentService.provenanceDigest(signed.timestamp)}"))
+        }
+
+    @Test
+    fun `a limited-mode write still carries the decision time`() =
+        runTest {
+            val (_, body) = writeWithDecisionTs(1700000000L, signed = false)
+
+            assertTrue(body, body.contains("\"is_explicit\":true"))
+            assertTrue(body, body.contains("\"decision_ts\":1700000000"))
         }
 
     @Test
@@ -399,8 +538,9 @@ class UniversalConsentTest {
                 "consent_preferences must not collapse to an empty object",
                 body.contains("\"consent_preferences\":{}"),
             )
-            // The other defaulted scalars on the request must survive too.
-            assertTrue("ccpa_optout is present", body.contains("\"ccpa_optout\":false"))
+            // TRUST-3381 (as consent-banner #756): with the sync_optout gate off, ccpa_optout is left
+            // out entirely, never sent as false.
+            assertFalse("ccpa_optout is omitted with the gate off", body.contains("ccpa_optout"))
         }
 
     @Test

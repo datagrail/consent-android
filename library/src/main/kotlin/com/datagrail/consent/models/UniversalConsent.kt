@@ -2,6 +2,8 @@ package com.datagrail.consent.models
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.util.GregorianCalendar
+import java.util.TimeZone
 
 /**
  * Signature material returned by the customer-provided `getSignature` callback.
@@ -188,5 +190,85 @@ object SignalReconciliation {
         // this cannot re-enable something a signal turned off; it only ensures every essential key
         // is present and true (taxonomy-drift backfill lives here, not in each caller).
         return suppressed + essentialKeys.associateWith { true }
+    }
+}
+
+/**
+ * When a consent choice was made, as unix SECONDS: the resolution `decision_ts` has on the Universal
+ * Consent wire (TRUST-3224, the Android port of the web fix TRUST-3154).
+ *
+ * The edge merges each category as decision-time last-writer-wins. A write that carried the request
+ * time instead would let a stale device's re-sync out-rank a newer revocation made on another device
+ * (sign-off scenario P0-06), so the SDK records the real time of every choice next to it, sends it
+ * as the write's `decision_ts`, and on a re-sync writes a local change through only when it is
+ * strictly newer than the record's `updated_at` (the latest decision across all its categories).
+ *
+ * Clock skew: decision times from different devices are compared as-is. The monotonic [next] is the
+ * only protection, so skew between devices (up to roughly the edge's own 300 s clamp) can still
+ * mis-order changes made within that window of each other. A known bound, not solved here.
+ */
+internal object DecisionTime {
+    /** The edge's own future clamp on `decision_ts` (now + 300 s). */
+    const val FUTURE_TOLERANCE_SECONDS = 300L
+
+    /**
+     * How far ahead a STORED decision time may be and still be read back. An adopted record's time
+     * can already sit at the edge clamp, and [next] for a choice made right after it has to land
+     * beyond that and still be readable, or the fresh choice would read as unknown and lose to the
+     * record it follows. Twice the clamp leaves that room while a stamp from a since-corrected clock
+     * is still rejected.
+     */
+    const val STORED_TOLERANCE_SECONDS = 2 * FUTURE_TOLERANCE_SECONDS
+
+    /**
+     * A stored decision time as read back, or null when unknown: none stored (a choice from before
+     * this SDK recorded one), negative, or more than [STORED_TOLERANCE_SECONDS] ahead of [now]. A
+     * stamp that far ahead is bogus (the clock was ahead and has been corrected); the edge restamps
+     * such a write to now + 300, so it would never repair itself and would out-rank every record.
+     */
+    fun stored(
+        raw: Long?,
+        now: Long,
+    ): Long? = raw?.takeIf { it >= 0 && it <= now + STORED_TOLERANCE_SECONDS }
+
+    /**
+     * The time to record for a choice made [now]. MONOTONIC: never earlier than [previous] + 1, so two
+     * choices in the same second, or a choice right after adopting a record stamped slightly ahead of
+     * this clock, still order correctly; capped at what [stored] reads back.
+     *
+     * @param previous The current stored time as [stored] reads it, or null.
+     */
+    fun next(
+        previous: Long?,
+        now: Long,
+    ): Long = if (previous == null) now else minOf(maxOf(now, previous + 1), now + STORED_TOLERANCE_SECONDS)
+
+    private val ISO_8601 =
+        Regex("""^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$""")
+
+    /**
+     * A record's `updated_at` (ISO-8601, e.g. `2026-10-14T12:00:00Z`; fractional seconds are
+     * truncated) as unix seconds, or null when absent or unparseable. Parsed by hand: `java.time`
+     * needs API 26 and this library supports 23.
+     */
+    fun ofRecord(updatedAt: String?): Long? {
+        val match = ISO_8601.matchEntire(updatedAt ?: return null) ?: return null
+        val (year, month, day, hour, minute, second, zone) = match.destructured
+        val calendar =
+            GregorianCalendar(TimeZone.getTimeZone("UTC")).apply {
+                isLenient = false
+                clear()
+                set(year.toInt(), month.toInt() - 1, day.toInt(), hour.toInt(), minute.toInt(), second.toInt())
+            }
+        // A non-lenient calendar throws on an out-of-range field (month 13, second 61, ...).
+        val utcSeconds = runCatching { calendar.timeInMillis / 1000 }.getOrNull() ?: return null
+        val offsetSeconds =
+            if (zone == "Z") {
+                0L
+            } else {
+                val sign = if (zone[0] == '-') -1 else 1
+                sign * (zone.substring(1, 3).toLong() * 3600 + zone.substring(4, 6).toLong() * 60)
+            }
+        return (utcSeconds - offsetSeconds).takeIf { it >= 0 }
     }
 }

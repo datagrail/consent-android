@@ -114,3 +114,9 @@ internal fun universalConsentTestConfig(syncOptout: Boolean): ConsentConfig {
         universalConsent = UniversalConsentConfig(enabled = true, syncOptout = syncOptout),
     )
 }
+
+/**
+ * A record's `updated_at` that is older than any choice a test makes on the real clock, so a local
+ * change saved during the test is newer than the record and is written through (TRUST-3224).
+ */
+internal const val RECORD_UPDATED_AT = "2020-01-01T00:00:00Z"

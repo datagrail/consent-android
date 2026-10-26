@@ -49,6 +49,7 @@ class UniversalConsentResyncTests {
     private var storedBoundHash: String? = null
     private var storedCcpaWritePending = false
     private var storedSyncState: UniversalConsentSyncState? = null
+    private var storedDecisionTs: Long? = null
 
     private val userA = "alice@example.com"
     private val userB = "bob@example.com"
@@ -59,10 +60,19 @@ class UniversalConsentResyncTests {
         MockitoAnnotations.openMocks(this)
         whenever(mockStorage.saveCcpaWritePending(any())).doAnswer { storedCcpaWritePending = it.getArgument(0) }
         whenever(mockStorage.loadCcpaWritePending()).doAnswer { storedCcpaWritePending }
-        whenever(mockStorage.savePreferences(any())).doAnswer { storedPreferences = it.getArgument(0) }
+        whenever(mockStorage.savePreferences(any(), anyOrNull())).doAnswer {
+            storedPreferences = it.getArgument(0)
+            storedDecisionTs = it.getArgument(1)
+        }
+        whenever(mockStorage.replacePreferencesKeepingDecisionTs(any())).doAnswer { storedPreferences = it.getArgument(0) }
         whenever(mockStorage.loadPreferences()).doAnswer { storedPreferences }
-        whenever(mockStorage.clearPreferences()).doAnswer { storedPreferences = null }
+        whenever(mockStorage.loadDecisionTs()).doAnswer { storedDecisionTs }
+        whenever(mockStorage.clearPreferences()).doAnswer {
+            storedPreferences = null
+            storedDecisionTs = null
+        }
         whenever(mockStorage.saveCcpaOptout(any())).doAnswer { storedCcpaOptout = it.getArgument(0) }
+        whenever(mockStorage.saveCcpaChoice(any(), anyOrNull())).doAnswer { storedCcpaOptout = it.getArgument(0) }
         whenever(mockStorage.loadCcpaOptout()).doAnswer { storedCcpaOptout }
         whenever(mockStorage.clearCcpaOptout()).doAnswer { storedCcpaOptout = false }
         whenever(mockStorage.saveBoundUserHash(any())).doAnswer { storedBoundHash = it.getArgument(0) }
@@ -80,6 +90,7 @@ class UniversalConsentResyncTests {
             storedBoundHash = null
             storedCcpaWritePending = false
             storedSyncState = null
+            storedDecisionTs = null
         }
         relaunch()
     }
@@ -140,7 +151,7 @@ class UniversalConsentResyncTests {
             sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
             sut.setCcpaOptout(true)
 
-            assertEquals(true, writtenPreferences().single().cookieOptions["category_marketing"])
+            assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
         }
 
     @Test
@@ -159,11 +170,44 @@ class UniversalConsentResyncTests {
             recordIs(record(marketing = false))
             sut.setUserIdentifier(userA, apiKey)
 
-            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull())
-            assertEquals(false, writtenPreferences().single().cookieOptions["category_marketing"])
+            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull(), anyOrNull(), any())
+            assertEquals("CCPA-only", emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
             assertFalse(storedCcpaWritePending)
             assertTrue(sut.getCcpaOptout())
             assertEquals(choice(marketing = false), storedPreferences)
+        }
+
+    @Test
+    fun `a failed pending-CCPA flush does not fail the re-sync and stays pending`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+            relaunch()
+            sut.setCcpaOptout(true)
+            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any()))
+                .doSuspendableAnswer { throw ConsentException.NetworkError("offline") }
+
+            // The read and adopt succeeded, so the identity binds; the flag waits for the next re-sync.
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertTrue(storedCcpaWritePending)
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `a pending flag the record already holds is cleared without a write`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+            relaunch()
+            // The record already says false.
+            sut.setCcpaOptout(false)
+            assertTrue(storedCcpaWritePending)
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+            assertFalse(storedCcpaWritePending)
         }
 
     @Test
@@ -181,7 +225,7 @@ class UniversalConsentResyncTests {
             sut.currentConfig = config
             sut.setUserIdentifier(userA, apiKey)
 
-            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull())
+            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull(), anyOrNull(), any())
             assertTrue("the record's older false does not replace it", sut.getCcpaOptout())
         }
 
@@ -248,11 +292,17 @@ class UniversalConsentResyncTests {
             sut.savePreferences(choice(marketing = false)) {}
 
             sut.setCcpaOptout(true)
-            assertEquals(1, writtenPreferences().size)
+            val writes = writtenPreferences()
+            assertEquals("the change, then the CCPA-only write", 2, writes.size)
+            assertEquals(false, writes[0].cookieOptions["category_marketing"])
+            assertEquals(emptyMap<String, Boolean>(), writes[1].cookieOptions)
 
+            // The record now holds the change (its updated_at moved past it with the CCPA write).
+            recordIs(record(marketing = false))
             sut.setUserIdentifier(userA, apiKey)
 
-            assertEquals("the re-sync adopts instead of writing again", 1, writtenPreferences().size)
+            assertEquals("the re-sync adopts instead of writing again", 2, writtenPreferences().size)
+            assertEquals(choice(marketing = false), storedPreferences)
         }
 
     @Test
@@ -261,7 +311,7 @@ class UniversalConsentResyncTests {
             storedPreferences = choice(marketing = true)
             recordIs(null)
             val writeGate = CompletableDeferred<Unit>()
-            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull()))
+            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any()))
                 .doSuspendableAnswer { writeGate.await() }
             val seed = launch { sut.setUserIdentifier(userA, apiKey) }
             testScheduler.runCurrent()
@@ -294,9 +344,9 @@ class UniversalConsentResyncTests {
             verifyNoWrite()
             sut.setCcpaOptout(true)
             assertEquals(
-                "the record's raw opt-in",
-                true,
-                writtenPreferences().single().cookieOptions["category_marketing"],
+                "CCPA-only: the record's raw opt-in is untouched",
+                emptyMap<String, Boolean>(),
+                writtenPreferences().single().cookieOptions,
             )
         }
 
@@ -421,7 +471,7 @@ class UniversalConsentResyncTests {
 
             // The next re-sync carries it, even with no category change.
             sut.setUserIdentifier(userA, apiKey)
-            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull())
+            verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull(), anyOrNull(), any())
             assertFalse(storedCcpaWritePending)
             assertTrue(sut.getCcpaOptout())
         }
@@ -524,12 +574,12 @@ class UniversalConsentResyncTests {
     private suspend fun writtenPreferences(): List<UniversalConsentPreferences> {
         val captor = argumentCaptor<UniversalConsentPreferences>()
         verify(mockConsentService, org.mockito.Mockito.atLeastOnce())
-            .saveUniversalConsent(any(), any(), captor.capture(), eq(apiKey), any(), anyOrNull())
+            .saveUniversalConsent(any(), any(), captor.capture(), eq(apiKey), any(), anyOrNull(), anyOrNull(), any())
         return captor.allValues
     }
 
     private suspend fun verifyNoWrite() {
-        verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull())
+        verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any())
     }
 
     private fun hashFor(identifier: String): String {
@@ -557,6 +607,8 @@ class UniversalConsentResyncTests {
     ): UniversalConsentRecord =
         UniversalConsentRecord(
             status = "found",
+            // Older than any choice a test makes, so a later local change is newer (TRUST-3224).
+            updatedAt = RECORD_UPDATED_AT,
             consentPreferences =
                 UniversalConsentPreferences(
                     isCustomised = true,
