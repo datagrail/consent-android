@@ -75,8 +75,10 @@ class DataGrailConsent private constructor() {
 
     // The initGeneration value reset() last set. Not a second currency token: it only tells a
     // superseded init whether the reset (not a newer initialize) superseded it, to pick its result.
-    @Volatile
+    // Guarded by generationLock, with reset()'s increment, so a superseded init never reads the
+    // generation reset() just took before reset() has recorded it.
     private var resetGeneration = 0
+    private val generationLock = Any()
 
     // Builds an init's storage + services off the main thread. A seam so tests can hold an init in
     // flight; production always uses the default.
@@ -350,7 +352,7 @@ class DataGrailConsent private constructor() {
             // A newer initialize() or a reset() superseded this call. Still fire this caller's
             // callback so it isn't left hanging.
             fun finishSuperseded() {
-                if (initGeneration.get() == resetGeneration) {
+                if (synchronized(generationLock) { initGeneration.get() == resetGeneration }) {
                     // reset() ran over this init and no newer init followed: the SDK is not
                     // initialized. Apply the wipe to this init's storage too: reset() could not
                     // reach it if it ran before this manager existed, and if it ran mid-load it
@@ -605,7 +607,7 @@ class DataGrailConsent private constructor() {
     fun reset() {
         // Supersede an init still in flight: it neither commits nor reports a config fetch failure
         // to its onConfigError (TRUST-3254), and its callback fails with NotInitialized.
-        resetGeneration = initGeneration.incrementAndGet()
+        synchronized(generationLock) { resetGeneration = initGeneration.incrementAndGet() }
         manager?.reset()
     }
 
