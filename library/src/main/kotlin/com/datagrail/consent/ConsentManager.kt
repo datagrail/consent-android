@@ -17,6 +17,8 @@ import com.datagrail.consent.storage.ConsentStorage
 import com.datagrail.consent.storage.UniversalConsentSyncState
 import com.datagrail.consent.utils.ConsentLogger
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicInteger
@@ -879,7 +881,14 @@ internal class ConsentManager(
                             // value is dropped exactly like the categories (with the gate off the
                             // record holds false, the same neutral clearUserIdentifier() leaves). Only
                             // a RE-SYNC adopt is gated (see rehydrate).
-                            storage.saveCcpaOptout(record.ccpaOptout)
+                            // With the record's time, as a re-sync adopt, so the next toggle here is
+                            // stamped strictly after it (a tie keeps an opt-out).
+                            val recordTs = recordDecisionTs(record)
+                            if (recordTs != null) {
+                                storage.saveCcpaChoice(record.ccpaOptout, recordTs)
+                            } else {
+                                storage.saveCcpaOptout(record.ccpaOptout)
+                            }
                         } else if (boundToOther) {
                             // The previous identity's flag must not carry over to this one, whatever
                             // the gate: the flag is identity-scoped, as clearUserIdentifier() treats it.
@@ -967,6 +976,9 @@ internal class ConsentManager(
                     // succeeded, so the identity binds and the session is set as usual, and the flag
                     // stays pending for the next re-sync. Any other failed write fails the call.
                     if (!ccpaOnly) throw e
+                    // A cancelled call is not a failed flush: the service re-types the IO
+                    // cancellation as NetworkError, so check the coroutine itself before binding.
+                    currentCoroutineContext().ensureActive()
                     ConsentLogger.w("Pending CCPA choice not written; it stays pending: ${e.javaClass.simpleName}")
                     false
                 }
