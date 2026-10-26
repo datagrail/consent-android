@@ -103,6 +103,30 @@ interface ConsentChangeListener {
 }
 
 /**
+ * Java-friendly listener for config fetch failures the cached config masked (TRUST-3254), passed to
+ * one [DataGrailConsent.initialize] call (see the Kotlin overload with `onConfigError`).
+ *
+ * Example (Java):
+ * ```java
+ * DataGrailConsent.getInstance().initialize(context, configUrl,
+ *     new ConfigErrorListener() {
+ *         @Override
+ *         public void onConfigError(ConsentException error) {
+ *             Log.w("Consent", "Config refresh failed, using cached config", error);
+ *         }
+ *     },
+ *     callback);
+ * ```
+ */
+interface ConfigErrorListener {
+    /**
+     * Called when fetching the config failed and the SDK fell back to its cached config
+     * @param error The failure, as initialize() would have reported it without a cache
+     */
+    fun onConfigError(error: ConsentException)
+}
+
+/**
  * Java-friendly callback interface for retry operations
  *
  * Example (Java):
