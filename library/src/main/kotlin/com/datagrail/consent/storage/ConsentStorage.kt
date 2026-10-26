@@ -259,18 +259,6 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
     // MARK: - CCPA opt-out (TRUST-2591)
 
     /**
-     * Persist the user's explicit CCPA/CPRA "Do Not Sell or Share" choice for this device. Never a
-     * derived value: only the public setter, a found-record adopt, and the neutral reset write it.
-     * [clearAll] removes it with everything else.
-     * @param optedOut true when the user opted out of sale/sharing
-     */
-    fun saveCcpaOptout(optedOut: Boolean) {
-        // A value not chosen by the setter (an adopt, the neutral reset) has no known decision time,
-        // so any earlier setter time is removed with it rather than left paired with this value.
-        prefs.edit().putBoolean(KEY_CCPA_OPTOUT, optedOut).remove(KEY_CCPA_DECISION_TS).apply()
-    }
-
-    /**
      * Persist the host app's CCPA choice and WHEN it was made (TRUST-2902), unix seconds, in one edit
      * so the two never drift apart. A CCPA-only write sends the time as `decision_ts`, so a choice that
      * waited for a session (pending) is ranked by when the user made it, not by when it was finally

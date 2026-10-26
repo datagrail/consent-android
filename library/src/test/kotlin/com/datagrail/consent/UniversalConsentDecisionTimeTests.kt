@@ -79,10 +79,6 @@ class UniversalConsentDecisionTimeTests {
         whenever(mockStorage.saveSyncState(any())).doAnswer { storedSyncState = it.getArgument(0) }
         whenever(mockStorage.loadSyncState()).doAnswer { storedSyncState }
         whenever(mockStorage.clearSyncState()).doAnswer { storedSyncState = null }
-        whenever(mockStorage.saveCcpaOptout(any())).doAnswer {
-            storedCcpaOptout = it.getArgument(0)
-            storedCcpaDecisionTs = null
-        }
         whenever(mockStorage.saveCcpaChoice(any(), anyOrNull())).doAnswer {
             storedCcpaOptout = it.getArgument(0)
             storedCcpaDecisionTs = it.getArgument(1)

@@ -449,9 +449,8 @@ internal class ConsentManager(
      *   choice through instead of adopting it ([setUserIdentifier] on a re-sync with a local change
      *   newer than the record, TRUST-3224). When it returns true the record's view is not stored over
      *   that newer choice (and no save revision is reported; the caller stores the view of its own
-     *   choice once the write lands), and its `ccpa_optout` is not adopted, so a failed write cannot
-     *   drop the user's newer local flag. Otherwise a found record's `ccpa_optout` replaces the local
-     *   flag (TRUST-2591: the record is authoritative for the stored choice), applied only when
+     *   choice once the write lands). The record's `ccpa_optout` is its own register and is adopted
+     *   either way (TRUST-2591: the record is authoritative for the stored choice), applied only when
      *   `universalConsent.syncOptout` is on, and skipped while a bound CCPA choice has not reached the
      *   record yet ([ConsentStorage.loadCcpaWritePending]), or when [ccpaRevision] is given and a
      *   setter call landed since it was captured.
@@ -751,14 +750,20 @@ internal class ConsentManager(
         // stores a choice and its time in one edit, so a standalone rehydrate's adopt (an older choice
         // at an older time) landing between the reads changes the time and is caught, and the adopted
         // view is never paired with the local change's newer time.
-        var localDecisionTs = storedDecisionTs()
-        var localChoice = storage.loadPreferences()
+        var localDecisionTs: Long? = null
+        var localChoice: ConsentPreferences? = null
+        var agreed = false
         for (attempt in 1..3) {
-            val after = storedDecisionTs()
-            if (after == localDecisionTs) break
-            localDecisionTs = after
+            val before = storedDecisionTs()
             localChoice = storage.loadPreferences()
+            localDecisionTs = storedDecisionTs()
+            if (before == localDecisionTs) {
+                agreed = true
+                break
+            }
         }
+        // Still moving after three tries: treat the time as unknown, which adopts (the safe side).
+        if (!agreed) localDecisionTs = null
         val explicitChoice = if (boundToOther) null else localChoice
         val ccpaChangedMidFlight = { ccpaChoiceRevision.get() != ccpaRevisionAtEntry }
         // What the last sync for this identity left, read once for this call.
@@ -802,8 +807,9 @@ internal class ConsentManager(
                 // otherwise this device holds a stale copy (the user changed it elsewhere since) and
                 // writing it would undo the newer choice. A signal-only record carries no category
                 // choice to undo, so a local change is written over it as before. The local CCPA flag
-                // takes the record's value only when nothing will be written back (and, as in
-                // rehydrate, only with the syncOptout gate on).
+                // takes the record's value unless a local CCPA choice is pending or changed mid-flight
+                // (and, as in rehydrate, only with the syncOptout gate on), whether or not a category
+                // change is written back.
                 val rehydrated =
                     rehydrate(
                         identifier,
@@ -986,7 +992,10 @@ internal class ConsentManager(
                     // A failed pending-CCPA flush does not fail the sync: the read and adopt
                     // succeeded, so the identity binds and the session is set as usual, and the flag
                     // stays pending for the next re-sync. Any other failed write fails the call.
-                    if (!ccpaOnly) throw e
+                    // Only a transient failure is non-fatal: a signing failure or a definite 4xx
+                    // would fail every retry, and swallowing it would leave the opt-out unsent while
+                    // every re-sync reports success.
+                    if (!ccpaOnly || !ConsentException.isRetryable(e)) throw e
                     // A cancelled call is not a failed flush: the service re-types the IO
                     // cancellation as NetworkError, so check the coroutine itself before binding.
                     currentCoroutineContext().ensureActive()
@@ -1320,8 +1329,8 @@ internal class ConsentManager(
             // no category choice, so the CCPA write never leaves an empty, answered-all-off block. An
             // unknown time is not sent stamped now (P0-06): the change waits for the next re-sync.
             val sendsCategories =
-                (!unchangedSinceSync(stored, syncState) && captured.choiceDecisionTs != null) ||
-                    (syncState != null && syncState.syncedRaw == null)
+                captured.choiceDecisionTs != null &&
+                    (!unchangedSinceSync(stored, syncState) || (syncState != null && syncState.syncedRaw == null))
             // A logout/reset landed while preparing the write (including during the reads above):
             // don't write through to the now-unbound (or re-bound) identity.
             if (identityOperationGeneration.get() != opGeneration) return@withLock

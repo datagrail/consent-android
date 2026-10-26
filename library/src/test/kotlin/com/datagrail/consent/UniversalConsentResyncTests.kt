@@ -71,7 +71,6 @@ class UniversalConsentResyncTests {
             storedPreferences = null
             storedDecisionTs = null
         }
-        whenever(mockStorage.saveCcpaOptout(any())).doAnswer { storedCcpaOptout = it.getArgument(0) }
         whenever(mockStorage.saveCcpaChoice(any(), anyOrNull())).doAnswer { storedCcpaOptout = it.getArgument(0) }
         whenever(mockStorage.loadCcpaOptout()).doAnswer { storedCcpaOptout }
         whenever(mockStorage.clearCcpaOptout()).doAnswer { storedCcpaOptout = false }
@@ -192,6 +191,21 @@ class UniversalConsentResyncTests {
 
             assertTrue(storedCcpaWritePending)
             assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `a pending-CCPA flush refused for good fails the re-sync instead of reporting success`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+            relaunch()
+            sut.setCcpaOptout(true)
+            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any()))
+                .doSuspendableAnswer { throw ConsentException.HttpError(401) }
+
+            // A definite 4xx fails every retry: surface it, so the host sees the opt-out is unsent.
+            assertTrue(runCatching { sut.setUserIdentifier(userA, apiKey) }.exceptionOrNull() is ConsentException.HttpError)
+            assertTrue(storedCcpaWritePending)
         }
 
     @Test
