@@ -235,7 +235,8 @@ class DataGrailConsent private constructor() {
      * Initialize the DataGrail Consent SDK, and be told when a config fetch fails but the SDK
      * carries on with the cached config (TRUST-3254). Same shape as the iOS SDK's
      * `initialize(configUrl:onConfigError:completion:)` and consent-react's `onConfigError` option:
-     * the handler belongs to this call only.
+     * the handler belongs to this call only. Unlike iOS, a [reset] during an in-flight initialize
+     * fails that init with `NotInitialized` and keeps its config from being restored.
      *
      * Every [initialize] fetches the config from the network. When that fetch fails and a config
      * cached by an earlier launch exists, initialization succeeds on the cached config, and
@@ -384,6 +385,9 @@ class DataGrailConsent private constructor() {
                 configUrl,
                 onConfigError = reportConfigError,
                 isCurrent = isCurrent,
+                // Only a reset() withholds the config: an init a newer initialize() superseded still
+                // reports success below, so its committed manager must not be left config-less.
+                keepsConfig = { synchronized(generationLock) { resetGeneration < generation } },
             ) { result ->
                 when {
                     // Superseded while the config loaded, including by a reset() from this init's

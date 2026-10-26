@@ -131,6 +131,8 @@ class DataGrailConsentTests {
      */
     private fun initializeWithFetch(
         onConfigError: (ConsentException) -> Unit = {},
+        // Runs after the init finished, before its committed state is cleared from the singleton.
+        afterInit: () -> Unit = {},
         fetch: suspend (isCurrent: () -> Boolean, reportError: ((ConsentException) -> Unit)?) -> Unit,
     ): Pair<Result<Unit>, ConsentStorage> {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -152,6 +154,7 @@ class DataGrailConsentTests {
                 done.countDown()
             }
             assertTrue(done.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            afterInit()
             return result!! to storage
         } finally {
             sut.managerFactory = defaultFactory
@@ -190,6 +193,33 @@ class DataGrailConsentTests {
         // The reset's wipe, then the superseded init's own wipe of anything persisted in the race.
         verify(storage, atLeast(2)).clearAll()
         verify(storage, never()).loadPendingEvents()
+    }
+
+    @Test
+    fun `an init a newer initialize superseded keeps its config when that init fails`() {
+        val newerDone = java.util.concurrent.CountDownLatch(1)
+        var newerResult: Result<Unit>? = null
+        var configAfterInit: Any? = null
+        val (result, _) =
+            initializeWithFetch(afterInit = { configAfterInit = sut.getConfig() }) { _, _ ->
+                // While this init's config loads, a newer initialize() supersedes it and then fails
+                // to build its storage, so it never commits a manager of its own.
+                sut.managerFactory = { _, _ -> throw IllegalStateException("keystore unavailable") }
+                // From another thread: an unconfined launch nested in this one would only start
+                // once this fetch returns.
+                Thread {
+                    sut.initialize(mockContext, "https://consent.datagrail.io/config.json") {
+                        newerResult = it
+                        newerDone.countDown()
+                    }
+                }.start()
+                assertTrue(newerDone.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            }
+
+        assertTrue(newerResult!!.isFailure)
+        // The superseded init reports success, so the manager it committed must hold its config.
+        assertTrue(result.isSuccess)
+        assertNotNull(configAfterInit)
     }
 
     @Test
