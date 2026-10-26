@@ -178,6 +178,39 @@ class UniversalConsentResyncTests {
         }
 
     @Test
+    fun `a failed pending-CCPA flush does not fail the re-sync and stays pending`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+            relaunch()
+            sut.setCcpaOptout(true)
+            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull()))
+                .doSuspendableAnswer { throw ConsentException.NetworkError("offline") }
+
+            // The read and adopt succeeded, so the identity binds; the flag waits for the next re-sync.
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertTrue(storedCcpaWritePending)
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
+    fun `a pending flag the record already holds is cleared without a write`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+            relaunch()
+            // The record already says false.
+            sut.setCcpaOptout(false)
+            assertTrue(storedCcpaWritePending)
+
+            sut.setUserIdentifier(userA, apiKey)
+
+            verifyNoWrite()
+            assertFalse(storedCcpaWritePending)
+        }
+
+    @Test
     fun `setter before the config loads on a bound device is still marked pending`() =
         runTest {
             recordIs(record(marketing = true))

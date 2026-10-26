@@ -15,6 +15,8 @@ import com.datagrail.consent.network.ConfigService
 import com.datagrail.consent.network.ConsentService
 import com.datagrail.consent.storage.ConsentStorage
 import com.datagrail.consent.storage.UniversalConsentSyncState
+import com.datagrail.consent.utils.ConsentLogger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicInteger
@@ -513,7 +515,10 @@ internal class ConsentManager(
             if (!keptLocal && !keepsLocalCcpa && readsBoundOrUnbound &&
                 config.universalConsent?.syncOptout == true
             ) {
-                storage.saveCcpaOptout(record.ccpaOptout)
+                // Adopted with the record's time, as a category adopt is, so the next toggle here is
+                // stamped strictly after it (a tie keeps an opt-out).
+                val recordTs = recordDecisionTs(record)
+                if (recordTs != null) storage.saveCcpaChoice(record.ccpaOptout, recordTs) else storage.saveCcpaOptout(record.ccpaOptout)
             }
         }
 
@@ -839,7 +844,15 @@ internal class ConsentManager(
                     // opt-out on a tie), nor the send time (a late flush would out-rank a newer CCPA
                     // choice made on another device meanwhile). Unknown, it sends no provenance. The
                     // record's raw choice is still what the record holds afterwards (syncedRaw).
-                    rawFromRecord?.takeIf { ccpaPending }?.also {
+                    // A record that already holds the pending flag needs no signed write.
+                    val recordHoldsPending =
+                        ccpaPending &&
+                            synchronized(localChoiceLock) {
+                                (rehydrated?.record?.ccpaOptout == storage.loadCcpaOptout()).also {
+                                    if (it) storage.saveCcpaWritePending(false)
+                                }
+                            }
+                    rawFromRecord?.takeIf { ccpaPending && !recordHoldsPending }?.also {
                         ccpaOnly = true
                         writeDecisionTs = storedCcpaDecisionTs()
                     }
@@ -921,7 +934,6 @@ internal class ConsentManager(
         if (toWrite != null) {
             syncedRaw = toWrite
             val carriedCcpa = if (ccpaChangedMidFlight()) storage.loadCcpaOptout() else localCcpaOptout
-            writtenCcpa = carriedCcpa
             val universalPrefs =
                 UniversalConsentPreferences(
                     isCustomised = toWrite.isCustomised,
@@ -929,24 +941,38 @@ internal class ConsentManager(
                         if (ccpaOnly) emptyMap() else toWrite.cookieOptions.associate { it.gtmKey to it.isEnabled },
                 )
 
-            consentService.saveUniversalConsent(
-                config = config,
-                identifier = identifier,
-                preferences = universalPrefs,
-                apiKey = resolvedApiKey,
+            val written =
+                try {
+                    consentService.saveUniversalConsent(
+                        config = config,
+                        identifier = identifier,
+                        preferences = universalPrefs,
+                        apiKey = resolvedApiKey,
                 // The user's explicit DNSMPI choice from setCcpaOptout, RAW. NEVER derived from the
                 // tracking signal or any category: the ad-tracking signal is a narrower
                 // ad-personalization signal, and treating one as the other would write a legal
                 // opt-out the user never made. The service gates it on `syncOptout`. A setter call
                 // made while this call was suspended is the newest choice, so it is sent instead.
-                ccpaOptout = carriedCcpa,
-                getSignature = getSignature,
-                // When the user made the choice being written (TRUST-3224), never the request time
-                // when known: a stale write must not out-rank a newer choice made elsewhere.
-                decisionTs = writeDecisionTs,
-            )
+                        ccpaOptout = carriedCcpa,
+                        getSignature = getSignature,
+                        // When the user made the choice being written (TRUST-3224), never the request
+                        // time when known: a stale write must not out-rank a newer choice made elsewhere.
+                        decisionTs = writeDecisionTs,
+                    )
+                    true
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // A failed pending-CCPA flush does not fail the sync: the read and adopt
+                    // succeeded, so the identity binds and the session is set as usual, and the flag
+                    // stays pending for the next re-sync. Any other failed write fails the call.
+                    if (!ccpaOnly) throw e
+                    ConsentLogger.w("Pending CCPA choice not written; it stays pending: ${e.javaClass.simpleName}")
+                    false
+                }
+            if (written) writtenCcpa = carriedCcpa
             // The record now holds the flag (when the gate is on), so nothing is pending.
-            if (config.universalConsent?.syncOptout == true) resolveCcpaWritePending(carriedCcpa)
+            if (written && config.universalConsent?.syncOptout == true) resolveCcpaWritePending(carriedCcpa)
             // A re-sync that wrote a local change through stores that change's signal-reconciled view,
             // as an adopt stores the record's, now that the record holds it (a failed write leaves
             // the raw choice in place to be written again). Not over a save made since, nor after a
