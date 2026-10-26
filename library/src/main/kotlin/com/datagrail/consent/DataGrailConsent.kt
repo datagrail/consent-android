@@ -79,11 +79,24 @@ class DataGrailConsent private constructor() {
     // generation reset() just took before reset() has recorded it.
     private var resetGeneration = 0
 
-    // Whether that reset() found a committed manager to wipe through. Every manager uses the same
-    // storage file, so when it did, a superseded init must not wipe again: that late second wipe
-    // would erase whatever the host stored after its reset(). Guarded by generationLock.
-    private var resetWipedStorage = false
+    // A wipe a reset() owes the storage file: set when reset() found no committed manager to wipe
+    // through (an init was still building its storage). The next init to commit, or the superseded
+    // init that reset() overtook, pays it before anything else uses the file. Every manager uses the
+    // same file, so a reset() that did wipe owes nothing, and nothing wipes again later (a late
+    // second wipe would erase what the host stored after its reset()). Guarded by generationLock,
+    // as are the commit and reset()'s read of the committed manager.
+    private var pendingWipe = false
+
+    // Inits still building their storage (not yet committed or given up). A reset() owes a wipe only
+    // while one is, and a debt nobody is left to pay is dropped. Guarded by generationLock.
+    private var uncommittedInits = 0
     private val generationLock = Any()
+
+    /** One init stopped being uncommitted; a wipe debt with no init left to pay it is dropped. */
+    private fun leaveUncommitted() {
+        uncommittedInits -= 1
+        if (uncommittedInits == 0) pendingWipe = false
+    }
 
     // Builds an init's storage + services off the main thread. A seam so tests can hold an init in
     // flight; production always uses the default.
@@ -315,6 +328,7 @@ class DataGrailConsent private constructor() {
         // commit its manager/configUrl (see the generation check after storage setup below), nor
         // report a config fetch failure.
         val generation = initGeneration.incrementAndGet()
+        synchronized(generationLock) { uncommittedInits += 1 }
         val reportConfigError = onConfigError?.let { configErrorReporter(generation, it) }
 
         // Build storage + services and load configuration off the calling thread.
@@ -332,8 +346,10 @@ class DataGrailConsent private constructor() {
                 } catch (e: CancellationException) {
                     // Never swallow cancellation — let it propagate so the coroutine unwinds
                     // normally rather than being reported as a storage-init failure.
+                    synchronized(generationLock) { leaveUncommitted() }
                     throw e
                 } catch (e: Exception) {
+                    synchronized(generationLock) { leaveUncommitted() }
                     // Storage initialization failed (e.g. encrypted storage could not be set up
                     // even after keyset recovery). Report through the callback rather than
                     // throwing synchronously, consistent with the async contract. configUrl is
@@ -357,22 +373,29 @@ class DataGrailConsent private constructor() {
 
             // A newer initialize() or a reset() superseded this call. Still fire this caller's
             // callback so it isn't left hanging.
-            fun finishSuperseded() {
-                val (resetSupersededIt, resetWiped) =
-                    synchronized(generationLock) { (initGeneration.get() == resetGeneration) to resetWipedStorage }
-                if (resetSupersededIt) {
-                    // reset() ran over this init and no newer init followed: the SDK is not
-                    // initialized, so it must not stay committed either (every API would otherwise
-                    // keep working against a manager with no config).
-                    if (this@DataGrailConsent.manager === manager) {
-                        this@DataGrailConsent.manager = null
-                        this@DataGrailConsent.configUrl = null
-                        this@DataGrailConsent.appContext = null
+            fun finishSuperseded(uncommitted: Boolean) {
+                val (resetSupersededIt, owesWipe) =
+                    synchronized(generationLock) {
+                        val resetWon = initGeneration.get() == resetGeneration
+                        if (resetWon) {
+                            // reset() ran over this init and no newer init followed: the SDK is not
+                            // initialized, so it must not stay committed either (every API would
+                            // otherwise keep working against a manager with no config).
+                            if (this@DataGrailConsent.manager === manager) {
+                                this@DataGrailConsent.manager = null
+                                this@DataGrailConsent.configUrl = null
+                                this@DataGrailConsent.appContext = null
+                            }
+                        }
+                        // Pay a wipe reset() owes, whether or not a newer init followed: the file is
+                        // shared, and this init's manager is the one in hand.
+                        (resetWon to pendingWipe).also {
+                            pendingWipe = false
+                            if (uncommitted) leaveUncommitted()
+                        }
                     }
-                    // Wipe only when reset() had no manager to wipe through (it ran before any
-                    // init committed). Otherwise the file is already wiped, and the config this
-                    // init fetched was neither cached nor made current after it.
-                    if (!resetWiped) manager.reset()
+                if (owesWipe) manager.reset()
+                if (resetSupersededIt) {
                     callback(Result.failure(ConsentException.NotInitialized()))
                 } else {
                     // A newer initialize() will commit and report its own result.
@@ -380,19 +403,35 @@ class DataGrailConsent private constructor() {
                 }
             }
 
+            // Commit shared state only after successful storage setup and once we've confirmed
+            // this is still the current init — so a failed init never leaves a stale configUrl. The
+            // check and the commit are one critical section with reset(), which reads the committed
+            // manager under the same lock, so it either sees this commit (and wipes through it) or
+            // supersedes this init before it (and this init does not commit).
+            val (committed, owesWipe) =
+                synchronized(generationLock) {
+                    if (!isCurrent()) {
+                        false to false
+                    } else {
+                        this@DataGrailConsent.manager = manager
+                        this@DataGrailConsent.configUrl = configUrl
+                        // applicationContext, not the caller's context: an Activity held here would
+                        // leak for the process lifetime, and the ad-id lookup only needs an
+                        // application context.
+                        this@DataGrailConsent.appContext = context.applicationContext
+                        (true to pendingWipe).also {
+                            pendingWipe = false
+                            leaveUncommitted()
+                        }
+                    }
+                }
             // If superseded during storage setup, don't commit our state.
-            if (!isCurrent()) {
-                finishSuperseded()
+            if (!committed) {
+                finishSuperseded(uncommitted = true)
                 return@launch
             }
-
-            // Commit shared state only after successful storage setup and once we've confirmed
-            // this is still the current init — so a failed init never leaves a stale configUrl.
-            this@DataGrailConsent.manager = manager
-            this@DataGrailConsent.configUrl = configUrl
-            // applicationContext, not the caller's context: an Activity held here would leak for
-            // the process lifetime, and the ad-id lookup only needs an application context.
-            this@DataGrailConsent.appContext = context.applicationContext
+            // A reset() that ran while this init built its storage had nothing to wipe through.
+            if (owesWipe) manager.reset()
 
             // Load configuration
             manager.loadConfig(
@@ -406,7 +445,7 @@ class DataGrailConsent private constructor() {
                 when {
                     // Superseded while the config loaded, including by a reset() from this init's
                     // own onConfigError: no success, no pending-request retry (TRUST-3254).
-                    !isCurrent() -> finishSuperseded()
+                    !isCurrent() -> finishSuperseded(uncommitted = false)
                     result.isSuccess -> {
                         // Retry any pending requests on initialization
                         scope.launch {
@@ -625,11 +664,11 @@ class DataGrailConsent private constructor() {
     fun reset() {
         // Supersede an init still in flight: it neither commits nor reports a config fetch failure
         // to its onConfigError (TRUST-3254), and its callback fails with NotInitialized.
-        val current = manager
-        synchronized(generationLock) {
-            resetGeneration = initGeneration.incrementAndGet()
-            resetWipedStorage = current != null
-        }
+        val current =
+            synchronized(generationLock) {
+                resetGeneration = initGeneration.incrementAndGet()
+                manager.also { if (it == null && uncommittedInits > 0) pendingWipe = true }
+            }
         current?.reset()
     }
 

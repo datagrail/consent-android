@@ -105,6 +105,9 @@ internal class ConfigService(
      * Fetch configuration with retry logic
      * @param url The configuration URL
      * @param isCurrent See [fetchConfig]
+     * @param keepsRetrying False once retrying is pointless: the caller will never use the result
+     *   (a reset() superseded the init). Narrower than [isCurrent], whose result a newer
+     *   initialize() still reports
      * @return The parsed configuration
      * @throws ConsentException if all retries fail
      */
@@ -112,11 +115,12 @@ internal class ConfigService(
         url: String,
         isCurrent: () -> Boolean = { true },
         onRefreshError: ((ConsentException) -> Unit)? = null,
+        keepsRetrying: () -> Boolean = isCurrent,
     ): ConsentConfig {
         // A definite 4xx or ConfigNotPublished gives up at once; 408, 429, 5xx and transport failures retry.
         // An attempt that falls back to the cache returns, so a masked failure is reported once.
-        // A superseded load stops retrying: its result is never used.
-        return networkClient.retryWithBackoff(shouldRetry = { isCurrent() && ConsentException.isRetryable(it) }) {
+        // A load a reset() superseded stops retrying: its result is never used.
+        return networkClient.retryWithBackoff(shouldRetry = { keepsRetrying() && ConsentException.isRetryable(it) }) {
             fetchConfig(url, isCurrent, onRefreshError)
         }
     }

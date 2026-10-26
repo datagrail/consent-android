@@ -97,7 +97,7 @@ internal class ConsentManager(
         callback: (Result<ConsentConfig>) -> Unit,
     ) {
         try {
-            val config = configService.fetchConfigWithRetry(configUrl, isCurrent, onConfigError)
+            val config = configService.fetchConfigWithRetry(configUrl, isCurrent, onConfigError, keepsRetrying = keepsConfig)
             // A load that a reset() (or a newer initialize()) superseded mid-fetch does not restore
             // the config the reset cleared (TRUST-3254); the caller decides its result.
             if (keepsConfig()) currentConfig = config

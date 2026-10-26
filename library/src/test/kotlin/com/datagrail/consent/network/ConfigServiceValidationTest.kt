@@ -353,7 +353,10 @@ class ConfigServiceValidationTest {
             whenever(mockStorage.loadConfigCache()).thenReturn(cachedConfig)
             val reported = mutableListOf<ConsentException>()
 
-            val result = ConfigService(client, mockStorage).fetchConfigWithRetry("https://example.com/config.json") { reported += it }
+            val result = ConfigService(client, mockStorage).fetchConfigWithRetry(
+                    "https://example.com/config.json",
+                    onRefreshError = { reported += it },
+                )
 
             assertEquals("cached-v1", result.version)
             assertEquals(1, reported.size)

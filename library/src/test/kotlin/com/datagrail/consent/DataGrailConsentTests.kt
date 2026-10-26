@@ -125,6 +125,47 @@ class DataGrailConsentTests {
         }
     }
 
+    @Test
+    fun `a reset during storage setup that a newer initialize follows still wipes once`() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        val building = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val olderDone = java.util.concurrent.CountDownLatch(1)
+        val older = mock<ConsentManager>()
+        val newer = mock<ConsentManager>()
+        val builds = java.util.concurrent.atomic.AtomicInteger(0)
+        val defaultFactory = sut.managerFactory
+        sut.managerFactory = { _, _ ->
+            if (builds.incrementAndGet() == 1) {
+                building.countDown()
+                release.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                older
+            } else {
+                newer
+            }
+        }
+        try {
+            sut.initialize(mockContext, "https://consent.datagrail.io/config.json") { olderDone.countDown() }
+            assertTrue(building.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            // Nothing is committed yet, so this reset() has no manager to wipe through.
+            sut.reset()
+            // Logout then re-init: the newer init commits first and pays the wipe the reset owed.
+            sut.initialize(mockContext, "https://consent.datagrail.io/config.json") { }
+            org.mockito.kotlin.verify(newer, org.mockito.kotlin.timeout(5_000)).reset()
+
+            release.countDown()
+            assertTrue(olderDone.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            // Paid once: the overtaken init does not wipe again over what the host stored since.
+            verify(older, never()).reset()
+        } finally {
+            release.countDown()
+            sut.managerFactory = defaultFactory
+            for (field in listOf("manager", "configUrl", "appContext")) {
+                DataGrailConsent::class.java.getDeclaredField(field).apply { isAccessible = true }.set(sut, null)
+            }
+        }
+    }
+
     /**
      * Runs one initialize() whose manager is real but whose config fetch is [fetch]: it receives the
      * fetch's isCurrent token and onConfigError reporter. Returns the init's result and its storage.
@@ -140,7 +181,7 @@ class DataGrailConsentTests {
         val storage = mock<ConsentStorage>()
         val configService = mock<ConfigService>()
         runBlocking {
-            whenever(configService.fetchConfigWithRetry(any(), any(), anyOrNull())).doSuspendableAnswer {
+            whenever(configService.fetchConfigWithRetry(any(), any(), anyOrNull(), any())).doSuspendableAnswer {
                 fetch(it.getArgument(1), it.getArgument(2))
                 universalConsentTestConfig(syncOptout = false)
             }
