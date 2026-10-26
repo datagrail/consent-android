@@ -5,6 +5,9 @@ import com.datagrail.consent.models.ConsentException
 import com.datagrail.consent.models.TrackingSignal
 import com.datagrail.consent.models.UniversalConsentSignature
 import com.datagrail.consent.models.UniversalConsentSigningPayload
+import com.datagrail.consent.network.ConfigService
+import com.datagrail.consent.network.ConsentService
+import com.datagrail.consent.storage.ConsentStorage
 import com.datagrail.consent.utils.ConsentLogger
 import com.datagrail.consent.utils.LogLevel
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +24,16 @@ import org.junit.Before
 import org.junit.Test
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
+import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.atLeast
+import org.mockito.kotlin.doSuspendableAnswer
+import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
+import org.mockito.kotlin.times
+import org.mockito.kotlin.verify
+import org.mockito.kotlin.verifyNoMoreInteractions
+import org.mockito.kotlin.whenever
 
 /**
  * Tests for DataGrailConsent public API including URL validation and category detection
@@ -44,6 +57,285 @@ class DataGrailConsentTests {
     fun tearDown() {
         sut.reset()
         Dispatchers.resetMain()
+    }
+
+    // MARK: - onConfigError (TRUST-3254)
+
+    @Test
+    fun `a config fetch failure reaches the init's onConfigError handler`() {
+        val received = mutableListOf<ConsentException>()
+        val error = ConsentException.ConfigNotPublished(statusCode = 404)
+        val (result, _) = initializeWithFetch(onConfigError = { received += it }) { _, report -> report?.invoke(error) }
+        assertTrue(result.isSuccess)
+        assertEquals(listOf<ConsentException>(error), received)
+    }
+
+    @Test
+    fun `onConfigError stops for a fetch that a newer initialize superseded`() {
+        val received = mutableListOf<ConsentException>()
+        val newerDone = java.util.concurrent.CountDownLatch(1)
+        initializeWithFetch(onConfigError = { received += it }) { _, report ->
+            // From another thread: an unconfined launch nested in this one would only start once
+            // this fetch returns. Its storage setup fails, so it only bumps the generation.
+            sut.managerFactory = { _, _ -> throw IllegalStateException("keystore unavailable") }
+            Thread { sut.initialize(mockContext, "https://consent.datagrail.io/config.json") { newerDone.countDown() } }
+                .start()
+            assertTrue(newerDone.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            report?.invoke(ConsentException.NetworkError("offline"))
+        }
+        assertTrue(received.isEmpty())
+    }
+
+    @Test
+    fun `reset during an in-flight initialize stops its commit and fails its callback`() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        val building = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val done = java.util.concurrent.CountDownLatch(1)
+        val built = mock<ConsentManager>()
+        val defaultFactory = sut.managerFactory
+        sut.managerFactory = { _, _ ->
+            building.countDown()
+            release.await(5, java.util.concurrent.TimeUnit.SECONDS)
+            built
+        }
+        try {
+            val configErrors = mutableListOf<ConsentException>()
+            var result: Result<Unit>? = null
+            sut.initialize(mockContext, "https://consent.datagrail.io/config.json", { configErrors += it }) {
+                result = it
+                done.countDown()
+            }
+            assertTrue(building.await(5, java.util.concurrent.TimeUnit.SECONDS))
+
+            sut.reset()
+            release.countDown()
+
+            assertTrue(done.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            assertTrue(result!!.exceptionOrNull() is ConsentException.NotInitialized)
+            assertNull(sut.getConfig())
+            // The wipe reached the uncommitted init's storage, and it never loaded a config, so
+            // nothing could report to onConfigError.
+            verify(built).reset()
+            verifyNoMoreInteractions(built)
+            assertTrue(configErrors.isEmpty())
+        } finally {
+            release.countDown()
+            sut.managerFactory = defaultFactory
+        }
+    }
+
+    @Test
+    fun `a reset during storage setup that a newer initialize follows still wipes once`() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        val building = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val olderDone = java.util.concurrent.CountDownLatch(1)
+        val older = mock<ConsentManager>()
+        val newer = mock<ConsentManager>()
+        val builds = java.util.concurrent.atomic.AtomicInteger(0)
+        val defaultFactory = sut.managerFactory
+        sut.managerFactory = { _, _ ->
+            if (builds.incrementAndGet() == 1) {
+                building.countDown()
+                release.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                older
+            } else {
+                newer
+            }
+        }
+        try {
+            sut.initialize(mockContext, "https://consent.datagrail.io/config.json") { olderDone.countDown() }
+            assertTrue(building.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            // Nothing is committed yet, so this reset() has no manager to wipe through.
+            sut.reset()
+            // Logout then re-init: the newer init commits first and pays the wipe the reset owed.
+            sut.initialize(mockContext, "https://consent.datagrail.io/config.json") { }
+            org.mockito.kotlin.verify(newer, org.mockito.kotlin.timeout(5_000)).reset()
+
+            release.countDown()
+            assertTrue(olderDone.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            // Paid once: the overtaken init does not wipe again over what the host stored since.
+            verify(older, never()).reset()
+        } finally {
+            release.countDown()
+            sut.managerFactory = defaultFactory
+            for (field in listOf("manager", "configUrl", "appContext")) {
+                DataGrailConsent::class.java.getDeclaredField(field).apply { isAccessible = true }.set(sut, null)
+            }
+        }
+    }
+
+    /**
+     * Runs one initialize() whose manager is real but whose config fetch is [fetch]: it receives the
+     * fetch's isCurrent token and onConfigError reporter. Returns the init's result and its storage.
+     */
+    private fun initializeWithFetch(
+        onConfigError: (ConsentException) -> Unit = {},
+        // Runs after the init finished, before its committed state is cleared from the singleton.
+        afterInit: () -> Unit = {},
+        // When set, the init goes through the Java overload with this listener instead.
+        javaListener: ConfigErrorListener? = null,
+        fetch: suspend (isCurrent: () -> Boolean, reportError: ((ConsentException) -> Unit)?) -> Unit,
+    ): Pair<Result<Unit>, ConsentStorage> {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        val done = java.util.concurrent.CountDownLatch(1)
+        val storage = mock<ConsentStorage>()
+        val configService = mock<ConfigService>()
+        runBlocking {
+            whenever(configService.fetchConfigWithRetry(any(), any(), anyOrNull(), any())).doSuspendableAnswer {
+                fetch(it.getArgument(1), it.getArgument(2))
+                universalConsentTestConfig(syncOptout = false)
+            }
+        }
+        val defaultFactory = sut.managerFactory
+        sut.managerFactory = { _, _ -> ConsentManager(storage, configService, mock<ConsentService>()) }
+        try {
+            var result: Result<Unit>? = null
+            if (javaListener != null) {
+                sut.initialize(
+                    mockContext,
+                    "https://consent.datagrail.io/config.json",
+                    javaListener,
+                    object : ConsentCallback {
+                        override fun onSuccess() {
+                            result = Result.success(Unit)
+                            done.countDown()
+                        }
+
+                        override fun onFailure(error: ConsentException) {
+                            result = Result.failure(error)
+                            done.countDown()
+                        }
+                    },
+                )
+            } else {
+                sut.initialize(mockContext, "https://consent.datagrail.io/config.json", onConfigError) {
+                    result = it
+                    done.countDown()
+                }
+            }
+            assertTrue(done.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            afterInit()
+            return result!! to storage
+        } finally {
+            sut.managerFactory = defaultFactory
+            // This init committed its manager to the shared singleton, and reset() keeps it; later
+            // tests expect an uninitialized SDK.
+            for (field in listOf("manager", "configUrl", "appContext")) {
+                DataGrailConsent::class.java.getDeclaredField(field).apply { isAccessible = true }.set(sut, null)
+            }
+        }
+    }
+
+    @Test
+    fun `reset while the config loads fails the init and restores no config`() {
+        val loading = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        var currentWhenFetched: Boolean? = null
+        val resetter =
+            Thread {
+                assertTrue(loading.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                sut.reset()
+                release.countDown()
+            }.apply { start() }
+
+        val (result, storage) =
+            initializeWithFetch { isCurrent, _ ->
+                loading.countDown()
+                release.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                currentWhenFetched = isCurrent()
+            }
+        resetter.join(5_000)
+
+        assertTrue(result.exceptionOrNull() is ConsentException.NotInitialized)
+        // The fetch saw the reset, so ConfigService skips caching what it fetched.
+        assertEquals(false, currentWhenFetched)
+        assertNull(sut.getConfig())
+        // Only the reset's own wipe: the superseded init cached and kept nothing after it, and a
+        // second wipe would erase what the host stored after its reset().
+        verify(storage, times(1)).clearAll()
+        // Not left committed: the SDK reads as uninitialized, as the callback said.
+        assertThrows(ConsentException.NotInitialized::class.java) { sut.shouldDisplayBanner() }
+        verify(storage, never()).loadPendingEvents()
+    }
+
+    @Test
+    fun `an init a newer initialize superseded keeps its config when that init fails`() {
+        val newerDone = java.util.concurrent.CountDownLatch(1)
+        var newerResult: Result<Unit>? = null
+        var configAfterInit: Any? = null
+        val (result, _) =
+            initializeWithFetch(afterInit = { configAfterInit = sut.getConfig() }) { _, _ ->
+                // While this init's config loads, a newer initialize() supersedes it and then fails
+                // to build its storage, so it never commits a manager of its own.
+                sut.managerFactory = { _, _ -> throw IllegalStateException("keystore unavailable") }
+                // From another thread: an unconfined launch nested in this one would only start
+                // once this fetch returns.
+                Thread {
+                    sut.initialize(mockContext, "https://consent.datagrail.io/config.json") {
+                        newerResult = it
+                        newerDone.countDown()
+                    }
+                }.start()
+                assertTrue(newerDone.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            }
+
+        assertTrue(newerResult!!.isFailure)
+        // The superseded init reports success, so the manager it committed must hold its config.
+        assertTrue(result.isSuccess)
+        assertNotNull(configAfterInit)
+    }
+
+    @Test
+    fun `an init a newer initialize superseded reports its own load failure`() {
+        val newerDone = java.util.concurrent.CountDownLatch(1)
+        val (result, _) =
+            initializeWithFetch { _, _ ->
+                sut.managerFactory = { _, _ -> throw IllegalStateException("keystore unavailable") }
+                Thread { sut.initialize(mockContext, "https://consent.datagrail.io/config.json") { newerDone.countDown() } }
+                    .start()
+                assertTrue(newerDone.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                throw ConsentException.NetworkError("offline")
+            }
+
+        // Not the success the newer init would report for itself: that one never committed.
+        assertTrue(result.exceptionOrNull() is ConsentException.NetworkError)
+    }
+
+    @Test
+    fun `reset from the init's own onConfigError fails the init and restores no cached config`() {
+        val reported = mutableListOf<ConsentException>()
+        val (result, _) =
+            initializeWithFetch(onConfigError = {
+                reported += it
+                sut.reset()
+            }) { _, reportError ->
+                // The fetch failed and the cache masked it: report, then return the cached config.
+                reportError?.invoke(ConsentException.NetworkError("offline"))
+            }
+
+        assertEquals(1, reported.size)
+        assertTrue(result.exceptionOrNull() is ConsentException.NotInitialized)
+        assertNull(sut.getConfig())
+    }
+
+    @Test
+    fun `the Java initialize overload delivers a cache-masked failure to its ConfigErrorListener`() {
+        val received = mutableListOf<ConsentException>()
+        val error = ConsentException.NetworkError("offline")
+        val (result, _) =
+            initializeWithFetch(
+                javaListener =
+                    object : ConfigErrorListener {
+                        override fun onConfigError(error: ConsentException) {
+                            received += error
+                        }
+                    },
+            ) { _, report -> report?.invoke(error) }
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf<ConsentException>(error), received)
     }
 
     // MARK: - URL Validation Tests
