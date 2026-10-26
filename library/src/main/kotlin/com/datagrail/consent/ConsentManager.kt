@@ -1111,10 +1111,11 @@ internal class ConsentManager(
 
     /**
      * Whether a local choice made at [localDecisionTs] is strictly newer than [record]'s latest
-     * decision. `updated_at` is the latest decision_ts across ALL the record's categories (the GET
-     * exposes no per-category times, TRUST-3226), so this is conservative: it never lets a stale copy
-     * win, but it can drop a newer local change in one category when another category of the record
-     * is newer still. An unknown local time, a record without a usable `updated_at`, and a same-second
+     * decision. `updated_at` is the latest decision_ts across ALL the record's registers, categories
+     * and record-level fields such as ccpa_optout alike (the GET exposes no per-category times,
+     * TRUST-3226), so this is conservative: it never lets a stale copy win, but it can drop a newer
+     * local change in one category when anything else on the record is newer still (a CCPA-only
+     * write from another device included). An unknown local time, a record without a usable `updated_at`, and a same-second
      * tie are all "not newer": the revocation-safe default is to adopt.
      */
     private fun isNewerThanRecord(
