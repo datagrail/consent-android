@@ -309,6 +309,32 @@ class UniversalConsentTest {
         }
 
     @Test
+    fun `with the gate on, a false ccpa_optout is still sent on both bodies`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+            val config =
+                ConsentServiceSecurityTest.createTestConfig().copy(
+                    consentProjectId = "proj_abc123",
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = true),
+                )
+            for (ccpaOnly in listOf(false, true)) {
+                service.saveUniversalConsent(
+                    config = config,
+                    identifier = "user-7f3c2a91",
+                    preferences = UniversalConsentPreferences(isCustomised = true),
+                    apiKey = "dg_live_key",
+                    ccpaOptout = false,
+                    getSignature = null,
+                    ccpaOnly = ccpaOnly,
+                )
+            }
+            val bodyCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient, times(2)).request(any(), any(), bodyCaptor.capture(), anyOrNull())
+            // TRUST-3381 omits the field only with the gate off; an explicit opt-in still clears it.
+            bodyCaptor.allValues.forEach { assertTrue(it, it.contains("\"ccpa_optout\":false")) }
+        }
+
+    @Test
     fun `saveUniversalConsent attaches signature headers and hits CloudFront path`() =
         runTest {
             whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
