@@ -26,8 +26,10 @@ internal class ConfigService(
      * config is returned instead and the failure goes to [onRefreshError] (TRUST-3254); without a
      * cache it is thrown.
      * @param url The configuration URL
-     * @param isCurrent False once the init this fetch serves is superseded; a fetched config is then
-     *   returned but not cached
+     * @param isCurrent False once the fetched config must not be cached: [fetchConfigWithRetry]
+     *   passes "no reset() superseded the init" (a newer initialize() alone does not withhold it). The
+     *   cache is one key for all config URLs, so a slow init for an older URL can still overwrite a
+     *   newer init's cache
      * @param onRefreshError Receives a failure the cached config masked: exactly the exception this
      *   call would have thrown without a cache ([ConsentException.ConfigNotPublished] for a definite
      *   4xx, [ConsentException.NetworkError] for transport/timeout/5xx, [ConsentException.ParseError]
@@ -55,8 +57,8 @@ internal class ConfigService(
                 return cachedOrThrow(e, onRefreshError)
             }
 
-            // Cache the configuration, unless a reset() or a newer initialize() superseded this fetch
-            // while it was in flight: a superseded fetch must not repopulate the wiped cache (TRUST-3254).
+            // Cache the configuration, unless a reset() superseded this fetch while it was in flight: it
+            // must not repopulate the wiped cache (TRUST-3254).
             if (isCurrent()) storage.saveConfigCache(config)
 
             config
@@ -104,26 +106,25 @@ internal class ConfigService(
     /**
      * Fetch configuration with retry logic
      * @param url The configuration URL
-     * @param isCurrent The default for [keepsRetrying]
-     * @param keepsRetrying False once retrying is pointless: the caller will never use the result
-     *   (a reset() superseded the init). Also the cache gate passed to [fetchConfig]: an init a newer
-     *   initialize() overtook still reports and keeps its config, so it caches it too
+     * @param onRefreshError See [fetchConfig]
+     * @param notReset False once a reset() superseded the init: retrying stops and the fetched config
+     *   is not cached. An init a newer initialize() overtook still reports and keeps its config, so
+     *   it keeps retrying and caches it too
      * @return The parsed configuration
      * @throws ConsentException if all retries fail
      */
     suspend fun fetchConfigWithRetry(
         url: String,
-        isCurrent: () -> Boolean = { true },
         onRefreshError: ((ConsentException) -> Unit)? = null,
-        keepsRetrying: () -> Boolean = isCurrent,
+        notReset: () -> Boolean = { true },
     ): ConsentConfig {
         // A definite 4xx or ConfigNotPublished gives up at once; 408, 429, 5xx and transport failures retry.
         // An attempt that falls back to the cache returns, so a masked failure is reported once.
         // A load a reset() superseded stops retrying: its result is never used.
         // The cache follows the same reset-only rule: a config an init a newer initialize() overtook
         // fetched is still the freshest one, so it is cached; only a reset() withholds it.
-        return networkClient.retryWithBackoff(shouldRetry = { keepsRetrying() && ConsentException.isRetryable(it) }) {
-            fetchConfig(url, keepsRetrying, onRefreshError)
+        return networkClient.retryWithBackoff(shouldRetry = { notReset() && ConsentException.isRetryable(it) }) {
+            fetchConfig(url, notReset, onRefreshError)
         }
     }
 }
