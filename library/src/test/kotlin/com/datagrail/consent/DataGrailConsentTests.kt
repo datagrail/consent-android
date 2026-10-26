@@ -174,6 +174,8 @@ class DataGrailConsentTests {
         onConfigError: (ConsentException) -> Unit = {},
         // Runs after the init finished, before its committed state is cleared from the singleton.
         afterInit: () -> Unit = {},
+        // When set, the init goes through the Java overload with this listener instead.
+        javaListener: ConfigErrorListener? = null,
         fetch: suspend (isCurrent: () -> Boolean, reportError: ((ConsentException) -> Unit)?) -> Unit,
     ): Pair<Result<Unit>, ConsentStorage> {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -190,9 +192,28 @@ class DataGrailConsentTests {
         sut.managerFactory = { _, _ -> ConsentManager(storage, configService, mock<ConsentService>()) }
         try {
             var result: Result<Unit>? = null
-            sut.initialize(mockContext, "https://consent.datagrail.io/config.json", onConfigError) {
-                result = it
-                done.countDown()
+            if (javaListener != null) {
+                sut.initialize(
+                    mockContext,
+                    "https://consent.datagrail.io/config.json",
+                    javaListener,
+                    object : ConsentCallback {
+                        override fun onSuccess() {
+                            result = Result.success(Unit)
+                            done.countDown()
+                        }
+
+                        override fun onFailure(error: ConsentException) {
+                            result = Result.failure(error)
+                            done.countDown()
+                        }
+                    },
+                )
+            } else {
+                sut.initialize(mockContext, "https://consent.datagrail.io/config.json", onConfigError) {
+                    result = it
+                    done.countDown()
+                }
             }
             assertTrue(done.await(5, java.util.concurrent.TimeUnit.SECONDS))
             afterInit()
@@ -267,6 +288,22 @@ class DataGrailConsentTests {
     }
 
     @Test
+    fun `an init a newer initialize superseded reports its own load failure`() {
+        val newerDone = java.util.concurrent.CountDownLatch(1)
+        val (result, _) =
+            initializeWithFetch { _, _ ->
+                sut.managerFactory = { _, _ -> throw IllegalStateException("keystore unavailable") }
+                Thread { sut.initialize(mockContext, "https://consent.datagrail.io/config.json") { newerDone.countDown() } }
+                    .start()
+                assertTrue(newerDone.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                throw ConsentException.NetworkError("offline")
+            }
+
+        // Not the success the newer init would report for itself: that one never committed.
+        assertTrue(result.exceptionOrNull() is ConsentException.NetworkError)
+    }
+
+    @Test
     fun `reset from the init's own onConfigError fails the init and restores no cached config`() {
         val reported = mutableListOf<ConsentException>()
         val (result, _) =
@@ -284,24 +321,21 @@ class DataGrailConsentTests {
     }
 
     @Test
-    fun `the Java initialize overload takes a ConfigErrorListener`() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-        val done = java.util.concurrent.CountDownLatch(1)
-        sut.initialize(
-            mockContext,
-            "ftp://consent.datagrail.io/config.json",
-            object : ConfigErrorListener {
-                override fun onConfigError(error: ConsentException) = Unit
-            },
-            object : ConsentCallback {
-                override fun onSuccess() = Unit
+    fun `the Java initialize overload delivers a cache-masked failure to its ConfigErrorListener`() {
+        val received = mutableListOf<ConsentException>()
+        val error = ConsentException.NetworkError("offline")
+        val (result, _) =
+            initializeWithFetch(
+                javaListener =
+                    object : ConfigErrorListener {
+                        override fun onConfigError(error: ConsentException) {
+                            received += error
+                        }
+                    },
+            ) { _, report -> report?.invoke(error) }
 
-                override fun onFailure(error: ConsentException) {
-                    done.countDown()
-                }
-            },
-        )
-        assertTrue(done.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        assertTrue(result.isSuccess)
+        assertEquals(listOf<ConsentException>(error), received)
     }
 
     // MARK: - URL Validation Tests

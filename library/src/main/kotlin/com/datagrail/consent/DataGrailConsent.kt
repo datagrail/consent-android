@@ -88,14 +88,15 @@ class DataGrailConsent private constructor() {
     private var pendingWipe = false
 
     // Inits still building their storage (not yet committed or given up). A reset() owes a wipe only
-    // while one is, and a debt nobody is left to pay is dropped. Guarded by generationLock.
+    // while one is. The debt stays until an init pays it: one that fails or is cancelled leaves it
+    // for the next init that commits, so a reset() during setup is never silently dropped.
+    // Guarded by generationLock.
     private var uncommittedInits = 0
     private val generationLock = Any()
 
-    /** One init stopped being uncommitted; a wipe debt with no init left to pay it is dropped. */
+    /** One init stopped being uncommitted. */
     private fun leaveUncommitted() {
         uncommittedInits -= 1
-        if (uncommittedInits == 0) pendingWipe = false
     }
 
     // Builds an init's storage + services off the main thread. A seam so tests can hold an init in
@@ -327,8 +328,13 @@ class DataGrailConsent private constructor() {
         // Token for this init call. Any earlier in-flight init is now superseded and must not
         // commit its manager/configUrl (see the generation check after storage setup below), nor
         // report a config fetch failure.
-        val generation = initGeneration.incrementAndGet()
-        synchronized(generationLock) { uncommittedInits += 1 }
+        // Taken in the same critical section as reset()'s, so a reset() can never supersede this init
+        // without also seeing it as uncommitted (and owing it a wipe).
+        val generation =
+            synchronized(generationLock) {
+                uncommittedInits += 1
+                initGeneration.incrementAndGet()
+            }
         val reportConfigError = onConfigError?.let { configErrorReporter(generation, it) }
 
         // Build storage + services and load configuration off the calling thread.
@@ -372,11 +378,16 @@ class DataGrailConsent private constructor() {
             val isCurrent = { initGeneration.get() == generation }
 
             // A newer initialize() or a reset() superseded this call. Still fire this caller's
-            // callback so it isn't left hanging.
-            fun finishSuperseded(uncommitted: Boolean) {
+            // callback so it isn't left hanging. [loadResult] is this init's config load, when it ran.
+            fun finishSuperseded(
+                uncommitted: Boolean,
+                loadResult: Result<*>? = null,
+            ) {
                 val (resetSupersededIt, owesWipe) =
                     synchronized(generationLock) {
-                        val resetWon = initGeneration.get() == resetGeneration
+                        // A reset() ran after this init started (whatever followed it), the same
+                        // predicate as keepsConfig below, so the two never disagree.
+                        val resetWon = resetGeneration > generation
                         if (resetWon) {
                             // reset() ran over this init and no newer init followed: the SDK is not
                             // initialized, so it must not stay committed either (every API would
@@ -395,11 +406,19 @@ class DataGrailConsent private constructor() {
                         }
                     }
                 if (owesWipe) manager.reset()
-                if (resetSupersededIt) {
-                    callback(Result.failure(ConsentException.NotInitialized()))
-                } else {
-                    // A newer initialize() will commit and report its own result.
-                    callback(Result.success(Unit))
+                val failure = loadResult?.exceptionOrNull()
+                when {
+                    resetSupersededIt -> callback(Result.failure(ConsentException.NotInitialized()))
+                    // Overtaken by a newer initialize(): report this init's own outcome. Its manager
+                    // may stay committed (if the newer one fails storage setup), so on success it
+                    // also resends the queued events, as a current init does.
+                    failure != null -> callback(Result.failure(failure))
+                    else -> {
+                        if (loadResult != null && this@DataGrailConsent.manager === manager) {
+                            scope.launch { manager.retryPendingRequests() }
+                        }
+                        callback(Result.success(Unit))
+                    }
                 }
             }
 
@@ -445,7 +464,7 @@ class DataGrailConsent private constructor() {
                 when {
                     // Superseded while the config loaded, including by a reset() from this init's
                     // own onConfigError: no success, no pending-request retry (TRUST-3254).
-                    !isCurrent() -> finishSuperseded(uncommitted = false)
+                    !isCurrent() -> finishSuperseded(uncommitted = false, loadResult = result)
                     result.isSuccess -> {
                         // Retry any pending requests on initialization
                         scope.launch {
