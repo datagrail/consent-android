@@ -262,7 +262,22 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
      * @param optedOut true when the user opted out of sale/sharing
      */
     fun saveCcpaOptout(optedOut: Boolean) {
-        prefs.edit().putBoolean(KEY_CCPA_OPTOUT, optedOut).apply()
+        // A value not chosen by the setter (an adopt, the neutral reset) has no known decision time,
+        // so any earlier setter time is removed with it rather than left paired with this value.
+        prefs.edit().putBoolean(KEY_CCPA_OPTOUT, optedOut).remove(KEY_CCPA_DECISION_TS).apply()
+    }
+
+    /**
+     * Persist the host app's CCPA choice and WHEN it was made (TRUST-2902), unix seconds, in one edit
+     * so the two never drift apart. A CCPA-only write sends the time as `decision_ts`, so a choice that
+     * waited for a session (pending) is ranked by when the user made it, not by when it was finally
+     * sent. Its own key: the category choice's time never stamps the CCPA flag.
+     */
+    fun saveCcpaChoice(
+        optedOut: Boolean,
+        decisionTs: Long,
+    ) {
+        prefs.edit().putBoolean(KEY_CCPA_OPTOUT, optedOut).putLong(KEY_CCPA_DECISION_TS, decisionTs).apply()
     }
 
     /**
@@ -271,25 +286,21 @@ internal class ConsentStorage(private val prefs: SharedPreferences) {
      */
     fun loadCcpaOptout(): Boolean = prefs.getBoolean(KEY_CCPA_OPTOUT, false)
 
-    /**
-     * Record when the host app's CCPA choice was made (TRUST-2902), unix seconds. A CCPA-only write
-     * sends it as `decision_ts`, so a choice that waited for a session (pending) is ranked by when the
-     * user made it, not by when it was finally sent. Its own key: the category choice's time never
-     * stamps the CCPA flag. [clearAll] removes it.
-     */
-    fun saveCcpaDecisionTs(decisionTs: Long) {
-        prefs.edit().putLong(KEY_CCPA_DECISION_TS, decisionTs).apply()
+    /** When the stored CCPA choice was made by the setter, or null when unknown (or unreadable). */
+    fun loadCcpaDecisionTs(): Long? {
+        if (!prefs.contains(KEY_CCPA_DECISION_TS)) return null
+        return try {
+            prefs.getLong(KEY_CCPA_DECISION_TS, 0L)
+        } catch (e: ClassCastException) {
+            null
+        }
     }
-
-    /** When the stored CCPA choice was made by the setter, or null when unknown. */
-    fun loadCcpaDecisionTs(): Long? =
-        if (prefs.contains(KEY_CCPA_DECISION_TS)) prefs.getLong(KEY_CCPA_DECISION_TS, 0L) else null
 
     /**
      * Remove the stored CCPA opt-out choice, so reads return false. Does not touch any other stored data.
      */
     fun clearCcpaOptout() {
-        prefs.edit().remove(KEY_CCPA_OPTOUT).apply()
+        prefs.edit().remove(KEY_CCPA_OPTOUT).remove(KEY_CCPA_DECISION_TS).apply()
     }
 
     /**

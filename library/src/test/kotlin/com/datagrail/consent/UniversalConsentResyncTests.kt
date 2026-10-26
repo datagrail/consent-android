@@ -72,6 +72,7 @@ class UniversalConsentResyncTests {
             storedDecisionTs = null
         }
         whenever(mockStorage.saveCcpaOptout(any())).doAnswer { storedCcpaOptout = it.getArgument(0) }
+        whenever(mockStorage.saveCcpaChoice(any(), any())).doAnswer { storedCcpaOptout = it.getArgument(0) }
         whenever(mockStorage.loadCcpaOptout()).doAnswer { storedCcpaOptout }
         whenever(mockStorage.clearCcpaOptout()).doAnswer { storedCcpaOptout = false }
         whenever(mockStorage.saveBoundUserHash(any())).doAnswer { storedBoundHash = it.getArgument(0) }

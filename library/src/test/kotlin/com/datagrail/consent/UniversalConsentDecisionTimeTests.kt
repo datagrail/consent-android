@@ -79,12 +79,18 @@ class UniversalConsentDecisionTimeTests {
         whenever(mockStorage.saveSyncState(any())).doAnswer { storedSyncState = it.getArgument(0) }
         whenever(mockStorage.loadSyncState()).doAnswer { storedSyncState }
         whenever(mockStorage.clearSyncState()).doAnswer { storedSyncState = null }
-        whenever(mockStorage.saveCcpaOptout(any())).doAnswer { storedCcpaOptout = it.getArgument(0) }
+        whenever(mockStorage.saveCcpaOptout(any())).doAnswer {
+            storedCcpaOptout = it.getArgument(0)
+            storedCcpaDecisionTs = null
+        }
+        whenever(mockStorage.saveCcpaChoice(any(), any())).doAnswer {
+            storedCcpaOptout = it.getArgument(0)
+            storedCcpaDecisionTs = it.getArgument(1)
+        }
         whenever(mockStorage.loadCcpaOptout()).doAnswer { storedCcpaOptout }
         whenever(mockStorage.clearCcpaOptout()).doAnswer { storedCcpaOptout = false }
         whenever(mockStorage.saveCcpaWritePending(any())).doAnswer { storedCcpaWritePending = it.getArgument(0) }
         whenever(mockStorage.loadCcpaWritePending()).doAnswer { storedCcpaWritePending }
-        whenever(mockStorage.saveCcpaDecisionTs(any())).doAnswer { storedCcpaDecisionTs = it.getArgument(0) }
         whenever(mockStorage.loadCcpaDecisionTs()).doAnswer { storedCcpaDecisionTs }
         sut = ConsentManager(mockStorage, mockConfigService, mockConsentService, nowSeconds = { now })
         sut.currentConfig = universalConsentTestConfig(syncOptout = true)
@@ -250,6 +256,34 @@ class UniversalConsentDecisionTimeTests {
 
             assertEquals(false, writtenPreferences().single().cookieOptions["category_marketing"])
             assertEquals(listOf<Long?>(changedAt), writtenDecisionTs())
+        }
+
+    @Test
+    fun `setCcpaOptout after a local change with no recorded time stays CCPA-only`() =
+        runTest {
+            bindAndSync(record(marketing = true, updatedAt = now - 100))
+            // A change stored before this version recorded decision times: stamped "now" it would
+            // out-rank a newer revocation made elsewhere (P0-06), so it does not ride along.
+            sut.savePreferences(choice(marketing = false)) {}
+            storedDecisionTs = null
+            now += 300
+
+            sut.setCcpaOptout(true)
+
+            assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
+            assertEquals(listOf<Long?>(now), writtenDecisionTs())
+        }
+
+    @Test
+    fun `two CCPA toggles in the same second get increasing decision times`() =
+        runTest {
+            bindAndSync(record(marketing = true, updatedAt = now - 100))
+
+            sut.setCcpaOptout(true)
+            sut.setCcpaOptout(false)
+
+            // A tie would keep the opt-out at the edge, so the opt-in must be stamped later.
+            assertEquals(listOf<Long?>(now, now + 1), writtenDecisionTs())
         }
 
     // MARK: - Recording the time
