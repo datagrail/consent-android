@@ -244,18 +244,18 @@ class UniversalConsentDecisionTimeTests {
         }
 
     @Test
-    fun `setCcpaOptout after a local change stamps the write with that change's time`() =
+    fun `setCcpaOptout after a local change is CCPA-only, dated when the CCPA choice was made`() =
         runTest {
             bindAndSync(record(marketing = true, updatedAt = now - 100))
             now += 10
-            val changedAt = now
             sut.savePreferences(choice(marketing = false)) {}
             now += 300
 
             sut.setCcpaOptout(true)
 
-            assertEquals(false, writtenPreferences().single().cookieOptions["category_marketing"])
-            assertEquals(listOf<Long?>(changedAt), writtenDecisionTs())
+            // TRUST-2591 decision (2026-10-26): the category change is not resent with it.
+            assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
+            assertEquals(listOf<Long?>(now), writtenDecisionTs())
         }
 
     @Test
@@ -380,20 +380,20 @@ class UniversalConsentDecisionTimeTests {
     private suspend fun writtenPreferences(): List<UniversalConsentPreferences> {
         val captor = argumentCaptor<UniversalConsentPreferences>()
         verify(mockConsentService, org.mockito.Mockito.atLeastOnce())
-            .saveUniversalConsent(any(), any(), captor.capture(), eq(apiKey), any(), anyOrNull(), anyOrNull())
+            .saveUniversalConsent(any(), any(), captor.capture(), eq(apiKey), any(), anyOrNull(), anyOrNull(), any())
         return captor.allValues
     }
 
     private suspend fun writtenDecisionTs(): List<Long?> {
         val captor = nullableArgumentCaptor<Long>()
         verify(mockConsentService, org.mockito.Mockito.atLeastOnce())
-            .saveUniversalConsent(any(), any(), any(), eq(apiKey), any(), anyOrNull(), captor.capture())
+            .saveUniversalConsent(any(), any(), any(), eq(apiKey), any(), anyOrNull(), captor.capture(), any())
         return captor.allValues
     }
 
     private suspend fun verifyNoWrite() {
         verify(mockConsentService, never())
-            .saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull())
+            .saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any())
     }
 
     private fun hashFor(identifier: String): String {

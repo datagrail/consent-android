@@ -69,6 +69,27 @@ internal class ConsentService(
         @SerialName("decision_ts") val decisionTs: Long,
     )
 
+    /**
+     * A CCPA-only write (TRUST-2591 decision, 2026-10-26; same body as consent-banner #756): the
+     * flag and its provenance only, with an empty `cookieOptions` map and no `isCustomised` or record
+     * metadata, so the edge advances the `ccpa_optout` register alone and no category or field
+     * another device set can change.
+     */
+    @Serializable
+    private data class UniversalCcpaOnlyRequest(
+        @SerialName("customer_id") val customerId: String,
+        @SerialName("user_hash") val userHash: String,
+        @SerialName("consent_preferences") val consentPreferences: CcpaOnlyPreferences = CcpaOnlyPreferences(),
+        @SerialName("ccpa_optout") val ccpaOptout: Boolean,
+        @SerialName("is_explicit") val isExplicit: Boolean,
+        @SerialName("decision_ts") val decisionTs: Long,
+    )
+
+    @Serializable
+    private data class CcpaOnlyPreferences(
+        @SerialName("cookieOptions") val cookieOptions: Map<String, Boolean> = emptyMap(),
+    )
+
     companion object {
         private const val MAX_PENDING_EVENTS = 100
         private const val PLATFORM = "android"
@@ -280,6 +301,7 @@ internal class ConsentService(
      *   Sent as the body's `decision_ts` and signed into provDigest. Null when unknown (a choice
      *   stored before the SDK recorded decision times, or a write that is not one choice): the
      *   request time stands in, exactly the edge's own default for a provenance-less write.
+     * @param ccpaOnly send a CCPA-only write ([UniversalCcpaOnlyRequest]): [preferences] is ignored
      * @throws ConsentException.NetworkError on failure (also queues nothing — universal writes
      *   are user-identity-scoped and not part of the anonymous pending-events retry queue).
      */
@@ -291,6 +313,7 @@ internal class ConsentService(
         ccpaOptout: Boolean,
         getSignature: SignatureProvider?,
         decisionTs: Long? = null,
+        ccpaOnly: Boolean = false,
     ) {
         val projectId = requireProjectId(config)
 
@@ -301,22 +324,36 @@ internal class ConsentService(
 
         val userHash = computeUserHash(config.dgCustomerId, projectId, identifier)
 
-        val requestBody =
-            UniversalSaveRequest(
-                customerId = config.dgCustomerId,
-                userHash = userHash,
-                consentPreferences = preferences,
-                consentMode = config.consentMode,
-                // The user's actual CCPA/US opt-out value, only synced when the
-                // universalConsent.syncOptout feature flag is enabled (otherwise false).
-                // syncOptout is a feature gate, NOT the opt-out value itself.
-                ccpaOptout = (config.universalConsent?.syncOptout == true) && ccpaOptout,
-                platform = PLATFORM,
-                policyName = config.consentPolicy.name,
-                configVersion = config.version,
-                isExplicit = true,
-                decisionTs = effectiveDecisionTs,
-            )
+        // The user's actual CCPA/US opt-out value, only synced when the universalConsent.syncOptout
+        // feature flag is enabled (otherwise false). syncOptout is a feature gate, NOT the value.
+        val wireCcpaOptout = (config.universalConsent?.syncOptout == true) && ccpaOptout
+        val requestJson =
+            if (ccpaOnly) {
+                json.encodeToString(
+                    UniversalCcpaOnlyRequest(
+                        customerId = config.dgCustomerId,
+                        userHash = userHash,
+                        ccpaOptout = wireCcpaOptout,
+                        isExplicit = true,
+                        decisionTs = effectiveDecisionTs,
+                    ),
+                )
+            } else {
+                json.encodeToString(
+                    UniversalSaveRequest(
+                        customerId = config.dgCustomerId,
+                        userHash = userHash,
+                        consentPreferences = preferences,
+                        consentMode = config.consentMode,
+                        ccpaOptout = wireCcpaOptout,
+                        platform = PLATFORM,
+                        policyName = config.consentPolicy.name,
+                        configVersion = config.version,
+                        isExplicit = true,
+                        decisionTs = effectiveDecisionTs,
+                    ),
+                )
+            }
 
         val headers =
             if (getSignature == null) {
@@ -380,7 +417,7 @@ internal class ConsentService(
             networkClient.request(
                 url = universalConsentUrl(),
                 method = HTTPMethod.POST,
-                body = json.encodeToString(requestBody),
+                body = requestJson,
                 headers = headers,
             )
         } catch (e: ConsentException) {

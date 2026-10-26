@@ -139,7 +139,7 @@ class UniversalConsentCcpaOptoutTests {
 
             sut.setCcpaOptout(true)
 
-            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull())
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any())
             assertTrue(sut.getCcpaOptout())
         }
 
@@ -165,7 +165,7 @@ class UniversalConsentCcpaOptoutTests {
 
             sut.setCcpaOptout(true)
 
-            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull())
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any())
         }
 
     @Test
@@ -195,7 +195,7 @@ class UniversalConsentCcpaOptoutTests {
 
             // Still only the login write — no stale CCPA write-through — and the logout left the flag
             // neutral.
-            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull())
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any())
             assertFalse(sut.getCcpaOptout())
         }
 
@@ -218,7 +218,7 @@ class UniversalConsentCcpaOptoutTests {
             // The stale coroutine neither re-persisted the opt-out nor wrote through: the logout's
             // neutral state stands.
             assertFalse(sut.getCcpaOptout())
-            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull())
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any())
         }
 
     @Test
@@ -361,7 +361,7 @@ class UniversalConsentCcpaOptoutTests {
             // stale one captured at bind time (TRUST-2603 review on #65).
             val keyCaptor = argumentCaptor<String>()
             verify(mockConsentService, times(2))
-                .saveUniversalConsent(any(), any(), any(), keyCaptor.capture(), any(), anyOrNull(), anyOrNull())
+                .saveUniversalConsent(any(), any(), any(), keyCaptor.capture(), any(), anyOrNull(), anyOrNull(), any())
             assertEquals("key_v1", keyCaptor.firstValue)
             assertEquals("key_v2", keyCaptor.secondValue)
         }
@@ -383,7 +383,7 @@ class UniversalConsentCcpaOptoutTests {
 
             val keyCaptor = argumentCaptor<String>()
             verify(mockConsentService, times(2))
-                .saveUniversalConsent(any(), any(), any(), keyCaptor.capture(), any(), anyOrNull(), anyOrNull())
+                .saveUniversalConsent(any(), any(), any(), keyCaptor.capture(), any(), anyOrNull(), anyOrNull(), any())
             assertEquals("explicit_key", keyCaptor.firstValue)
             assertEquals("explicit_key", keyCaptor.secondValue)
         }
@@ -551,7 +551,7 @@ class UniversalConsentCcpaOptoutTests {
             storedPreferences = choice(marketing = true)
             recordIs(null)
             sut.setUserIdentifier(userA, apiKey)
-            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull()))
+            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any()))
                 .doAnswer { throw ConsentException.NetworkError("offline") }
 
             try {
@@ -562,7 +562,7 @@ class UniversalConsentCcpaOptoutTests {
             }
             assertTrue(storedCcpaWritePending)
 
-            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull()))
+            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any()))
                 .thenReturn(Unit)
             sut.setCcpaOptout(true)
             assertFalse(storedCcpaWritePending)
@@ -622,7 +622,7 @@ class UniversalConsentCcpaOptoutTests {
             setter.join()
 
             // Only the login seed: the unchanged re-sync writes nothing, and the setter doesn't write through.
-            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull())
+            verify(mockConsentService, times(1)).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any())
         }
 
     @Test
@@ -732,7 +732,7 @@ class UniversalConsentCcpaOptoutTests {
         }
 
     @Test
-    fun `write-through after a user save sends the saved choice`() =
+    fun `write-through after a user save is CCPA-only and leaves the save to the re-sync`() =
         runTest {
             recordIs(record(ccpaOptout = false))
             sut.setUserIdentifier(userA, apiKey, trackingSignal = TrackingSignal.DENIED)
@@ -741,8 +741,9 @@ class UniversalConsentCcpaOptoutTests {
 
             sut.setCcpaOptout(true)
 
-            val written = writtenPreferences().single()
-            assertEquals(false, written.cookieOptions["category_marketing"])
+            // TRUST-2591 decision (2026-10-26): a CCPA change never resends the category map.
+            assertEquals(emptyMap<String, Boolean>(), writtenPreferences().single().cookieOptions)
+            assertEquals(listOf(true), writtenCcpa())
         }
 
     @Test
@@ -787,19 +788,19 @@ class UniversalConsentCcpaOptoutTests {
     private suspend fun writtenCcpa(): List<Boolean> {
         val captor = argumentCaptor<Boolean>()
         verify(mockConsentService, org.mockito.Mockito.atLeastOnce())
-            .saveUniversalConsent(any(), any(), any(), eq(apiKey), captor.capture(), anyOrNull(), anyOrNull())
+            .saveUniversalConsent(any(), any(), any(), eq(apiKey), captor.capture(), anyOrNull(), anyOrNull(), any())
         return captor.allValues
     }
 
     private suspend fun writtenPreferences(): List<UniversalConsentPreferences> {
         val captor = argumentCaptor<UniversalConsentPreferences>()
         verify(mockConsentService, org.mockito.Mockito.atLeastOnce())
-            .saveUniversalConsent(any(), any(), captor.capture(), eq(apiKey), any(), anyOrNull(), anyOrNull())
+            .saveUniversalConsent(any(), any(), captor.capture(), eq(apiKey), any(), anyOrNull(), anyOrNull(), any())
         return captor.allValues
     }
 
     private suspend fun verifyNoWrite() {
-        verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull())
+        verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any())
     }
 
     private fun hashFor(identifier: String): String {

@@ -3,6 +3,7 @@ package com.datagrail.consent.network
 import com.datagrail.consent.models.*
 import com.datagrail.consent.storage.ConsentStorage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
@@ -266,6 +267,46 @@ class UniversalConsentTest {
     }
 
     // MARK: - Signed POST
+
+    @Test
+    fun `a CCPA-only write sends only ccpa_optout and its provenance`() =
+        runTest {
+            whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull())).thenReturn("")
+            val config =
+                ConsentServiceSecurityTest.createTestConfig().copy(
+                    dgCustomerId = "ac46d8ad-a67a-431f-a5d5-9e3eb922dae7",
+                    consentProjectId = "proj_abc123",
+                    universalConsent = UniversalConsentConfig(enabled = true, syncOptout = true),
+                )
+
+            service.saveUniversalConsent(
+                config = config,
+                identifier = "user-7f3c2a91",
+                preferences =
+                    UniversalConsentPreferences(
+                        isCustomised = true,
+                        cookieOptions = mapOf("dg-category-marketing" to false),
+                    ),
+                apiKey = "dg_live_key",
+                ccpaOptout = true,
+                getSignature = null,
+                decisionTs = 1_760_000_000L,
+                ccpaOnly = true,
+            )
+
+            val bodyCaptor = argumentCaptor<String>()
+            verify(mockNetworkClient).request(any(), any(), bodyCaptor.capture(), anyOrNull())
+            val body = kotlinx.serialization.json.Json.parseToJsonElement(bodyCaptor.firstValue).jsonObject
+            // TRUST-2591 decision (2026-10-26), same body as consent-banner #756: no category map, no
+            // isCustomised and no record metadata, so the edge advances ccpa_optout alone.
+            assertEquals(
+                setOf("customer_id", "user_hash", "consent_preferences", "ccpa_optout", "is_explicit", "decision_ts"),
+                body.keys,
+            )
+            assertEquals("{\"cookieOptions\":{}}", body["consent_preferences"].toString())
+            assertEquals("true", body["ccpa_optout"].toString())
+            assertEquals("1760000000", body["decision_ts"].toString())
+        }
 
     @Test
     fun `saveUniversalConsent attaches signature headers and hits CloudFront path`() =
