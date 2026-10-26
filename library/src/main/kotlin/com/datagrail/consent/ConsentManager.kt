@@ -743,14 +743,22 @@ internal class ConsentManager(
         // signal-reconciled view, so no ATT/GPC-suppressed view reaches the write body. It is
         // EXPLICIT only when no other identity is bound (see the KDoc above).
         // A setCcpaOptout that lands while this call is suspended is newer than both the record and
-        // the capture below: nothing below adopts or clears over it, and a write carries it. Read
-        // before the locked capture, so a setter holding the lock (flag stored, revision not yet
-        // bumped) still reads as a change made mid-flight once it releases.
+        // the capture below: nothing below adopts or clears over it, and a write carries it.
         val ccpaRevisionAtEntry = ccpaChoiceRevision.get()
-        // ...with WHEN it was made (TRUST-3224), read with it in one localChoiceLock section: a
-        // standalone rehydrate's adopt (an older choice at an older time) landing between two
-        // separate reads would otherwise pair the adopted view with the local change's newer time.
-        val (localDecisionTs, localChoice) = synchronized(localChoiceLock) { storedDecisionTs() to storage.loadPreferences() }
+        // ...with WHEN it was made (TRUST-3224). Not under localChoiceLock: a setter holding the lock
+        // must not hold up a sync's capture (the CCPA-revision race tests depend on that). Instead the
+        // time is read on both sides of the choice and the pair retaken if it moved: every persist
+        // stores a choice and its time in one edit, so a standalone rehydrate's adopt (an older choice
+        // at an older time) landing between the reads changes the time and is caught, and the adopted
+        // view is never paired with the local change's newer time.
+        var localDecisionTs = storedDecisionTs()
+        var localChoice = storage.loadPreferences()
+        for (attempt in 1..3) {
+            val after = storedDecisionTs()
+            if (after == localDecisionTs) break
+            localDecisionTs = after
+            localChoice = storage.loadPreferences()
+        }
         val explicitChoice = if (boundToOther) null else localChoice
         val ccpaChangedMidFlight = { ccpaChoiceRevision.get() != ccpaRevisionAtEntry }
         // What the last sync for this identity left, read once for this call.
