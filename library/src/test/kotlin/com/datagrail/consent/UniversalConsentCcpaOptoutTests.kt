@@ -144,6 +144,26 @@ class UniversalConsentCcpaOptoutTests {
         }
 
     @Test
+    fun `a choice made with the gate off stays pending and is sent once the gate turns on`() =
+        runTest {
+            // TRUST-3381 (as consent-banner #756): with the gate off the choice is not sent, and it
+            // is not lost either.
+            sut.currentConfig = config(syncOptout = false)
+            recordIs(record(ccpaOptout = false))
+            sut.setUserIdentifier(userA, apiKey)
+            sut.setCcpaOptout(true)
+            verify(mockConsentService, never()).saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any())
+            assertTrue(storedCcpaWritePending)
+
+            sut.currentConfig = config(syncOptout = true)
+            sut.setUserIdentifier(userA, apiKey)
+
+            assertEquals(listOf(true), writtenCcpa())
+            assertFalse(storedCcpaWritePending)
+            assertTrue(sut.getCcpaOptout())
+        }
+
+    @Test
     fun `setter stays local when bound but no session in this process`() =
         runTest {
             storedPreferences = choice(marketing = true)

@@ -15,6 +15,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -59,7 +61,11 @@ internal class ConsentService(
         @SerialName("user_hash") val userHash: String,
         @SerialName("consent_preferences") val consentPreferences: UniversalConsentPreferences,
         @SerialName("consent_mode") val consentMode: String,
-        @SerialName("ccpa_optout") val ccpaOptout: Boolean,
+        // Omitted, not false, with the sync_optout gate off (TRUST-3381, as consent-banner #756).
+        @OptIn(ExperimentalSerializationApi::class)
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        @SerialName("ccpa_optout")
+        val ccpaOptout: Boolean? = null,
         val platform: String,
         @SerialName("policy_name") val policyName: String,
         @SerialName("config_version") val configVersion: String,
@@ -80,7 +86,10 @@ internal class ConsentService(
         @SerialName("customer_id") val customerId: String,
         @SerialName("user_hash") val userHash: String,
         @SerialName("consent_preferences") val consentPreferences: CcpaOnlyPreferences = CcpaOnlyPreferences(),
-        @SerialName("ccpa_optout") val ccpaOptout: Boolean,
+        @OptIn(ExperimentalSerializationApi::class)
+        @EncodeDefault(EncodeDefault.Mode.NEVER)
+        @SerialName("ccpa_optout")
+        val ccpaOptout: Boolean? = null,
         @SerialName("is_explicit") val isExplicit: Boolean,
         @SerialName("decision_ts") val decisionTs: Long,
     )
@@ -294,7 +303,7 @@ internal class ConsentService(
      * @param ccpaOptout the user's explicit CCPA/CPRA "Do Not Sell or Share" choice — the RAW
      *   local flag set by the host app through `DataGrailConsent.setCcpaOptout` (TRUST-2591). Only
      *   written to the record when the `universalConsent.syncOptout` feature flag is enabled;
-     *   otherwise `false`. Never derived from the device's ad-tracking signal or any category.
+     *   otherwise the field is omitted (TRUST-3381). Never derived from the device's ad-tracking signal or any category.
      * @param getSignature the customer signing callback, or null for a limited-mode
      *   (API-key-only) write.
      * @param decisionTs when the user made the choice being written, in unix seconds (TRUST-3224).
@@ -325,8 +334,10 @@ internal class ConsentService(
         val userHash = computeUserHash(config.dgCustomerId, projectId, identifier)
 
         // The user's actual CCPA/US opt-out value, only synced when the universalConsent.syncOptout
-        // feature flag is enabled (otherwise false). syncOptout is a feature gate, NOT the value.
-        val wireCcpaOptout = (config.universalConsent?.syncOptout == true) && ccpaOptout
+        // feature flag is enabled. syncOptout is a feature gate, NOT the value. With the gate off the
+        // field is left out entirely (TRUST-3381, as consent-banner #756), never sent as false: a
+        // choice made meanwhile stays pending on the device and is sent once the gate turns on.
+        val wireCcpaOptout = if (config.universalConsent?.syncOptout == true) ccpaOptout else null
         val requestJson =
             if (ccpaOnly) {
                 json.encodeToString(

@@ -512,8 +512,9 @@ class UniversalConsentTest {
                 "consent_preferences must not collapse to an empty object",
                 body.contains("\"consent_preferences\":{}"),
             )
-            // The other defaulted scalars on the request must survive too.
-            assertTrue("ccpa_optout is present", body.contains("\"ccpa_optout\":false"))
+            // TRUST-3381 (as consent-banner #756): with the sync_optout gate off, ccpa_optout is left
+            // out entirely, never sent as false.
+            assertFalse("ccpa_optout is omitted with the gate off", body.contains("ccpa_optout"))
         }
 
     @Test
