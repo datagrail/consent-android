@@ -183,8 +183,8 @@ class DataGrailConsentTests {
         val storage = mock<ConsentStorage>()
         val configService = mock<ConfigService>()
         runBlocking {
-            whenever(configService.fetchConfigWithRetry(any(), any(), anyOrNull(), any())).doSuspendableAnswer {
-                fetch(it.getArgument(1), it.getArgument(2))
+            whenever(configService.fetchConfigWithRetry(any(), anyOrNull(), any())).doSuspendableAnswer {
+                fetch(it.getArgument(2), it.getArgument(1))
                 universalConsentTestConfig(syncOptout = false)
             }
         }

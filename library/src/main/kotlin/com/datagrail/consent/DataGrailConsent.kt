@@ -84,12 +84,14 @@ class DataGrailConsent private constructor() {
     // init that reset() overtook, pays it before anything else uses the file. Every manager uses the
     // same file, so a reset() that did wipe owes nothing, and nothing wipes again later (a late
     // second wipe would erase what the host stored after its reset()). Guarded by generationLock,
-    // as are the commit and reset()'s read of the committed manager.
+    // as are the commit and reset()'s read of the committed manager. In process memory only: a
+    // reset() with no manager has no context to persist it with, so a debt the process dies before
+    // paying is lost, and that reset() is best-effort.
     private var pendingWipe = false
 
     // Inits still building their storage (not yet committed or given up). A reset() owes a wipe only
     // while one is. The debt stays until an init pays it: one that fails or is cancelled leaves it
-    // for the next init that commits, so a reset() during setup is never silently dropped.
+    // for the next init that commits in this process.
     // Guarded by generationLock.
     private var uncommittedInits = 0
     private val generationLock = Any()
@@ -264,7 +266,11 @@ class DataGrailConsent private constructor() {
      * unpublished), [ConsentException.NetworkError] (transport failure, timeout, 5xx),
      * [ConsentException.ParseError] (the response is not a config) or
      * [ConsentException.ValidationError] (it decodes but fails validation). It is for logging and
-     * monitoring only: the cached config is already in use.
+     * monitoring only: the SDK carries on with the cached config. The handler runs while the fetch
+     * is still in progress, before that config is made current, so SDK state is not ready yet inside
+     * it: on a first init, [getConfig] returns null and [shouldDisplayBanner] returns false (the
+     * manager is committed but has no config yet, so it reports no consent needed), which does not
+     * mean the SDK is initialized.
      *
      * Fires at most once per call, on the main thread, before [callback]. Not on a successful fetch,
      * and not when there is no cache (that failure is [callback]'s own result). Never once a newer
@@ -456,7 +462,6 @@ class DataGrailConsent private constructor() {
             manager.loadConfig(
                 configUrl,
                 onConfigError = reportConfigError,
-                isCurrent = isCurrent,
                 // Only a reset() withholds the config: an init a newer initialize() superseded still
                 // reports success below, so its committed manager must not be left config-less.
                 keepsConfig = { synchronized(generationLock) { resetGeneration < generation } },
