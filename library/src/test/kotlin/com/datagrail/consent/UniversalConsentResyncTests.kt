@@ -16,6 +16,7 @@ import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.clearInvocations
 import org.mockito.kotlin.doAnswer
 import org.mockito.kotlin.doSuspendableAnswer
 import org.mockito.kotlin.eq
@@ -206,7 +207,35 @@ class UniversalConsentResyncTests {
             // A definite 4xx fails every retry: surface it, so the host sees the opt-out is unsent.
             assertTrue(runCatching { sut.setUserIdentifier(userA, apiKey) }.exceptionOrNull() is ConsentException.HttpError)
             assertTrue(storedCcpaWritePending)
+            assertBoundWithASession()
         }
+
+    @Test
+    fun `a pending-CCPA flush whose signing fails fails the re-sync and still binds`() =
+        runTest {
+            recordIs(record(marketing = true))
+            sut.setUserIdentifier(userA, apiKey)
+            relaunch()
+            sut.setCcpaOptout(true)
+            whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any()))
+                .doSuspendableAnswer { throw ConsentException.SignatureTimeout("getSignature did not return") }
+
+            val failure = runCatching { sut.setUserIdentifier(userA, apiKey) }.exceptionOrNull()
+
+            assertTrue(failure is ConsentException.SignatureTimeout)
+            assertTrue(storedCcpaWritePending)
+            assertTrue(sut.getCcpaOptout())
+            assertBoundWithASession()
+        }
+
+    /** The failed flush did not block the sync: the session is set, so the next setter writes through. */
+    private suspend fun assertBoundWithASession() {
+        whenever(mockConsentService.saveUniversalConsent(any(), any(), any(), any(), any(), anyOrNull(), anyOrNull(), any()))
+            .doSuspendableAnswer { }
+        clearInvocations(mockConsentService)
+        sut.setCcpaOptout(true)
+        verify(mockConsentService).saveUniversalConsent(any(), any(), any(), eq(apiKey), eq(true), anyOrNull(), anyOrNull(), any())
+    }
 
     @Test
     fun `a pending flag the record already holds is cleared without a write`() =

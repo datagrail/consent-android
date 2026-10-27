@@ -26,8 +26,8 @@ internal class ConfigService(
      * config is returned instead and the failure goes to [onRefreshError] (TRUST-3254); without a
      * cache it is thrown.
      * @param url The configuration URL
-     * @param isCurrent False once the fetched config must not be cached: [fetchConfigWithRetry]
-     *   passes "no reset() superseded the init" (a newer initialize() alone does not withhold it). The
+     * @param notReset False once a reset() superseded the init this fetch serves: the fetched config
+     *   is then not cached (a newer initialize() alone does not withhold it). The
      *   cache is one key for all config URLs, so a slow init for an older URL can still overwrite a
      *   newer init's cache
      * @param onRefreshError Receives a failure the cached config masked: exactly the exception this
@@ -41,7 +41,7 @@ internal class ConfigService(
      */
     suspend fun fetchConfig(
         url: String,
-        isCurrent: () -> Boolean = { true },
+        notReset: () -> Boolean = { true },
         onRefreshError: ((ConsentException) -> Unit)? = null,
     ): ConsentConfig {
         return try {
@@ -59,7 +59,7 @@ internal class ConfigService(
 
             // Cache the configuration, unless a reset() superseded this fetch while it was in flight: it
             // must not repopulate the wiped cache (TRUST-3254).
-            if (isCurrent()) storage.saveConfigCache(config)
+            if (notReset()) storage.saveConfigCache(config)
 
             config
         } catch (e: ConsentException.NetworkError) {

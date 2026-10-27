@@ -69,7 +69,7 @@ class ConfigServiceValidationTest {
             whenever(mockNetworkClient.request(any(), any(), anyOrNull(), anyOrNull()))
                 .thenReturn(json.encodeToString(validConfig))
 
-            val result = configService.fetchConfig("https://example.com/config.json", isCurrent = { false })
+            val result = configService.fetchConfig("https://example.com/config.json", notReset = { false })
 
             assertEquals(validConfig.version, result.version)
             verify(mockStorage, never()).saveConfigCache(any())

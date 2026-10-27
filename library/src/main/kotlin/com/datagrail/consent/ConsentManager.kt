@@ -88,24 +88,21 @@ internal class ConsentManager(
      * @param configUrl URL to fetch configuration from
      * @param onConfigError Receives a fetch failure the cached config masked (TRUST-3254); see
      *   [ConfigService.fetchConfig]
-     * @param isCurrent False once the init this load serves is superseded: the fetched config is
-     *   then not cached
      * @param keepsConfig False once a reset() superseded the init this load serves: the fetched
-     *   config is then not made current. Narrower than [isCurrent]: an init a newer initialize()
-     *   superseded still reports success, so its manager must hold its config until the newer init
-     *   commits (or for good, if that one fails)
+     *   config is then neither cached nor made current. An init a newer initialize() superseded
+     *   still reports success, so its manager holds its config until the newer init commits (or for
+     *   good, if that one fails)
      * @param callback Callback with result
      */
     suspend fun loadConfig(
         configUrl: String,
         onConfigError: ((ConsentException) -> Unit)? = null,
-        isCurrent: () -> Boolean = { true },
-        keepsConfig: () -> Boolean = isCurrent,
+        keepsConfig: () -> Boolean = { true },
         callback: (Result<ConsentConfig>) -> Unit,
     ) {
         try {
             val config = configService.fetchConfigWithRetry(configUrl, onConfigError, notReset = keepsConfig)
-            // A load that a reset() (or a newer initialize()) superseded mid-fetch does not restore
+            // A load that a reset() superseded mid-fetch does not restore
             // the config the reset cleared (TRUST-3254); the caller decides its result.
             if (keepsConfig()) currentConfig = config
             callback(Result.success(config))
@@ -775,7 +772,10 @@ internal class ConsentManager(
                 break
             }
         }
-        // Still moving after three tries: treat the time as unknown, which adopts (the safe side).
+        // Still moving after three tries: treat the time as unknown. Over a found record with a
+        // choice that adopts (the safe side). Over a miss or a signal-only record the time is not
+        // checked, so the last read choice is written at the request time: that record has no
+        // category choice for it to undo.
         if (!agreed) localDecisionTs = null
         val explicitChoice = if (boundToOther) null else localChoice
         val ccpaChangedMidFlight = { ccpaChoiceRevision.get() != ccpaRevisionAtEntry }
@@ -966,6 +966,8 @@ internal class ConsentManager(
         var syncedLocal = storage.loadPreferences()
         // The CCPA flag a write carried; null when nothing was written.
         var writtenCcpa: Boolean? = null
+        // A pending-CCPA flush that failed for good: reported once the sync has bound (see below).
+        var flushFailure: Exception? = null
         if (toWrite != null) {
             syncedRaw = toWrite
             // The stored flag at write time: the rehydrate adopted the record's unless a local CCPA
@@ -1002,17 +1004,20 @@ internal class ConsentManager(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    // A failed pending-CCPA flush does not fail the sync: the read and adopt
-                    // succeeded, so the identity binds and the session is set as usual, and the flag
-                    // stays pending for the next re-sync. Any other failed write fails the call.
-                    // Only a transient failure is non-fatal: a signing failure or a definite 4xx
-                    // would fail every retry, and swallowing it would leave the opt-out unsent while
-                    // every re-sync reports success.
-                    if (!ccpaOnly || !ConsentException.isRetryable(e)) throw e
+                    // Any failed write other than a pending-CCPA flush fails the call. A failed flush
+                    // never stops the sync: the read and adopt succeeded, so the identity binds and
+                    // the session is set as usual (a flush that failed the same way on every re-sync
+                    // must not leave the device unable to sync this user), and the flag stays pending
+                    // for the next re-sync. Only a transient transport or HTTP failure is silent. A
+                    // failure that fails every retry (a signing failure or timeout, a definite 4xx, a
+                    // rejected body) also fails the call, after the bind, so the host learns that the
+                    // opt-out is unsent instead of seeing success on every re-sync.
+                    if (!ccpaOnly) throw e
                     // A cancelled call is not a failed flush: the service re-types the IO
                     // cancellation as NetworkError, so check the coroutine itself before binding.
                     currentCoroutineContext().ensureActive()
                     ConsentLogger.w("Pending CCPA choice not written; it stays pending: ${e.javaClass.simpleName}")
+                    if (!isTransientWriteFailure(e)) flushFailure = e
                     false
                 }
             if (written) writtenCcpa = carriedCcpa
@@ -1076,7 +1081,15 @@ internal class ConsentManager(
                 explicitApiKey = apiKey,
                 getSignature = getSignature,
             )
+        flushFailure?.let { throw it }
     }
+
+    /**
+     * A write failure a later attempt can get past: a transport failure or a retryable HTTP status.
+     * Not a signing failure (the host's signer threw or timed out) nor a body the edge rejects.
+     */
+    private fun isTransientWriteFailure(e: Exception): Boolean =
+        e is ConsentException.NetworkError && ConsentException.isRetryable(e)
 
     /** The persisted sync state for [userHash], or null when none is stored for it. */
     private fun syncState(userHash: String): UniversalConsentSyncState? =
@@ -1339,8 +1352,11 @@ internal class ConsentManager(
             // its own write at its own decision time. Without it, the CCPA write below advances the
             // record's updated_at (the latest decision over ALL registers), so the next re-sync would
             // read the change as older than the record and adopt over it. Also when the last sync found
-            // no category choice, so the CCPA write never leaves an empty, answered-all-off block. An
-            // unknown time is not sent stamped now (P0-06): the change waits for the next re-sync.
+            // no category choice, so the CCPA write never leaves an empty, answered-all-off block; that
+            // needs a known time too, so a choice with none there would send the CCPA-only write alone
+            // (unreachable today: a null syncedRaw is recorded only with a null syncedLocal, and a save
+            // clears the sync state; keep the time check if that changes). An unknown time is not sent
+            // stamped now (P0-06): the change waits for the next re-sync.
             val sendsCategories =
                 captured.choiceDecisionTs != null &&
                     (!unchangedSinceSync(stored, syncState) || (syncState != null && syncState.syncedRaw == null))
