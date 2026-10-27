@@ -914,8 +914,12 @@ class DataGrailConsent private constructor() {
      * fetched record.
      *
      * Login vs re-sync (TRUST-2902). The SDK records which identity this device is bound to (a hash
-     * only, never the raw identifier); the binding is set only when this call succeeds and cleared
-     * by [clearUserIdentifier] and [reset].
+     * only, never the raw identifier); the binding is set only once the read and any write of the
+     * user's choice succeed, and cleared by [clearUserIdentifier] and [reset]. One exception: when a
+     * re-sync flushes a pending CCPA choice ([setCcpaOptout]) and that write fails for a reason other
+     * than a transient network error, the device stays bound and the call then fails. The flush is
+     * tried again on each re-sync, so an edge that keeps refusing it (for example a bad API key)
+     * fails every call until it is sent or the user logs out ([clearUserIdentifier]).
      * - LOGIN (the device is unbound or bound to a different identity): a found record wins and
      *   nothing is written, even if the device holds a pre-login choice. A record carrying a choice
      *   REPLACES local state: its categories take the record's value, every other category its
