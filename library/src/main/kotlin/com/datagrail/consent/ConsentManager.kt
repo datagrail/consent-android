@@ -637,8 +637,11 @@ internal class ConsentManager(
      * [SignalReconciliation]).
      *
      * LOGIN vs RE-SYNC (TRUST-2902). The device persists the user hash (never the raw identifier) of
-     * the identity it is bound to; it is set only here, only after the call succeeds, and cleared by
-     * [clearUserIdentifier] and [reset].
+     * the identity it is bound to; it is set only here, after the read and any write of the user's
+     * choice succeed, and cleared by [clearUserIdentifier] and [reset]. One exception: a re-sync whose
+     * pending CCPA flush fails for a reason other than a transient network error binds, sets the
+     * session and THEN throws. The flush is tried again on each re-sync, so an edge that keeps
+     * refusing it (e.g. a bad API key) fails every call until it is sent or the user logs out.
      * - An EXPLICIT local choice is a stored record ([ConsentStorage.loadPreferences] non-null — the
      *   same read [hasUserConsent] keys off; initialize() never seeds storage, only a user save or a
      *   rehydrate writes it) on a device NOT bound to a different identity. When another identity
@@ -1008,10 +1011,10 @@ internal class ConsentManager(
                     // never stops the sync: the read and adopt succeeded, so the identity binds and
                     // the session is set as usual (a flush that failed the same way on every re-sync
                     // must not leave the device unable to sync this user), and the flag stays pending
-                    // for the next re-sync. Only a transient transport or HTTP failure is silent. A
-                    // failure that fails every retry (a signing failure or timeout, a definite 4xx, a
-                    // rejected body) also fails the call, after the bind, so the host learns that the
-                    // opt-out is unsent instead of seeing success on every re-sync.
+                    // for the next re-sync. Only a transient transport or HTTP failure is silent. Any
+                    // other failure (a definite 4xx, a rejected body, or a signing failure or timeout,
+                    // which the SDK cannot tell will recur or not) fails the call after the bind, so the
+                    // host learns that the opt-out is unsent instead of seeing success on every re-sync.
                     if (!ccpaOnly) throw e
                     // A cancelled call is not a failed flush: the service re-types the IO
                     // cancellation as NetworkError, so check the coroutine itself before binding.
@@ -1054,8 +1057,9 @@ internal class ConsentManager(
         // A logout landed while the read/write was suspended: don't rebind the identity the device
         // just left. The call still reports success — the logout's neutral state is what stands.
         if (identityOperationGeneration.get() != opGeneration) return
-        // Bind only after the call succeeds: a failed read or write throws above and leaves the
-        // binding untouched, so a retry is still recognised as a login.
+        // Bind only after the read and any write of the user's choice succeed: those failures throw
+        // above and leave the binding untouched, so a retry is still recognised as a login. A failed
+        // pending-CCPA flush is the exception: it binds and sets the session, then throws below.
         storage.saveBoundUserHash(userHash)
         // A setCcpaOptout made while this call was in flight that no write carried is still waiting
         // for the record. On a first login it found the device unbound, so it was neither written
@@ -1085,8 +1089,10 @@ internal class ConsentManager(
     }
 
     /**
-     * A write failure a later attempt can get past: a transport failure or a retryable HTTP status.
-     * Not a signing failure (the host's signer threw or timed out) nor a body the edge rejects.
+     * A write failure the SDK treats as transient and keeps silent: a transport failure or a
+     * retryable HTTP status. Not a body the edge rejects, nor a signing failure (the host's signer
+     * threw or timed out): the SDK cannot tell whether a signing failure will happen again, so it
+     * reports it to the host.
      */
     private fun isTransientWriteFailure(e: Exception): Boolean =
         e is ConsentException.NetworkError && ConsentException.isRetryable(e)
