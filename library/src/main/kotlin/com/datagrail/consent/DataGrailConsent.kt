@@ -916,10 +916,18 @@ class DataGrailConsent private constructor() {
      * Login vs re-sync (TRUST-2902). The SDK records which identity this device is bound to (a hash
      * only, never the raw identifier); the binding is set only once the read and any write of the
      * user's choice succeed, and cleared by [clearUserIdentifier] and [reset]. One exception: when a
-     * re-sync flushes a pending CCPA choice ([setCcpaOptout]) and that write fails for a reason other
-     * than a transient network error, the device stays bound and the call then fails. The flush is
-     * tried again on each re-sync, so an edge that keeps refusing it (for example a bad API key)
-     * fails every call until it is sent or the user logs out ([clearUserIdentifier]).
+     * re-sync flushes a pending CCPA choice ([setCcpaOptout]) and that write fails, the device stays
+     * bound, the session is set (so a later [setCcpaOptout] writes through at once), and then the
+     * call fails. A failure that surfaces as a retryable [ConsentException.NetworkError] is treated as
+     * transient and does not fail the call: a transport failure, a retryable HTTP status (408, 429,
+     * 5xx), or a signer that reports a NetworkError itself. A definite 4xx, a rejected body, a
+     * [ConsentException.SignatureTimeout] or a signer failure of any other type does. If
+     * [clearUserIdentifier] or [reset] lands during the flush, the call succeeds instead, as any sync a
+     * logout overtakes. The flush runs only on a re-sync that writes nothing else, with a stored choice,
+     * `sync_optout` on and a found record with a choice that does not hold the flag yet, so an edge
+     * that keeps refusing it (for example a bad API key) can fail each such re-sync until the flag is
+     * sent (by a later flush, or a [setCcpaOptout] write-through) or cleared by [clearUserIdentifier]
+     * or [reset].
      * - LOGIN (the device is unbound or bound to a different identity): a found record wins and
      *   nothing is written, even if the device holds a pre-login choice. A record carrying a choice
      *   REPLACES local state: its categories take the record's value, every other category its
