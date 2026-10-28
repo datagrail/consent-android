@@ -639,9 +639,14 @@ internal class ConsentManager(
      * LOGIN vs RE-SYNC (TRUST-2902). The device persists the user hash (never the raw identifier) of
      * the identity it is bound to; it is set only here, after the read and any write of the user's
      * choice succeed, and cleared by [clearUserIdentifier] and [reset]. One exception: a re-sync whose
-     * pending CCPA flush fails for a reason other than a transient network error binds, sets the
-     * session and THEN throws. The flush is tried again on each re-sync, so an edge that keeps
-     * refusing it (e.g. a bad API key) fails every call until it is sent or the user logs out.
+     * pending CCPA flush fails for a reason the SDK does not treat as transient
+     * ([isTransientWriteFailure]) binds, sets the session and THEN throws, unless [clearUserIdentifier]
+     * or [reset] lands during the flush: the call then returns without throwing, as any sync a logout
+     * overtakes. The flush runs only on a re-sync that writes nothing else, with a local choice stored,
+     * `sync_optout` on and a found record with a choice that does not hold the flag yet. So an edge
+     * that keeps refusing it (e.g. a bad API key) can fail each such re-sync until the flag is sent (by
+     * a later flush, or by a [setCcpaOptout] write-through over the session the failed call set) or
+     * cleared by [clearUserIdentifier] or [reset].
      * - An EXPLICIT local choice is a stored record ([ConsentStorage.loadPreferences] non-null — the
      *   same read [hasUserConsent] keys off; initialize() never seeds storage, only a user save or a
      *   rehydrate writes it) on a device NOT bound to a different identity. When another identity
@@ -1011,10 +1016,13 @@ internal class ConsentManager(
                     // never stops the sync: the read and adopt succeeded, so the identity binds and
                     // the session is set as usual (a flush that failed the same way on every re-sync
                     // must not leave the device unable to sync this user), and the flag stays pending
-                    // for the next re-sync. Only a transient transport or HTTP failure is silent. Any
-                    // other failure (a definite 4xx, a rejected body, or a signing failure or timeout,
-                    // which the SDK cannot tell will recur or not) fails the call after the bind, so the
-                    // host learns that the opt-out is unsent instead of seeing success on every re-sync.
+                    // for the next re-sync. A failure that is a retryable NetworkError is silent: a
+                    // transport failure (a socket timeout included), a retryable HTTP status (408, 429, 5xx),
+                    // and a signer that reports a NetworkError itself (asSignatureProvider passes it
+                    // through). Any other failure (a definite 4xx, a rejected body, a SignatureTimeout,
+                    // or a signer failure of another type, which the SDK cannot tell will recur or not)
+                    // fails the call after the bind, so the host learns that the opt-out is unsent
+                    // instead of seeing success on every re-sync.
                     if (!ccpaOnly) throw e
                     // A cancelled call is not a failed flush: the service re-types the IO
                     // cancellation as NetworkError, so check the coroutine itself before binding.
@@ -1089,10 +1097,12 @@ internal class ConsentManager(
     }
 
     /**
-     * A write failure the SDK treats as transient and keeps silent: a transport failure or a
-     * retryable HTTP status. Not a body the edge rejects, nor a signing failure (the host's signer
-     * threw or timed out): the SDK cannot tell whether a signing failure will happen again, so it
-     * reports it to the host.
+     * A write failure the SDK treats as transient and keeps silent: any retryable
+     * [ConsentException.NetworkError]. That is a transport failure or a retryable HTTP status, and
+     * also a signer that reports a NetworkError itself (a Java `SignatureResult.onFailure(NetworkError)`
+     * or a Kotlin signer that throws one): the SDK cannot tell that apart from a failed request. Not a
+     * body the edge rejects, a [ConsentException.SignatureTimeout], or a signer failure of any other
+     * type: the SDK cannot tell whether those will happen again, so it reports them to the host.
      */
     private fun isTransientWriteFailure(e: Exception): Boolean =
         e is ConsentException.NetworkError && ConsentException.isRetryable(e)
